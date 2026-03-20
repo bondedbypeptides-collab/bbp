@@ -77,6 +77,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [showPayModal, setShowPayModal] = useState(false);
   const [showHitListModal, setShowHitListModal] = useState(false);
+  const [selectedProfileEmail, setSelectedProfileEmail] = useState(null); // ✨ NEW: For viewing profiles
   const [isBtnLoading, setIsBtnLoading] = useState(false);
 
   // Admin Security State
@@ -114,7 +115,7 @@ export default function App() {
   const [cartItems, setCartItems] = useState({}); 
   const [addressForm, setAddressForm] = useState({ shipOpt: '', street: '', brgy: '', city: '', prov: '', zip: '', contact: '' });
   const [searchQuery, setSearchQuery] = useState('');
-  const [adminUserSearch, setAdminUserSearch] = useState('');
+  const [adminGlobalSearch, setAdminGlobalSearch] = useState(''); // ✨ NEW: Global Search for all Admin Tabs
 
   // Admin New Product/Admin State
   const [newProd, setNewProd] = useState({ name: '', kit: '', vial: '', max: '' });
@@ -235,19 +236,31 @@ export default function App() {
     });
   }, [orders, products, settings, users]);
 
-  const filteredProducts = useMemo(() => {
+  // ✨ GLOBAL ADMIN SEARCH FILTERS
+  const filteredAdminProducts = useMemo(() => {
+    return enrichedProducts.filter(p => !adminGlobalSearch || p.name.toLowerCase().includes(adminGlobalSearch.toLowerCase()));
+  }, [enrichedProducts, adminGlobalSearch]);
+
+  const filteredCustomerList = useMemo(() => {
+    return customerList.filter(c => !adminGlobalSearch || c.name.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || c.email.toLowerCase().includes(adminGlobalSearch.toLowerCase()));
+  }, [customerList, adminGlobalSearch]);
+
+  const filteredPackingOrders = useMemo(() => {
+    return orders.filter(o => !adminGlobalSearch || o.product.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || o.name.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || o.email.toLowerCase().includes(adminGlobalSearch.toLowerCase()));
+  }, [orders, adminGlobalSearch]);
+
+  const filteredHitList = useMemo(() => {
+    return trimmingHitList.filter(v => !adminGlobalSearch || v.prod.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || v.name.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || v.email.toLowerCase().includes(adminGlobalSearch.toLowerCase()));
+  }, [trimmingHitList, adminGlobalSearch]);
+
+  const filteredUsers = useMemo(() => {
+    return users.filter(u => !adminGlobalSearch || u.name?.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || u.id?.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || u.handle?.toLowerCase().includes(adminGlobalSearch.toLowerCase()));
+  }, [users, adminGlobalSearch]);
+
+  const filteredShopProducts = useMemo(() => {
     if (!searchQuery) return enrichedProducts;
     return enrichedProducts.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
   }, [enrichedProducts, searchQuery]);
-
-  const filteredUsers = useMemo(() => {
-    if (!adminUserSearch) return users;
-    return users.filter(u => 
-      u.name?.toLowerCase().includes(adminUserSearch.toLowerCase()) || 
-      u.id?.toLowerCase().includes(adminUserSearch.toLowerCase()) ||
-      u.handle?.toLowerCase().includes(adminUserSearch.toLowerCase())
-    );
-  }, [users, adminUserSearch]);
 
   const customerProfile = useMemo(() => users.find(u => u.id === customerEmail.toLowerCase().trim()) || null, [users, customerEmail]);
 
@@ -320,6 +333,21 @@ export default function App() {
     setCartItems(prev => ({ ...prev, [prodName]: { k: prev[prodName]?.k || 0, v: prev[prodName]?.v || 0, [field]: num } }));
   };
 
+  // ✨ NEW: Per-Product Min Vial Validation
+  const handleCartBlur = (prodName) => {
+    const cart = cartItems[prodName];
+    if (!cart) return;
+    
+    let k = cart.k || 0;
+    let v = cart.v || 0;
+    const totalVials = (k * 10) + v;
+    
+    if (totalVials > 0 && totalVials < settings.minOrder && !settings.addOnly) {
+      showToast(`Minimum ${settings.minOrder} vials required per item! 🎀`);
+      setCartItems(prev => ({ ...prev, [prodName]: { ...cart, v: settings.minOrder } }));
+    }
+  };
+
   const submitOrder = async () => {
     if (!customerEmail || !customerName || !action) { showToast("Please fill all fields! 🌸"); return; }
     const emailLower = customerEmail.toLowerCase().trim();
@@ -344,6 +372,12 @@ export default function App() {
       Object.entries(cartItems).forEach(([prodName, amounts]) => {
         const qty = ((amounts.k || 0) * 10) + (amounts.v || 0);
         if (qty <= 0) return;
+        
+        // Double check validation on submit just in case
+        if (!settings.addOnly && qty < settings.minOrder) {
+           errors.push(`${prodName} requires at least ${settings.minOrder} vials.`);
+        }
+        
         totalRequestedVials += qty;
         const pData = enrichedProducts.find(p => p.name === prodName);
         if (pData?.isClosed) return;
@@ -969,42 +1003,60 @@ export default function App() {
                       </select>
                     </div>
                   </div>
+                  
+                  {/* ✨ NEW: User Profile Viewer Shortcut */}
+                  <div className="mt-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs text-[#9E2A5E] bg-[#FFF0F5] p-3 rounded-xl border border-[#FFC0CB] font-semibold">
+                     <span>{customerProfile?.address?.street ? `✅ Profile Active: Shipping to ${customerProfile.address.city}` : "ℹ️ New customer? Your address will be saved securely upon payment."}</span>
+                     {customerProfile && (
+                       <button onClick={() => setSelectedProfileEmail(customerEmail)} className="text-[#D6006E] font-black hover:underline flex items-center gap-1 whitespace-nowrap bg-white px-2 py-1 rounded-md border border-pink-200 shadow-sm"><Users size={12}/> View Profile & History</button>
+                     )}
+                  </div>
                 </div>
 
-                <div className="glass-card overflow-hidden">
-                  <div className="p-4 border-b-2 border-[#FFE4E1] flex justify-between items-center bg-[#FFF0F5]">
-                     <h2 className="font-bold text-pink-600 uppercase tracking-widest text-sm flex items-center gap-2"><Package size={18}/> Shop Catalog</h2>
-                     <input type="text" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Search..." className="bg-white px-3 py-1 rounded-full text-xs font-bold border border-[#FFC0CB] outline-none w-32 focus:w-48 transition-all"/>
+                <div className="bg-white rounded-3xl border-2 border-[#FF1493] shadow-sm relative z-10">
+                  {/* ✨ IMPROVED: Loud Sticky Search Bar */}
+                  <div className="sticky top-2 z-20 p-4 sm:p-5 border-b-2 border-[#FFC0CB] flex flex-col sm:flex-row justify-between items-center gap-4 bg-white/95 backdrop-blur-xl rounded-t-[1.5rem]">
+                     <h2 className="font-black text-[#D6006E] uppercase tracking-widest text-base sm:text-lg flex items-center gap-2 whitespace-nowrap">
+                       <Package size={22} className="text-[#FF1493]"/> Shop Catalog
+                     </h2>
+                     <div className="relative w-full">
+                       <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-400" size={18} />
+                       <input type="text" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Search products..." className="w-full pl-11 pr-4 py-3 rounded-2xl text-sm font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-[#FFF0F5] placeholder:text-pink-300 text-[#4A042A] shadow-inner"/>
+                     </div>
                   </div>
                   
                   {products.length === 0 ? (
                     <div className="p-12 text-center text-pink-400 font-bold italic">No products available yet.</div>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-0">
-                      {filteredProducts.map(p => {
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 sm:p-6 bg-slate-50/50 rounded-b-3xl">
+                      {filteredShopProducts.map(p => {
                          const cart = cartItems[p.name] || { k:0, v:0 };
                          const active = cart.k > 0 || cart.v > 0;
                          const exist = existingMap[p.name] || 0;
                          return (
-                          <div key={p.id} className={`p-4 border-b md:border-r border-[#FFE4E1] flex flex-col sm:flex-row justify-between sm:items-center gap-4 transition-colors ${active ? 'bg-[#FFF0F5]' : 'bg-white'}`}>
-                            <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <h3 className="font-bold text-base md:text-lg leading-tight">{p.name}</h3>
-                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${p.statusKey === 'available' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>{p.statusText}</span>
+                          <div key={p.id} className={`p-5 rounded-2xl border-2 transition-all duration-300 ${active ? 'bg-[#FFF0F5] border-[#D6006E] shadow-md scale-[1.01] z-10' : 'bg-white border-[#FFE4E1] hover:border-pink-300'}`}>
+                            <div className="flex justify-between items-start mb-4 gap-2">
+                              <div className="min-w-0 flex-1">
+                                <h3 className="font-black text-lg text-[#4A042A]">{p.name}</h3>
+                                <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                                  <span className="bg-[#FF1493] text-white px-2.5 py-0.5 rounded-full text-xs font-bold shadow-sm">${p.pricePerVialUSD.toFixed(2)} / vial</span>
+                                  {exist > 0 && <span className="bg-[#9C27B0] text-white px-2.5 py-0.5 rounded-full text-xs font-bold shadow-sm">📦 Has {exist}</span>}
+                                </div>
                               </div>
-                              <div className="flex gap-2 text-xs font-bold text-[#9E2A5E]">
-                                <span className="bg-[#FF69B4] text-white px-2 py-0.5 rounded-full">${p.pricePerVialUSD.toFixed(2)} / vial</span>
-                                {exist > 0 && <span className="bg-[#9C27B0] text-white px-2 py-0.5 rounded-full">📦 Has {exist}</span>}
-                              </div>
+                              <span className={`shrink-0 text-[10px] font-black uppercase px-3 py-1.5 rounded-full border shadow-sm whitespace-nowrap ${p.statusKey === 'available' ? 'bg-[#E6F6EC] text-[#079E51] border-[#bbf7d0]' : p.statusKey === 'full' ? 'bg-[#FFEBEE] text-[#D32F2F] border-[#ffcdd2]' : p.statusKey === 'locked' ? 'bg-gray-100 text-gray-500 border-gray-300' : 'bg-[#F3E5F5] text-[#7B1FA2] border-[#e1bee7]'}`}>
+                                {p.statusText}
+                              </span>
                             </div>
-                            <div className={`flex gap-2 ${p.isClosed ? 'opacity-40 pointer-events-none' : ''}`}>
-                              <div className="bg-white border-2 border-[#FFC0CB] rounded-xl p-1 text-center w-20 xl:w-24">
-                                <span className="block text-[8px] font-black uppercase text-pink-400">Kits (10x)</span>
-                                <input type="number" min="0" value={cart.k || ''} onChange={e=>handleCartChange(p.name, 'k', e.target.value)} className="w-full text-center font-bold text-lg text-pink-600 outline-none bg-transparent" placeholder="0" disabled={p.isClosed}/>
+                            
+                            {/* ✨ IMPROVED: Smaller, Mobile-Friendly Inputs */}
+                            <div className={`flex gap-3 ${p.isClosed ? 'opacity-40 pointer-events-none' : ''}`}>
+                              <div className="bg-slate-50 border border-pink-100 rounded-lg p-1.5 flex-1 flex justify-between items-center transition-colors focus-within:border-pink-400 focus-within:bg-white shadow-inner">
+                                <span className="text-[9px] font-black uppercase text-pink-400 ml-1">Kits<span className="hidden sm:inline"> (10x)</span></span>
+                                <input type="number" min="0" value={cart.k || ''} onChange={e=>handleCartChange(p.name, 'k', e.target.value)} onBlur={()=>handleCartBlur(p.name)} className="w-12 text-right font-black text-base text-[#D6006E] outline-none bg-transparent placeholder:text-pink-200" placeholder="0" disabled={p.isClosed}/>
                               </div>
-                              <div className="bg-white border-2 border-[#FFC0CB] rounded-xl p-1 text-center w-20 xl:w-24">
-                                <span className="block text-[8px] font-black uppercase text-pink-400">Vials (1x)</span>
-                                <input type="number" min="0" max="9" value={cart.v || ''} onChange={e=>handleCartChange(p.name, 'v', e.target.value)} className="w-full text-center font-bold text-lg text-pink-600 outline-none bg-transparent" placeholder="0" disabled={p.isClosed}/>
+                              <div className="bg-slate-50 border border-pink-100 rounded-lg p-1.5 flex-1 flex justify-between items-center transition-colors focus-within:border-pink-400 focus-within:bg-white shadow-inner">
+                                <span className="text-[9px] font-black uppercase text-pink-400 ml-1">Vials<span className="hidden sm:inline"> (1x)</span></span>
+                                <input type="number" min="0" max="9" value={cart.v || ''} onChange={e=>handleCartChange(p.name, 'v', e.target.value)} onBlur={()=>handleCartBlur(p.name)} className="w-12 text-right font-black text-base text-[#D6006E] outline-none bg-transparent placeholder:text-pink-200" placeholder="0" disabled={p.isClosed}/>
                               </div>
                             </div>
                           </div>
@@ -1074,7 +1126,6 @@ export default function App() {
                   </div>
                   <div className="p-6 overflow-y-auto space-y-6">
                      
-                     {/* ✨ Updated QR Code Priority Logic in Checkout */}
                      <div className="bg-[#E6F6EC] p-4 rounded-2xl border-2 border-[#bbf7d0]">
                         <p className="text-[10px] font-black text-emerald-600 uppercase mb-2">Send Payment To</p>
                         
@@ -1087,7 +1138,6 @@ export default function App() {
                                <p className="font-bold text-emerald-900 mb-3">{adminObj?.name || "Admin"}</p>
                                
                                <div className="space-y-4">
-                                 {/* Bank 1 / QR 1 */}
                                  {(adminObj?.bank1 || adminObj?.qr1) && (
                                    <div className="bg-white p-3 rounded-xl border border-emerald-100 shadow-sm">
                                       <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-2 border-b border-emerald-50 pb-1">Option 1</p>
@@ -1098,8 +1148,6 @@ export default function App() {
                                       )}
                                    </div>
                                  )}
-
-                                 {/* Bank 2 / QR 2 */}
                                  {(adminObj?.bank2 || adminObj?.qr2) && (
                                    <div className="bg-white p-3 rounded-xl border border-emerald-100 shadow-sm">
                                       <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-2 border-b border-emerald-50 pb-1">Option 2</p>
@@ -1139,7 +1187,6 @@ export default function App() {
             </div>
           )}
 
-          {/* ✨ NEW: Public Hit List Modal (For Add-Only Mode) */}
           {showHitListModal && (
             <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
                <div className="bg-white rounded-[32px] w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
@@ -1164,7 +1211,6 @@ export default function App() {
                                <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest bg-rose-50 inline-block px-2 py-1 rounded-md mt-1">Needs {v.missingSlots} more to complete Box {v.boxNum}</p>
                              </div>
                              
-                             {/* ✨ NEW: Cute Speech Bubble Callout */}
                              <div className="relative w-full sm:w-auto mt-6 sm:mt-0">
                                <div className="absolute -top-8 right-2 sm:-top-8 sm:right-2 bg-[#FFF0F5] border border-[#FFC0CB] text-[#D6006E] text-[9px] px-3 py-1.5 rounded-2xl rounded-br-none shadow-sm italic whitespace-nowrap z-10 font-bold">
                                  💬 "{CUTE_PLEAS[i % CUTE_PLEAS.length]}"
@@ -1187,8 +1233,75 @@ export default function App() {
             </div>
           )}
 
+          {/* ✨ NEW: Customer Profile Modal */}
+          {selectedProfileEmail && (() => {
+            const profile = users.find(u => u.id === selectedProfileEmail.toLowerCase().trim()) || { id: selectedProfileEmail, name: 'Unknown Customer' };
+            const curOrders = orders.filter(o => o.email === selectedProfileEmail.toLowerCase().trim());
+            const histOrders = history.filter(o => o.email === selectedProfileEmail.toLowerCase().trim());
+            
+            return (
+              <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[300] flex items-center justify-center p-4">
+                <div className="bg-white rounded-[32px] w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
+                   <div className="bg-[#FFF0F5] p-5 flex justify-between items-center border-b-2 border-[#FFC0CB]">
+                      <h2 className="brand-title text-2xl text-[#D6006E]">👤 Profile & History</h2>
+                      <button onClick={()=>setSelectedProfileEmail(null)} className="text-pink-600 font-black text-2xl hover:text-pink-800 transition-colors">&times;</button>
+                   </div>
+                   <div className="p-6 overflow-y-auto space-y-6 bg-slate-50">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                         <div className="bg-white p-4 rounded-2xl border border-pink-100 shadow-sm">
+                           <p className="text-[10px] font-black text-pink-400 uppercase tracking-widest mb-1">Customer Details</p>
+                           <p className="font-black text-xl text-[#4A042A]">{profile.name}</p>
+                           <p className="text-sm text-slate-500 font-bold">{profile.id}</p>
+                           <p className="text-sm text-[#D6006E] font-black mt-1">{profile.handle || 'No handle provided'}</p>
+                         </div>
+                         <div className="bg-white p-4 rounded-2xl border border-pink-100 shadow-sm">
+                           <p className="text-[10px] font-black text-pink-400 uppercase tracking-widest mb-1">Saved Address</p>
+                           {profile.address?.street ? (
+                             <p className="text-sm font-bold text-slate-700 leading-tight">
+                               {profile.address.street}<br/>
+                               {profile.address.city}, {profile.address.prov} {profile.address.zip}<br/>
+                               <span className="text-emerald-600 mt-1 inline-block">Courier: {profile.address.shipOpt}</span><br/>
+                               <span className="text-slate-500">📞 {profile.address.contact}</span>
+                             </p>
+                           ) : <p className="text-sm text-slate-400 italic">No address on file</p>}
+                         </div>
+                      </div>
+                      
+                      <div>
+                        <h3 className="font-black text-sm text-[#D6006E] uppercase tracking-widest mb-3 border-b-2 border-pink-100 pb-1">📦 Current Active Orders</h3>
+                        {curOrders.length === 0 ? <p className="text-xs text-slate-400 italic bg-white p-3 rounded-lg border border-slate-200">No active orders in this batch.</p> : (
+                          <div className="bg-white border-2 border-pink-100 rounded-xl overflow-hidden shadow-sm">
+                            <table className="w-full text-left text-sm">
+                              <thead className="bg-[#FFF0F5] text-[#D6006E] text-[10px] uppercase"><tr><th className="p-3">Product</th><th className="p-3 text-center">Qty</th></tr></thead>
+                              <tbody>
+                                {curOrders.map(o => <tr key={o.id} className="border-t border-pink-50"><td className="p-3 font-bold text-slate-800">{o.product}</td><td className="p-3 text-center font-black text-[#D6006E] text-lg">{o.qty}</td></tr>)}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <h3 className="font-black text-sm text-slate-500 uppercase tracking-widest mb-3 border-b-2 border-slate-200 pb-1">🕰️ Past Order History</h3>
+                        {histOrders.length === 0 ? <p className="text-xs text-slate-400 italic bg-white p-3 rounded-lg border border-slate-200">No past orders found.</p> : (
+                          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                            <table className="w-full text-left text-sm">
+                              <thead className="bg-slate-100 text-slate-500 text-[10px] uppercase"><tr><th className="p-3">Batch</th><th className="p-3">Product</th><th className="p-3 text-center">Qty</th></tr></thead>
+                              <tbody>
+                                {histOrders.map(o => <tr key={o.id} className="border-t border-slate-100"><td className="p-3 text-xs text-slate-500 font-bold">{o.batchName || 'Unknown'}</td><td className="p-3 font-bold text-slate-700">{o.product}</td><td className="p-3 text-center font-black text-slate-500">{o.qty}</td></tr>)}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                   </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {toast && (
-            <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] bg-white border-2 border-pink-600 text-pink-600 px-6 py-3 rounded-full shadow-2xl font-black text-xs uppercase tracking-widest flex items-center gap-2">
+            <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[400] bg-white border-2 border-pink-600 text-pink-600 px-6 py-3 rounded-full shadow-2xl font-black text-xs uppercase tracking-widest flex items-center gap-2">
               <Info size={16}/> {toast}
             </div>
           )}
@@ -1236,7 +1349,7 @@ export default function App() {
             </aside>
 
             <main className="flex-1 h-screen overflow-y-auto p-4 lg:p-10">
-               <div className="lg:hidden flex items-center justify-between mb-8 bg-[#4A042A] p-4 rounded-2xl shadow-xl">
+               <div className="lg:hidden flex items-center justify-between mb-6 bg-[#4A042A] p-4 rounded-2xl shadow-xl">
                   <span className="brand-title text-white text-xl">BBP</span>
                   <select value={adminTab} onChange={e => setAdminTab(e.target.value)} className="bg-white text-[#D6006E] font-black text-[10px] uppercase tracking-widest px-4 py-2 rounded-xl outline-none">
                      <option value="overview">Inventory</option>
@@ -1248,7 +1361,15 @@ export default function App() {
                   </select>
                </div>
 
-               <div className="w-full max-w-[1600px] mx-auto">
+               <div className="w-full max-w-[1600px] mx-auto relative">
+                 {/* ✨ NEW: Global Sticky Admin Search */}
+                 {adminTab !== 'settings' && (
+                   <div className="bg-white p-3 rounded-2xl shadow-sm border-2 border-pink-100 mb-6 flex items-center gap-3 sticky top-0 z-40">
+                      <Search size={20} className="text-pink-400 ml-2 shrink-0" />
+                      <input type="text" value={adminGlobalSearch} onChange={e => setAdminGlobalSearch(e.target.value)} placeholder="Global Search (Ctrl+F equivalent)..." className="w-full text-sm font-bold text-[#4A042A] outline-none placeholder:text-pink-200 bg-transparent" />
+                   </div>
+                 )}
+
                  {adminTab === 'overview' && (
                    <div className="space-y-6">
                      <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Live Inventory Overview</h2>
@@ -1256,7 +1377,7 @@ export default function App() {
                         <table className="w-full text-left custom-table">
                            <thead><tr><th>Product</th><th className="text-center">Total Vials</th><th className="text-center">Full Boxes</th><th className="text-center">Slots Left</th><th>Status</th></tr></thead>
                            <tbody className="divide-y divide-pink-50">
-                              {enrichedProducts.map(p => (
+                              {filteredAdminProducts.map(p => (
                                 <tr key={p.id} className="hover:bg-pink-50/20">
                                    <td className="font-bold text-slate-900">{p.name}</td>
                                    <td className="text-center">{p.totalVials}</td>
@@ -1265,6 +1386,7 @@ export default function App() {
                                    <td><span className="text-[9px] font-black uppercase px-2 py-0.5 rounded border border-pink-200 text-pink-600">{p.statusText}</span></td>
                                 </tr>
                               ))}
+                              {filteredAdminProducts.length === 0 && <tr><td colSpan="5" className="text-center p-8 text-pink-300 font-bold italic">No products found.</td></tr>}
                            </tbody>
                         </table>
                      </div>
@@ -1275,7 +1397,6 @@ export default function App() {
                    <div className="space-y-6">
                       <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight mb-2">Customer Payments Management</h2>
                       
-                      {/* ✨ NEW: Admin Overall Totals Dashboard */}
                       {(() => {
                         const totalExpectedPHP = customerList.reduce((acc, c) => acc + c.totalPHP, 0);
                         const totalPaidPHP = customerList.filter(c => c.isPaid).reduce((acc, c) => acc + c.totalPHP, 0);
@@ -1326,9 +1447,13 @@ export default function App() {
                         <table className="w-full text-left custom-table">
                            <thead><tr><th>Customer</th><th>Assigned Admin</th><th className="text-right">Total PHP</th><th className="text-center">Status</th></tr></thead>
                            <tbody className="divide-y divide-pink-50">
-                              {customerList.map(c => (
+                              {filteredCustomerList.map(c => (
                                 <tr key={c.email}>
-                                  <td><p className="font-bold text-slate-900">{c.name}</p><p className="text-[10px] text-slate-400">{c.email}</p></td>
+                                  <td>
+                                    {/* ✨ Clickable Profile Link in Admin */}
+                                    <button onClick={() => setSelectedProfileEmail(c.email)} className="font-bold text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">{c.name}</button>
+                                    <p className="text-[10px] text-slate-400">{c.email}</p>
+                                  </td>
                                   <td><span className="bg-[#FFF0F5] px-2 py-1 rounded text-[10px] font-black text-pink-600 border border-pink-100">{c.adminAssigned}</span></td>
                                   <td className="text-right font-black text-pink-600">₱{c.totalPHP.toLocaleString()}</td>
                                   <td className="text-center">
@@ -1338,6 +1463,7 @@ export default function App() {
                                   </td>
                                 </tr>
                               ))}
+                              {filteredCustomerList.length === 0 && <tr><td colSpan="4" className="text-center p-8 text-pink-300 font-bold italic">No customers found.</td></tr>}
                            </tbody>
                         </table>
                       </div>
@@ -1351,18 +1477,29 @@ export default function App() {
                         <table className="w-full text-left custom-table">
                            <thead><tr style={{background: '#F3E5F5'}}><th style={{color: '#7B1FA2'}}>Product</th><th className="text-center" style={{color: '#7B1FA2'}}>Box #</th><th style={{color: '#7B1FA2'}}>Customer</th><th className="text-center" style={{color: '#7B1FA2'}}>Take</th></tr></thead>
                            <tbody className="divide-y divide-pink-50">
-                              {Object.keys(orders.reduce((acc, o) => { if(!acc[o.product]) acc[o.product] = []; acc[o.product].push(o); return acc; }, {})).sort().map(prod => {
+                              {Object.keys(filteredPackingOrders.reduce((acc, o) => { if(!acc[o.product]) acc[o.product] = []; acc[o.product].push(o); return acc; }, {})).sort().map(prod => {
                                 let box = 1; let slots = 10;
-                                return orders.filter(o=>o.product===prod).map(o => {
+                                return filteredPackingOrders.filter(o=>o.product===prod).map(o => {
                                   let rows = []; let q = o.qty;
                                   while(q>0) {
                                     if(slots===0) { box++; slots=10; }
                                     let alloc = Math.min(q, slots); slots -= alloc;
-                                    rows.push(<tr key={`${o.id}-${box}`}><td>{prod}</td><td className="text-center font-bold text-pink-600">Box {box}</td><td><strong>{o.name}</strong><br/><span className="text-[10px]">{o.email}</span></td><td className="text-center font-black text-lg">{alloc}</td></tr>);
+                                    rows.push(
+                                      <tr key={`${o.id}-${box}`}>
+                                        <td>{prod}</td>
+                                        <td className="text-center font-bold text-pink-600">Box {box}</td>
+                                        <td>
+                                          <button onClick={() => setSelectedProfileEmail(o.email)} className="font-bold text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">{o.name}</button>
+                                          <br/><span className="text-[10px]">{o.email}</span>
+                                        </td>
+                                        <td className="text-center font-black text-lg">{alloc}</td>
+                                      </tr>
+                                    );
                                     q -= alloc;
                                   } return rows;
                                 });
                               })}
+                              {filteredPackingOrders.length === 0 && <tr><td colSpan="4" className="text-center p-8 text-pink-300 font-bold italic">No orders found.</td></tr>}
                            </tbody>
                         </table>
                      </div>
@@ -1372,18 +1509,21 @@ export default function App() {
                  {adminTab === 'trimming' && (
                    <div className="space-y-6">
                      <div className="flex justify-between items-center"><h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Loose Vial Hit List</h2></div>
-                     {trimmingHitList.length === 0 ? (
-                       <div className="bg-emerald-50 p-12 rounded-[24px] text-center font-bold text-emerald-600 border-2 border-emerald-100 uppercase tracking-widest text-xs">✅ All boxes are perfectly full (10/10)</div>
+                     {filteredHitList.length === 0 ? (
+                       <div className="bg-emerald-50 p-12 rounded-[24px] text-center font-bold text-emerald-600 border-2 border-emerald-100 uppercase tracking-widest text-xs">✅ No loose vials matching your search.</div>
                      ) : (
                         <div className="bg-white rounded-[24px] shadow-sm border-2 border-pink-50 overflow-hidden">
                           <table className="w-full text-left custom-table">
                             <thead><tr style={{background: '#FEF2F2'}}><th style={{color: '#D32F2F'}}>⚠️ Product</th><th style={{color: '#D32F2F'}}>Status</th><th style={{color: '#D32F2F'}}>Target Customer</th><th className="text-center" style={{color: '#D32F2F'}}>Action</th></tr></thead>
                             <tbody className="divide-y divide-pink-50">
-                               {trimmingHitList.map((v, i) => (
+                               {filteredHitList.map((v, i) => (
                                  <tr key={v.id}>
                                    <td className="font-bold">{v.prod}</td>
                                    <td className="text-[10px] font-black text-rose-500 uppercase">Box {v.boxNum} needs {v.missingSlots} more</td>
-                                   <td><p className="font-bold">{v.name}</p><p className="text-[10px] text-slate-400">{v.email}</p></td>
+                                   <td>
+                                     <button onClick={() => setSelectedProfileEmail(v.email)} className="font-bold text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">{v.name}</button>
+                                     <p className="text-[10px] text-slate-400">{v.email}</p>
+                                   </td>
                                    <td className="text-center"><button onClick={() => executeTrim(v)} className="bg-rose-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md">Cut {v.amountToRemove} Vials</button></td>
                                  </tr>
                                ))}
@@ -1396,7 +1536,7 @@ export default function App() {
 
                  {adminTab === 'customers' && (
                    <div className="space-y-6">
-                     <div className="flex justify-between items-center"><h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Customer Database</h2><input type="text" value={adminUserSearch} onChange={e => setAdminUserSearch(e.target.value)} placeholder="Search..." className="bg-white border-2 border-pink-100 rounded-full px-4 py-2 text-xs font-bold w-48 outline-none focus:border-pink-500 transition-all" /></div>
+                     <div className="flex justify-between items-center"><h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Customer Database</h2></div>
                      <div className="bg-white rounded-[24px] shadow-sm border-2 border-pink-50 overflow-hidden">
                        <table className="w-full text-left custom-table">
                          <thead><tr><th>Customer Info</th><th>Address</th><th>Reserved</th><th className="text-center">Del</th></tr></thead>
@@ -1405,13 +1545,17 @@ export default function App() {
                               const userQty = orders.filter(o => o.email === u.id).reduce((s,o)=>s+o.qty,0);
                               return (
                                 <tr key={u.id}>
-                                  <td><strong>{u.name}</strong><br/><span className="text-[10px] text-slate-400">{u.id}</span></td>
+                                  <td>
+                                    <button onClick={() => setSelectedProfileEmail(u.id)} className="font-bold text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">{u.name}</button>
+                                    <br/><span className="text-[10px] text-slate-400">{u.id}</span>
+                                  </td>
                                   <td className="text-[10px] text-slate-500">{u.address?.street ? `${u.address.street}, ${u.address.city} (${u.address.shipOpt})` : <span className="italic opacity-40">No address on file</span>}</td>
                                   <td className="font-black text-pink-600">{userQty} Vials</td>
                                   <td className="text-center"><button onClick={() => safeAwait(deleteDoc(doc(db, colPath('users'), u.id)))} className="text-slate-300 hover:text-rose-500"><Trash2 size={16} /></button></td>
                                 </tr>
                               )
                             })}
+                            {filteredUsers.length === 0 && <tr><td colSpan="4" className="text-center p-8 text-pink-300 font-bold italic">No customers found.</td></tr>}
                          </tbody>
                        </table>
                      </div>
@@ -1569,6 +1713,73 @@ export default function App() {
           </div>
         )
       )}
+
+      {/* ✨ NEW: Customer Profile Modal (Used in both Shop & Admin views) */}
+      {selectedProfileEmail && (() => {
+        const profile = users.find(u => u.id === selectedProfileEmail.toLowerCase().trim()) || { id: selectedProfileEmail, name: 'Unknown Customer' };
+        const curOrders = orders.filter(o => o.email === selectedProfileEmail.toLowerCase().trim());
+        const histOrders = history.filter(o => o.email === selectedProfileEmail.toLowerCase().trim());
+        
+        return (
+          <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[300] flex items-center justify-center p-4">
+            <div className="bg-white rounded-[32px] w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
+               <div className="bg-[#FFF0F5] p-5 flex justify-between items-center border-b-2 border-[#FFC0CB]">
+                  <h2 className="brand-title text-2xl text-[#D6006E]">👤 Profile & History</h2>
+                  <button onClick={()=>setSelectedProfileEmail(null)} className="text-pink-600 font-black text-2xl hover:text-pink-800 transition-colors">&times;</button>
+               </div>
+               <div className="p-6 overflow-y-auto space-y-6 bg-slate-50">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                     <div className="bg-white p-4 rounded-2xl border border-pink-100 shadow-sm">
+                       <p className="text-[10px] font-black text-pink-400 uppercase tracking-widest mb-1">Customer Details</p>
+                       <p className="font-black text-xl text-[#4A042A]">{profile.name}</p>
+                       <p className="text-sm text-slate-500 font-bold">{profile.id}</p>
+                       <p className="text-sm text-[#D6006E] font-black mt-1">{profile.handle || 'No handle provided'}</p>
+                     </div>
+                     <div className="bg-white p-4 rounded-2xl border border-pink-100 shadow-sm">
+                       <p className="text-[10px] font-black text-pink-400 uppercase tracking-widest mb-1">Saved Address</p>
+                       {profile.address?.street ? (
+                         <p className="text-sm font-bold text-slate-700 leading-tight">
+                           {profile.address.street}<br/>
+                           {profile.address.city}, {profile.address.prov} {profile.address.zip}<br/>
+                           <span className="text-emerald-600 mt-1 inline-block">Courier: {profile.address.shipOpt}</span><br/>
+                           <span className="text-slate-500">📞 {profile.address.contact}</span>
+                         </p>
+                       ) : <p className="text-sm text-slate-400 italic">No address on file</p>}
+                     </div>
+                  </div>
+                  
+                  <div>
+                    <h3 className="font-black text-sm text-[#D6006E] uppercase tracking-widest mb-3 border-b-2 border-pink-100 pb-1">📦 Current Active Orders</h3>
+                    {curOrders.length === 0 ? <p className="text-xs text-slate-400 italic bg-white p-3 rounded-lg border border-slate-200">No active orders in this batch.</p> : (
+                      <div className="bg-white border-2 border-pink-100 rounded-xl overflow-hidden shadow-sm">
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-[#FFF0F5] text-[#D6006E] text-[10px] uppercase"><tr><th className="p-3">Product</th><th className="p-3 text-center">Qty</th></tr></thead>
+                          <tbody>
+                            {curOrders.map(o => <tr key={o.id} className="border-t border-pink-50"><td className="p-3 font-bold text-slate-800">{o.product}</td><td className="p-3 text-center font-black text-[#D6006E] text-lg">{o.qty}</td></tr>)}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <h3 className="font-black text-sm text-slate-500 uppercase tracking-widest mb-3 border-b-2 border-slate-200 pb-1">🕰️ Past Order History</h3>
+                    {histOrders.length === 0 ? <p className="text-xs text-slate-400 italic bg-white p-3 rounded-lg border border-slate-200">No past orders found.</p> : (
+                      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-slate-100 text-slate-500 text-[10px] uppercase"><tr><th className="p-3">Batch</th><th className="p-3">Product</th><th className="p-3 text-center">Qty</th></tr></thead>
+                          <tbody>
+                            {histOrders.map(o => <tr key={o.id} className="border-t border-slate-100"><td className="p-3 text-xs text-slate-500 font-bold">{o.batchName || 'Unknown'}</td><td className="p-3 font-bold text-slate-700">{o.product}</td><td className="p-3 text-center font-black text-slate-500">{o.qty}</td></tr>)}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+               </div>
+            </div>
+          </div>
+        );
+      })()}
     </>
   );
 }
