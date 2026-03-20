@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 
 // --- FIREBASE SETUP ---
-// 🔥 Your Real Firebase Config for Netlify & Stackblitz 🔥
 const userFirebaseConfig = {
   apiKey: "AIzaSyBtqinodXxcYU4U5F-LoImCOj681KlZ9w4",
   authDomain: "bonded-by-peptides.firebaseapp.com",
@@ -21,7 +20,6 @@ const userFirebaseConfig = {
   measurementId: "G-6NMJD9WTS6"
 };
 
-// Auto-detect if we are in the Canvas or deployed live on Netlify
 const isCanvas = typeof __firebase_config !== 'undefined';
 const firebaseConfig = isCanvas ? JSON.parse(__firebase_config) : userFirebaseConfig;
 
@@ -29,8 +27,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-// ✨ FIXED DATABASE PATH LOGIC: Uses root collections when live on Netlify to prevent rule blocks
 const colPath = (name) => isCanvas ? `artifacts/${appId}/public/data/${name}` : name;
 
 const SLOTS_PER_BATCH = 10;
@@ -43,7 +39,6 @@ const CUTE_PLEAS = [
   "Help! I don't wanna be trimmed! 😭"
 ];
 
-// ✨ Safe Async Wrapper to prevent infinite hanging if Firebase blocks the request
 const safeAwait = (promise, ms = 15000) => {
   return Promise.race([
     promise,
@@ -51,7 +46,6 @@ const safeAwait = (promise, ms = 15000) => {
   ]);
 };
 
-// ✨ Robust CSV Parser to prevent browser freezing on bad formatting
 const parseCSVLine = (text) => {
   let ret = [], inQuote = false, value = '';
   for (let i = 0; i < text.length; i++) {
@@ -77,8 +71,13 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [showPayModal, setShowPayModal] = useState(false);
   const [showHitListModal, setShowHitListModal] = useState(false);
-  const [selectedProfileEmail, setSelectedProfileEmail] = useState(null); // ✨ NEW: For viewing profiles
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [selectedProfileEmail, setSelectedProfileEmail] = useState(null);
   const [isBtnLoading, setIsBtnLoading] = useState(false);
+  
+  // ✨ Animation States
+  const [shakingField, setShakingField] = useState(null);
+  const [shakingProd, setShakingProd] = useState(null);
 
   // Admin Security State
   const [adminPassword, setAdminPassword] = useState('');
@@ -115,7 +114,8 @@ export default function App() {
   const [cartItems, setCartItems] = useState({}); 
   const [addressForm, setAddressForm] = useState({ shipOpt: '', street: '', brgy: '', city: '', prov: '', zip: '', contact: '' });
   const [searchQuery, setSearchQuery] = useState('');
-  const [adminGlobalSearch, setAdminGlobalSearch] = useState(''); // ✨ NEW: Global Search for all Admin Tabs
+  const [adminGlobalSearch, setAdminGlobalSearch] = useState('');
+  const [adminSettingsProductSearch, setAdminSettingsProductSearch] = useState(''); // ✨ NEW: Dedicated search for Manage Products
 
   // Admin New Product/Admin State
   const [newProd, setNewProd] = useState({ name: '', kit: '', vial: '', max: '' });
@@ -262,6 +262,10 @@ export default function App() {
     return enrichedProducts.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
   }, [enrichedProducts, searchQuery]);
 
+  const filteredSettingsProducts = useMemo(() => {
+    return products.filter(p => !adminSettingsProductSearch || p.name.toLowerCase().includes(adminSettingsProductSearch.toLowerCase()));
+  }, [products, adminSettingsProductSearch]);
+
   const customerProfile = useMemo(() => users.find(u => u.id === customerEmail.toLowerCase().trim()) || null, [users, customerEmail]);
 
   const existingOrderData = useMemo(() => {
@@ -280,6 +284,11 @@ export default function App() {
   }, [trimmingHitList, customerEmail, settings.addOnly]);
 
   // --- ACTIONS ---
+  const triggerShake = (field) => {
+    setShakingField(field);
+    setTimeout(() => setShakingField(null), 500);
+  };
+
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
   const handleAdminLogin = (e) => {
@@ -333,7 +342,7 @@ export default function App() {
     setCartItems(prev => ({ ...prev, [prodName]: { k: prev[prodName]?.k || 0, v: prev[prodName]?.v || 0, [field]: num } }));
   };
 
-  // ✨ NEW: Per-Product Min Vial Validation
+  // ✨ IMPROVED: Shake and autocorrect on blur
   const handleCartBlur = (prodName) => {
     const cart = cartItems[prodName];
     if (!cart) return;
@@ -345,11 +354,17 @@ export default function App() {
     if (totalVials > 0 && totalVials < settings.minOrder && !settings.addOnly) {
       showToast(`Minimum ${settings.minOrder} vials required per item! 🎀`);
       setCartItems(prev => ({ ...prev, [prodName]: { ...cart, v: settings.minOrder } }));
+      setShakingProd(prodName);
+      setTimeout(() => setShakingProd(null), 500); // Trigger physical card shake
     }
   };
 
   const submitOrder = async () => {
-    if (!customerEmail || !customerName || !action) { showToast("Please fill all fields! 🌸"); return; }
+    // ✨ Visual Shakes for Missing Fields!
+    if (!customerEmail) { triggerShake('email'); showToast("Email Address is required! 💌"); return; }
+    if (!customerName) { triggerShake('name'); showToast("Your Name is required! 🌸"); return; }
+    if (!action) { triggerShake('action'); showToast("Please choose an Action! ⚡"); return; }
+
     const emailLower = customerEmail.toLowerCase().trim();
     setIsBtnLoading(true);
     try {
@@ -367,18 +382,17 @@ export default function App() {
       }
       
       const errors = []; const newOrderItems = []; const timestamp = Date.now();
-      let totalRequestedVials = 0;
+      let newlyAddedQty = 0;
 
       Object.entries(cartItems).forEach(([prodName, amounts]) => {
         const qty = ((amounts.k || 0) * 10) + (amounts.v || 0);
         if (qty <= 0) return;
         
-        // Double check validation on submit just in case
         if (!settings.addOnly && qty < settings.minOrder) {
            errors.push(`${prodName} requires at least ${settings.minOrder} vials.`);
         }
         
-        totalRequestedVials += qty;
+        newlyAddedQty += qty;
         const pData = enrichedProducts.find(p => p.name === prodName);
         if (pData?.isClosed) return;
         
@@ -388,14 +402,34 @@ export default function App() {
         newOrderItems.push({ email: emailLower, name: customerName, handle: customerHandle, product: prodName, qty, timestamp });
       });
 
-      if (!settings.addOnly && action !== 'cancel' && totalRequestedVials < settings.minOrder) {
-        showToast(`Your total cart must have at least ${settings.minOrder} vials! 🎀`);
+      // Prevent submitting empty selections
+      if (action === 'replace' && newlyAddedQty === 0) {
+         showToast("Your cart is empty! Add items or choose 'Cancel Order'. 🛍️");
+         setIsBtnLoading(false);
+         return;
+      }
+      if (action === 'add' && newlyAddedQty === 0) {
+         showToast("No new items added to your order! 🛍️");
+         setIsBtnLoading(false);
+         return;
+      }
+
+      // Check global minimums based on action
+      let finalTotalQty = 0;
+      if (action === 'replace') {
+         finalTotalQty = newlyAddedQty;
+      } else if (action === 'add') {
+         const existingTotal = Object.values(existingOrderData.items).reduce((a,b)=>a+b, 0);
+         finalTotalQty = existingTotal + newlyAddedQty;
+      }
+
+      if (!settings.addOnly && finalTotalQty < settings.minOrder) {
+        showToast(`Your total order must be at least ${settings.minOrder} vials! 🎀`);
         setIsBtnLoading(false);
         return;
       }
 
       if (errors.length > 0) { showToast(errors.join(' | ')); setIsBtnLoading(false); return; }
-      if (newOrderItems.length === 0 && action === 'add') { showToast("No items added!"); setIsBtnLoading(false); return; }
 
       // Database Commit with Batched Writes
       if (action === 'replace') {
@@ -519,7 +553,6 @@ export default function App() {
     setIsBtnLoading(false);
   };
 
-  // ✨ SAFELY BATCHED DATA SEEDER
   const seedDemoData = async () => {
     setIsBtnLoading(true);
     showToast("Starting Seed Process... Please Wait ⏳");
@@ -774,7 +807,6 @@ export default function App() {
     setIsBtnLoading(false);
   };
 
-  // --- CSV UPLOAD LOGIC ---
   const downloadCSVTemplate = () => {
     const headers = "Peptide Name,CODE,Price per KIT(USD),Price per vial (USD)\n";
     const sampleRow1 = "5-amino-1mq 5mg,5AM,60.00,6.00\n";
@@ -882,16 +914,32 @@ export default function App() {
   // --- STYLES ---
   const originalInput = "w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-2xl px-4 py-3 outline-none focus:border-[#D6006E] font-bold text-[#4A042A]";
   const adminInputSm = "w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs outline-none focus:border-[#D6006E] font-bold text-[#4A042A]";
-  const originalBtn = "bg-gradient-to-r from-[#FF1493] to-[#FF69B4] text-white font-bold px-6 py-4 rounded-full shadow-[0_4px_10px_rgba(255,20,147,0.3)] uppercase tracking-wider disabled:opacity-50 hover:scale-[0.98] transition-all";
+  const originalBtn = "bg-gradient-to-r from-[#FF1493] to-[#FF69B4] text-white font-bold px-6 py-4 rounded-full shadow-[0_4px_10px_rgba(255,20,147,0.3)] uppercase tracking-wider hover:scale-[0.98] transition-all";
 
   // --- PREPARE DATA ---
   const userOrders = orders.filter(o => o.email === customerEmail.toLowerCase().trim());
   const existingMap = {};
   userOrders.forEach(o => existingMap[o.product] = o.qty);
 
+  // ✨ FIXED: Perfectly calculates cartList whether adding new items, replacing, or just viewing.
+  const finalItems = {};
+  if (settings.paymentsOpen || action === '' || action === 'cancel') {
+    Object.assign(finalItems, existingMap);
+  } else if (action === 'replace') {
+    Object.entries(cartItems).forEach(([p, a]) => {
+      const q = (a.k||0)*10 + (a.v||0);
+      if (q > 0) finalItems[p] = q;
+    });
+  } else if (action === 'add') {
+    Object.assign(finalItems, existingMap);
+    Object.entries(cartItems).forEach(([p, a]) => {
+      const q = (a.k||0)*10 + (a.v||0);
+      if (q > 0) finalItems[p] = (finalItems[p] || 0) + q;
+    });
+  }
+  
   let subtotalUSD = 0;
   const cartList = [];
-  const finalItems = (settings.paymentsOpen || action === '') ? existingMap : (action === 'replace' ? Object.fromEntries(Object.entries(cartItems).map(([p, a]) => [p, (a.k||0)*10+(a.v||0)])) : existingMap);
   
   Object.entries(finalItems).forEach(([prod, qty]) => {
     const pData = products.find(p => p.name === prod);
@@ -906,29 +954,44 @@ export default function App() {
   // --- RENDER ---
   return (
     <>
-      {/* 🚀 GLOBAL CSS INJECTION TO FORCE FONTS PROPERLY ACROSS BOTH VIEWS 🚀 */}
       <style dangerouslySetInnerHTML={{__html: `
         @import url('https://fonts.googleapis.com/css2?family=Pacifico&family=Quicksand:wght@500;600;700;800&display=swap');
         
-        /* CRITICAL STRETCH FIXES FOR VITE */
-        html, body { width: 100% !important; min-height: 100vh !important; margin: 0 !important; padding: 0 !important; overflow-x: hidden !important; display: block !important; }
+        html, body { width: 100% !important; min-height: 100vh !important; margin: 0 !important; padding: 0 !important; overflow-x: clip !important; display: block !important; }
         #root { width: 100% !important; max-width: 100% !important; min-height: 100vh !important; margin: 0 !important; padding: 0 !important; text-align: left !important; display: block !important; }
         
-        /* Force Quicksand Everywhere */
         body, input, button, select, textarea, table, th, td, span, div { 
           font-family: 'Quicksand', sans-serif !important; 
         }
+
+        /* HIDE DEFAULT NUMBER INPUT ARROWS */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+          -webkit-appearance: none; 
+          margin: 0; 
+        }
+        input[type=number] {
+          -moz-appearance: textfield;
+          appearance: textfield;
+        }
+
+        /* ✨ NEW: Bounce & Shake Animations */
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          20% { transform: translateX(-6px); }
+          40% { transform: translateX(6px); }
+          60% { transform: translateX(-6px); }
+          80% { transform: translateX(6px); }
+        }
+        .animate-shake { animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both; }
         
-        /* Force Pacifico only on specific elements */
         .brand-title, .brand-title * { 
           font-family: 'Pacifico', cursive !important; 
         }
-        
         .brand-title { transform: rotate(-2deg); text-shadow: 2px 2px 0px rgba(0,0,0,0.1); }
         .glass-card { background: white; border: 2px solid #FF1493; border-radius: 1.5rem; }
         .hide-scroll::-webkit-scrollbar { display: none; }
         
-        /* Admin specific styles */
         .admin-sidebar { width: 280px; background: #4A042A; flex-shrink: 0; }
         .nav-item.active { background: white; color: #D6006E; border-radius: 1rem 0 0 1rem; margin-right: -1.5rem; padding-right: 1.5rem; }
         .custom-table th { background: #FFF0F5; color: #D6006E; font-weight: 800; font-size: 10px; text-transform: uppercase; padding: 1rem; border-bottom: 2px solid #FFC0CB; }
@@ -947,7 +1010,6 @@ export default function App() {
               </span>
             </div>
 
-            {/* Banners */}
             {settings.paymentsOpen && (
               <div className="bg-white border-l-4 border-[#FF1493] p-3 rounded-lg mb-4 text-sm font-bold shadow-sm">🔒 PAYMENTS OPEN: Check email below to pay.</div>
             )}
@@ -963,18 +1025,17 @@ export default function App() {
               </div>
             )}
 
-            <div className="flex flex-col lg:grid lg:grid-cols-[1fr_380px] xl:grid-cols-[1fr_450px] gap-6">
+            <div className="flex flex-col lg:grid lg:grid-cols-[1fr_380px] xl:grid-cols-[1fr_450px] gap-6 items-start">
               <div className="space-y-4 w-full">
                 
-                {/* ✨ NEW: User is at risk banner directly above their form */}
                 {isCurrentUserAtRisk && (
                    <div className="bg-rose-100 border-2 border-rose-500 p-4 rounded-2xl shadow-sm animate-pulse flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                      <div>
                        <h3 className="text-rose-700 font-black text-sm mb-1">🚨 YOUR VIALS ARE AT RISK!</h3>
                        <p className="text-xs text-rose-600 font-bold">You have loose vials on the Hit List. If the box isn't completed before cutoff, they will be deleted. Help fill the box!</p>
                      </div>
-                     <button onClick={() => setShowHitListModal(true)} className="bg-rose-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md hover:bg-rose-700 whitespace-nowrap">
-                       View Hit List
+                     <button onClick={() => setShowHitListModal(true)} className="bg-rose-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md hover:bg-rose-700 whitespace-nowrap transition-transform hover:scale-105">
+                       Click Here 👉 View Hit List
                      </button>
                    </div>
                 )}
@@ -983,11 +1044,11 @@ export default function App() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="sm:col-span-2">
                       <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">💌 Email Address</label>
-                      <input type="email" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)} onBlur={handleLookup} className={originalInput} placeholder="Enter email to lookup profile..."/>
+                      <input type="email" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)} onBlur={handleLookup} className={`${originalInput} transition-all duration-300 ${shakingField === 'email' ? 'animate-shake border-red-500 bg-red-50 text-red-700 placeholder:text-red-300' : ''}`} placeholder="Enter email to lookup profile..."/>
                     </div>
                     <div>
                       <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">🌸 Name</label>
-                      <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} className={originalInput} placeholder="Full name" disabled={settings.paymentsOpen}/>
+                      <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} className={`${originalInput} transition-all duration-300 ${shakingField === 'name' ? 'animate-shake border-red-500 bg-red-50 text-red-700 placeholder:text-red-300' : ''}`} placeholder="Full name" disabled={settings.paymentsOpen}/>
                     </div>
                     <div>
                       <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">💬 Handle</label>
@@ -995,7 +1056,7 @@ export default function App() {
                     </div>
                     <div className="sm:col-span-2">
                       <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">⚡ Action</label>
-                      <select value={action} onChange={e => handleActionChange(e.target.value)} className={originalInput} disabled={settings.paymentsOpen}>
+                      <select value={action} onChange={e => handleActionChange(e.target.value)} className={`${originalInput} transition-all duration-300 ${shakingField === 'action' ? 'animate-shake border-red-500 bg-red-50 text-red-700' : ''}`} disabled={settings.paymentsOpen}>
                         <option value="" disabled>Choose an action...</option>
                         <option value="replace" disabled={settings.addOnly}>Create / Replace Order</option>
                         <option value="add">Add Items (Keep Existing)</option>
@@ -1004,7 +1065,6 @@ export default function App() {
                     </div>
                   </div>
                   
-                  {/* ✨ NEW: User Profile Viewer Shortcut */}
                   <div className="mt-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs text-[#9E2A5E] bg-[#FFF0F5] p-3 rounded-xl border border-[#FFC0CB] font-semibold">
                      <span>{customerProfile?.address?.street ? `✅ Profile Active: Shipping to ${customerProfile.address.city}` : "ℹ️ New customer? Your address will be saved securely upon payment."}</span>
                      {customerProfile && (
@@ -1014,8 +1074,7 @@ export default function App() {
                 </div>
 
                 <div className="bg-white rounded-3xl border-2 border-[#FF1493] shadow-sm relative z-10">
-                  {/* ✨ IMPROVED: Loud Sticky Search Bar */}
-                  <div className="sticky top-2 z-20 p-4 sm:p-5 border-b-2 border-[#FFC0CB] flex flex-col sm:flex-row justify-between items-center gap-4 bg-white/95 backdrop-blur-xl rounded-t-[1.5rem]">
+                  <div className="sticky top-0 z-30 p-4 sm:p-5 border-b-2 border-[#FFC0CB] flex flex-col sm:flex-row justify-between items-center gap-4 bg-white/95 backdrop-blur-xl rounded-t-[1.3rem] shadow-sm">
                      <h2 className="font-black text-[#D6006E] uppercase tracking-widest text-base sm:text-lg flex items-center gap-2 whitespace-nowrap">
                        <Package size={22} className="text-[#FF1493]"/> Shop Catalog
                      </h2>
@@ -1028,36 +1087,36 @@ export default function App() {
                   {products.length === 0 ? (
                     <div className="p-12 text-center text-pink-400 font-bold italic">No products available yet.</div>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 sm:p-6 bg-slate-50/50 rounded-b-3xl">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-4 p-2 sm:p-6 bg-slate-50/50 rounded-b-3xl">
                       {filteredShopProducts.map(p => {
                          const cart = cartItems[p.name] || { k:0, v:0 };
                          const active = cart.k > 0 || cart.v > 0;
                          const exist = existingMap[p.name] || 0;
+                         
                          return (
-                          <div key={p.id} className={`p-5 rounded-2xl border-2 transition-all duration-300 ${active ? 'bg-[#FFF0F5] border-[#D6006E] shadow-md scale-[1.01] z-10' : 'bg-white border-[#FFE4E1] hover:border-pink-300'}`}>
-                            <div className="flex justify-between items-start mb-4 gap-2">
+                          <div key={p.id} className={`p-3 sm:p-5 rounded-xl sm:rounded-2xl border-2 transition-all duration-300 ${shakingProd === p.name ? 'animate-shake border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)] z-20 bg-red-50' : (active ? 'bg-[#FFF0F5] border-[#D6006E] shadow-md scale-[1.01] z-10' : 'bg-white border-[#FFE4E1] hover:border-pink-300')}`}>
+                            <div className="flex justify-between items-start mb-2 sm:mb-4 gap-2">
                               <div className="min-w-0 flex-1">
-                                <h3 className="font-black text-lg text-[#4A042A]">{p.name}</h3>
-                                <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                                  <span className="bg-[#FF1493] text-white px-2.5 py-0.5 rounded-full text-xs font-bold shadow-sm">${p.pricePerVialUSD.toFixed(2)} / vial</span>
-                                  {exist > 0 && <span className="bg-[#9C27B0] text-white px-2.5 py-0.5 rounded-full text-xs font-bold shadow-sm">📦 Has {exist}</span>}
+                                <h3 className="font-black text-sm sm:text-lg text-[#4A042A] leading-tight">{p.name}</h3>
+                                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-1 sm:mt-1.5">
+                                  <span className="bg-[#FF1493] text-white px-2 sm:px-2.5 py-0.5 rounded-full text-[9px] sm:text-xs font-bold shadow-sm">${p.pricePerVialUSD.toFixed(2)} / vial</span>
+                                  {exist > 0 && <span className="bg-[#9C27B0] text-white px-2 sm:px-2.5 py-0.5 rounded-full text-[9px] sm:text-xs font-bold shadow-sm">📦 Has {exist}</span>}
                                 </div>
                               </div>
-                              <span className={`shrink-0 text-[10px] font-black uppercase px-3 py-1.5 rounded-full border shadow-sm whitespace-nowrap ${p.statusKey === 'available' ? 'bg-[#E6F6EC] text-[#079E51] border-[#bbf7d0]' : p.statusKey === 'full' ? 'bg-[#FFEBEE] text-[#D32F2F] border-[#ffcdd2]' : p.statusKey === 'locked' ? 'bg-gray-100 text-gray-500 border-gray-300' : 'bg-[#F3E5F5] text-[#7B1FA2] border-[#e1bee7]'}`}>
+                              <span className={`shrink-0 text-[8px] sm:text-[10px] font-black uppercase px-2 sm:px-3 py-1 sm:py-1.5 rounded-full border shadow-sm whitespace-nowrap ${p.statusKey === 'available' ? 'bg-[#E6F6EC] text-[#079E51] border-[#bbf7d0]' : p.statusKey === 'full' ? 'bg-[#FFEBEE] text-[#D32F2F] border-[#ffcdd2]' : p.statusKey === 'locked' ? 'bg-gray-100 text-gray-500 border-gray-300' : 'bg-[#F3E5F5] text-[#7B1FA2] border-[#e1bee7]'}`}>
                                 {p.statusText}
                               </span>
                             </div>
                             
-                            {/* ✨ IMPROVED: Smaller, Mobile-Friendly Inputs */}
-                            <div className={`flex gap-3 ${p.isClosed ? 'opacity-40 pointer-events-none' : ''}`}>
-                              <div className="bg-slate-50 border border-pink-100 rounded-lg p-1.5 flex-1 flex justify-between items-center transition-colors focus-within:border-pink-400 focus-within:bg-white shadow-inner">
-                                <span className="text-[9px] font-black uppercase text-pink-400 ml-1">Kits<span className="hidden sm:inline"> (10x)</span></span>
-                                <input type="number" min="0" value={cart.k || ''} onChange={e=>handleCartChange(p.name, 'k', e.target.value)} onBlur={()=>handleCartBlur(p.name)} className="w-12 text-right font-black text-base text-[#D6006E] outline-none bg-transparent placeholder:text-pink-200" placeholder="0" disabled={p.isClosed}/>
-                              </div>
-                              <div className="bg-slate-50 border border-pink-100 rounded-lg p-1.5 flex-1 flex justify-between items-center transition-colors focus-within:border-pink-400 focus-within:bg-white shadow-inner">
-                                <span className="text-[9px] font-black uppercase text-pink-400 ml-1">Vials<span className="hidden sm:inline"> (1x)</span></span>
-                                <input type="number" min="0" max="9" value={cart.v || ''} onChange={e=>handleCartChange(p.name, 'v', e.target.value)} onBlur={()=>handleCartBlur(p.name)} className="w-12 text-right font-black text-base text-[#D6006E] outline-none bg-transparent placeholder:text-pink-200" placeholder="0" disabled={p.isClosed}/>
-                              </div>
+                            <div className={`flex gap-2 sm:gap-3 ${p.isClosed ? 'opacity-40 pointer-events-none' : ''}`}>
+                              <label className="bg-slate-50 border border-pink-100 rounded-md sm:rounded-lg p-1 sm:p-1.5 flex-1 flex justify-between items-center transition-colors focus-within:border-pink-400 focus-within:bg-white shadow-inner cursor-text">
+                                <span className="text-[8px] sm:text-[9px] font-black uppercase text-pink-400 ml-1 shrink-0">Kits<span className="hidden sm:inline"> (10x)</span></span>
+                                <input type="number" min="0" value={cart.k || ''} onChange={e=>handleCartChange(p.name, 'k', e.target.value)} onBlur={()=>handleCartBlur(p.name)} className={`w-full ml-1 sm:ml-2 text-right font-black text-sm sm:text-base outline-none bg-transparent placeholder:text-pink-200 ${shakingProd === p.name ? 'text-red-600' : 'text-[#D6006E]'}`} placeholder="0" disabled={p.isClosed}/>
+                              </label>
+                              <label className="bg-slate-50 border border-pink-100 rounded-md sm:rounded-lg p-1 sm:p-1.5 flex-1 flex justify-between items-center transition-colors focus-within:border-pink-400 focus-within:bg-white shadow-inner cursor-text">
+                                <span className="text-[8px] sm:text-[9px] font-black uppercase text-pink-400 ml-1 shrink-0">Vials<span className="hidden sm:inline"> (1x)</span></span>
+                                <input type="number" min="0" max="9" value={cart.v || ''} onChange={e=>handleCartChange(p.name, 'v', e.target.value)} onBlur={()=>handleCartBlur(p.name)} className={`w-full ml-1 sm:ml-2 text-right font-black text-sm sm:text-base outline-none bg-transparent placeholder:text-pink-200 ${shakingProd === p.name ? 'text-red-600' : 'text-[#D6006E]'}`} placeholder="0" disabled={p.isClosed}/>
+                              </label>
                             </div>
                           </div>
                          );
@@ -1067,7 +1126,7 @@ export default function App() {
                 </div>
               </div>
 
-              <aside className="hidden lg:block sticky top-6 w-full">
+              <aside className="hidden lg:block sticky top-6 w-full self-start">
                 <div className="glass-card p-6 shadow-xl">
                   <h3 className="brand-title text-2xl text-[#D6006E] border-b-2 border-pink-100 pb-2 mb-4 text-center">Your Cart 🛍️</h3>
                   <div className="max-h-[350px] overflow-y-auto mb-4 space-y-2 pr-2">
@@ -1088,32 +1147,42 @@ export default function App() {
                       <span className="text-3xl xl:text-4xl font-black text-[#D6006E]">₱{totalPHP.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                     </div>
                   </div>
-                  <button onClick={submitOrder} disabled={isBtnLoading || (cartList.length === 0 && action !== 'cancel')} className={originalBtn + " w-full mt-6 py-5"}>
-                    {isBtnLoading ? "Saving... ⏳" : action === 'cancel' ? "Confirm Cancel" : "Submit Order 💖"}
-                  </button>
-                  {settings.paymentsOpen && cartList.length > 0 && (
-                     <button onClick={()=>setShowPayModal(true)} className="w-full mt-2 bg-[#008040] text-white font-bold py-5 rounded-full uppercase tracking-widest text-sm shadow-md">Pay Now 💸</button>
-                  )}
+                  
+                  <div className="flex flex-col gap-2 mt-6">
+                    <button onClick={() => setShowPreviewModal(true)} disabled={cartList.length === 0} className="w-full bg-white text-[#D6006E] border-2 border-pink-200 font-bold py-4 rounded-full uppercase tracking-widest text-sm shadow-sm hover:bg-pink-50 disabled:opacity-50 transition-transform hover:scale-[0.98] active:scale-95">Preview 👀</button>
+                    {!settings.paymentsOpen ? (
+                      <button onClick={submitOrder} disabled={isBtnLoading} className={`${originalBtn} w-full py-4`}>
+                        {isBtnLoading ? "Saving... ⏳" : action === 'cancel' ? "Confirm Cancel" : "Submit Order 💖"}
+                      </button>
+                    ) : (
+                      <button onClick={()=>setShowPayModal(true)} disabled={cartList.length === 0} className="w-full bg-[#008040] text-white font-bold py-4 rounded-full uppercase tracking-widest text-sm shadow-md hover:scale-[0.98] transition-transform active:scale-95 disabled:opacity-50">Pay Now 💸</button>
+                    )}
+                  </div>
                 </div>
               </aside>
             </div>
           </div>
 
-          <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t-2 border-[#FF1493] p-4 rounded-t-3xl shadow-[0_-10px_20px_rgba(0,0,0,0.1)] z-50 flex justify-between items-center">
-            <div>
+          <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t-2 border-[#FF1493] p-4 rounded-t-3xl shadow-[0_-10px_20px_rgba(0,0,0,0.1)] z-50 flex justify-between items-center gap-2">
+            <div className="shrink-0">
               <div className="text-[10px] font-black text-[#D6006E] uppercase">Total Estimate</div>
-              <div className="text-2xl font-black text-[#D6006E]">₱{totalPHP.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+              <div className="text-xl sm:text-2xl font-black text-[#D6006E]">₱{totalPHP.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
             </div>
-            {settings.paymentsOpen ? (
-              <button onClick={() => setShowPayModal(true)} disabled={cartList.length===0} className="bg-[#008040] text-white px-6 py-3 rounded-full font-bold uppercase text-sm shadow-md disabled:opacity-50">Pay Now 💸</button>
-            ) : (
-              <button onClick={submitOrder} disabled={cartList.length === 0 && action !== 'cancel'} className="bg-[#D6006E] text-white px-6 py-3 rounded-full font-black uppercase text-sm shadow-md disabled:opacity-50">
-                {action === 'cancel' ? 'Cancel' : 'Submit 💖'}
-              </button>
-            )}
+            
+            <div className="flex gap-2 w-full justify-end">
+              <button onClick={() => setShowPreviewModal(true)} disabled={cartList.length === 0} className="bg-white text-[#D6006E] border-2 border-pink-200 px-3 sm:px-4 py-2 sm:py-3 rounded-full font-bold uppercase text-[10px] sm:text-sm shadow-sm disabled:opacity-50 whitespace-nowrap active:scale-95 transition-transform">Preview 👀</button>
+              
+              {settings.paymentsOpen ? (
+                <button onClick={() => setShowPayModal(true)} disabled={cartList.length===0} className="bg-[#008040] text-white px-4 sm:px-6 py-2 sm:py-3 rounded-full font-bold uppercase text-[10px] sm:text-sm shadow-md disabled:opacity-50 whitespace-nowrap active:scale-95 transition-transform">Pay Now 💸</button>
+              ) : (
+                <button onClick={submitOrder} disabled={isBtnLoading} className="bg-[#D6006E] text-white px-4 sm:px-6 py-2 sm:py-3 rounded-full font-black uppercase text-[10px] sm:text-sm shadow-md disabled:opacity-50 whitespace-nowrap active:scale-95 transition-transform">
+                  {action === 'cancel' ? 'Cancel' : 'Submit 💖'}
+                </button>
+              )}
+            </div>
           </div>
 
-          <button onClick={()=>setView('admin')} className="fixed bottom-24 lg:bottom-6 right-4 bg-[#4A042A] text-white px-5 py-3 rounded-full font-bold text-xs uppercase tracking-widest shadow-xl z-[40] flex items-center gap-2">
+          <button onClick={()=>setView('admin')} className="fixed bottom-24 lg:bottom-6 right-4 bg-[#4A042A] text-white px-5 py-3 rounded-full font-bold text-xs uppercase tracking-widest shadow-xl z-[40] flex items-center gap-2 hover:scale-105 transition-transform">
              <Lock size={14}/> Admin Access
           </button>
 
@@ -1122,7 +1191,7 @@ export default function App() {
                <div className="bg-white rounded-[32px] w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
                   <div className="bg-[#FFF0F5] p-5 flex justify-between items-center border-b-2 border-[#FFC0CB]">
                      <h2 className="brand-title text-2xl text-pink-600">Checkout 💸</h2>
-                     <button onClick={()=>setShowPayModal(false)} className="text-pink-600 font-black text-2xl">&times;</button>
+                     <button onClick={()=>setShowPayModal(false)} className="text-pink-600 font-black text-2xl hover:scale-110 transition-transform">&times;</button>
                   </div>
                   <div className="p-6 overflow-y-auto space-y-6">
                      
@@ -1187,12 +1256,49 @@ export default function App() {
             </div>
           )}
 
+          {showPreviewModal && (
+            <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+               <div className="bg-white rounded-[32px] w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
+                  <div className="bg-[#FFF0F5] p-5 flex justify-between items-center border-b-2 border-[#FFC0CB]">
+                     <h2 className="brand-title text-2xl text-pink-600">Cart Preview 👀</h2>
+                     <button onClick={()=>setShowPreviewModal(false)} className="text-pink-600 font-black text-2xl hover:scale-110 transition-transform">&times;</button>
+                  </div>
+                  <div className="p-6 overflow-y-auto space-y-4">
+                    {cartList.length === 0 ? (
+                       <p className="text-center text-pink-400 font-bold italic py-8">Your cart is empty!</p>
+                    ) : (
+                       cartList.map((i, idx) => (
+                        <div key={idx} className="flex justify-between items-center text-sm border-b border-pink-50 border-dashed pb-3">
+                          <div className="font-bold text-[#4A042A] pr-4">{i.product}</div>
+                          <div className="text-right shrink-0">
+                            <span className="text-[#D6006E] font-black mr-2">x{i.qty}</span>
+                            <span className="text-gray-500 font-bold">${(i.price * i.qty).toFixed(2)}</span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                    <div className="pt-4 space-y-2 text-sm border-t-2 border-pink-100">
+                      <div className="flex justify-between font-bold text-gray-500 uppercase"><span>Subtotal</span><span>${subtotalUSD.toFixed(2)}</span></div>
+                      <div className="flex justify-between font-bold text-gray-500 uppercase"><span>Admin Fee</span><span>₱{settings.adminFeePhp}</span></div>
+                    </div>
+                  </div>
+                  <div className="p-6 border-t-2 border-pink-50 bg-[#FFF0F5]">
+                     <div className="flex justify-between items-center mb-4">
+                        <span className="font-bold text-pink-400">TOTAL PHP</span>
+                        <span className="text-2xl font-black text-pink-600">₱{totalPHP.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                     </div>
+                     <button onClick={()=>setShowPreviewModal(false)} className={originalBtn + " w-full"}>Close & Continue</button>
+                  </div>
+               </div>
+            </div>
+          )}
+
           {showHitListModal && (
             <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
                <div className="bg-white rounded-[32px] w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
                   <div className="bg-[#FFF0F5] p-5 flex justify-between items-center border-b-2 border-[#FFC0CB]">
                      <h2 className="brand-title text-2xl text-rose-600">✂️ Elimination Hit List</h2>
-                     <button onClick={()=>setShowHitListModal(false)} className="text-pink-600 font-black text-2xl">&times;</button>
+                     <button onClick={()=>setShowHitListModal(false)} className="text-pink-600 font-black text-2xl hover:scale-110 transition-transform">&times;</button>
                   </div>
                   <div className="p-6 overflow-y-auto bg-slate-50 hide-scroll">
                      <p className="text-sm font-bold text-slate-600 mb-6 text-center">
@@ -1233,75 +1339,8 @@ export default function App() {
             </div>
           )}
 
-          {/* ✨ NEW: Customer Profile Modal */}
-          {selectedProfileEmail && (() => {
-            const profile = users.find(u => u.id === selectedProfileEmail.toLowerCase().trim()) || { id: selectedProfileEmail, name: 'Unknown Customer' };
-            const curOrders = orders.filter(o => o.email === selectedProfileEmail.toLowerCase().trim());
-            const histOrders = history.filter(o => o.email === selectedProfileEmail.toLowerCase().trim());
-            
-            return (
-              <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[300] flex items-center justify-center p-4">
-                <div className="bg-white rounded-[32px] w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
-                   <div className="bg-[#FFF0F5] p-5 flex justify-between items-center border-b-2 border-[#FFC0CB]">
-                      <h2 className="brand-title text-2xl text-[#D6006E]">👤 Profile & History</h2>
-                      <button onClick={()=>setSelectedProfileEmail(null)} className="text-pink-600 font-black text-2xl hover:text-pink-800 transition-colors">&times;</button>
-                   </div>
-                   <div className="p-6 overflow-y-auto space-y-6 bg-slate-50">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                         <div className="bg-white p-4 rounded-2xl border border-pink-100 shadow-sm">
-                           <p className="text-[10px] font-black text-pink-400 uppercase tracking-widest mb-1">Customer Details</p>
-                           <p className="font-black text-xl text-[#4A042A]">{profile.name}</p>
-                           <p className="text-sm text-slate-500 font-bold">{profile.id}</p>
-                           <p className="text-sm text-[#D6006E] font-black mt-1">{profile.handle || 'No handle provided'}</p>
-                         </div>
-                         <div className="bg-white p-4 rounded-2xl border border-pink-100 shadow-sm">
-                           <p className="text-[10px] font-black text-pink-400 uppercase tracking-widest mb-1">Saved Address</p>
-                           {profile.address?.street ? (
-                             <p className="text-sm font-bold text-slate-700 leading-tight">
-                               {profile.address.street}<br/>
-                               {profile.address.city}, {profile.address.prov} {profile.address.zip}<br/>
-                               <span className="text-emerald-600 mt-1 inline-block">Courier: {profile.address.shipOpt}</span><br/>
-                               <span className="text-slate-500">📞 {profile.address.contact}</span>
-                             </p>
-                           ) : <p className="text-sm text-slate-400 italic">No address on file</p>}
-                         </div>
-                      </div>
-                      
-                      <div>
-                        <h3 className="font-black text-sm text-[#D6006E] uppercase tracking-widest mb-3 border-b-2 border-pink-100 pb-1">📦 Current Active Orders</h3>
-                        {curOrders.length === 0 ? <p className="text-xs text-slate-400 italic bg-white p-3 rounded-lg border border-slate-200">No active orders in this batch.</p> : (
-                          <div className="bg-white border-2 border-pink-100 rounded-xl overflow-hidden shadow-sm">
-                            <table className="w-full text-left text-sm">
-                              <thead className="bg-[#FFF0F5] text-[#D6006E] text-[10px] uppercase"><tr><th className="p-3">Product</th><th className="p-3 text-center">Qty</th></tr></thead>
-                              <tbody>
-                                {curOrders.map(o => <tr key={o.id} className="border-t border-pink-50"><td className="p-3 font-bold text-slate-800">{o.product}</td><td className="p-3 text-center font-black text-[#D6006E] text-lg">{o.qty}</td></tr>)}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                      </div>
-
-                      <div>
-                        <h3 className="font-black text-sm text-slate-500 uppercase tracking-widest mb-3 border-b-2 border-slate-200 pb-1">🕰️ Past Order History</h3>
-                        {histOrders.length === 0 ? <p className="text-xs text-slate-400 italic bg-white p-3 rounded-lg border border-slate-200">No past orders found.</p> : (
-                          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                            <table className="w-full text-left text-sm">
-                              <thead className="bg-slate-100 text-slate-500 text-[10px] uppercase"><tr><th className="p-3">Batch</th><th className="p-3">Product</th><th className="p-3 text-center">Qty</th></tr></thead>
-                              <tbody>
-                                {histOrders.map(o => <tr key={o.id} className="border-t border-slate-100"><td className="p-3 text-xs text-slate-500 font-bold">{o.batchName || 'Unknown'}</td><td className="p-3 font-bold text-slate-700">{o.product}</td><td className="p-3 text-center font-black text-slate-500">{o.qty}</td></tr>)}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                      </div>
-                   </div>
-                </div>
-              </div>
-            );
-          })()}
-
           {toast && (
-            <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[400] bg-white border-2 border-pink-600 text-pink-600 px-6 py-3 rounded-full shadow-2xl font-black text-xs uppercase tracking-widest flex items-center gap-2">
+            <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[500] bg-white border-2 border-pink-600 text-pink-600 px-6 py-3 rounded-full shadow-2xl font-black text-xs uppercase tracking-widest flex items-center gap-2">
               <Info size={16}/> {toast}
             </div>
           )}
@@ -1320,7 +1359,7 @@ export default function App() {
                 {loginError && <p className="text-xs font-bold text-rose-500">{loginError}</p>}
                 <div className="flex flex-col gap-2 pt-4">
                   <button type="submit" className={originalBtn}>Enter Dashboard</button>
-                  <button type="button" onClick={() => setView('shop')} className="text-gray-400 font-bold text-[10px] uppercase tracking-[0.2em] mt-2">🛍️ Cancel / Back to Shop</button>
+                  <button type="button" onClick={() => setView('shop')} className="text-gray-400 font-bold text-[10px] uppercase tracking-[0.2em] mt-2 hover:underline">🛍️ Cancel / Back to Shop</button>
                 </div>
              </form>
           </div>
@@ -1349,9 +1388,12 @@ export default function App() {
             </aside>
 
             <main className="flex-1 h-screen overflow-y-auto p-4 lg:p-10">
-               <div className="lg:hidden flex items-center justify-between mb-6 bg-[#4A042A] p-4 rounded-2xl shadow-xl">
-                  <span className="brand-title text-white text-xl">BBP</span>
-                  <select value={adminTab} onChange={e => setAdminTab(e.target.value)} className="bg-white text-[#D6006E] font-black text-[10px] uppercase tracking-widest px-4 py-2 rounded-xl outline-none">
+               <div className="lg:hidden flex items-center justify-between mb-4 bg-[#4A042A] p-3 sm:p-4 rounded-xl sm:rounded-2xl shadow-xl sticky top-2 z-50">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <button onClick={() => setView('shop')} className="text-white bg-white/10 p-1.5 sm:p-2 rounded-lg hover:bg-white/20 transition-colors"><Home size={18}/></button>
+                    <span className="brand-title text-white text-lg sm:text-xl">BBP</span>
+                  </div>
+                  <select value={adminTab} onChange={e => setAdminTab(e.target.value)} className="bg-white text-[#D6006E] font-black text-[10px] uppercase tracking-widest px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl outline-none max-w-[130px] sm:max-w-none">
                      <option value="overview">Inventory</option>
                      <option value="payments">Payments</option>
                      <option value="packing">Packing</option>
@@ -1362,9 +1404,8 @@ export default function App() {
                </div>
 
                <div className="w-full max-w-[1600px] mx-auto relative">
-                 {/* ✨ NEW: Global Sticky Admin Search */}
                  {adminTab !== 'settings' && (
-                   <div className="bg-white p-3 rounded-2xl shadow-sm border-2 border-pink-100 mb-6 flex items-center gap-3 sticky top-0 z-40">
+                   <div className="bg-white p-3 rounded-2xl shadow-sm border-2 border-pink-100 mb-6 flex items-center gap-3 sticky top-[70px] lg:top-0 z-40">
                       <Search size={20} className="text-pink-400 ml-2 shrink-0" />
                       <input type="text" value={adminGlobalSearch} onChange={e => setAdminGlobalSearch(e.target.value)} placeholder="Global Search (Ctrl+F equivalent)..." className="w-full text-sm font-bold text-[#4A042A] outline-none placeholder:text-pink-200 bg-transparent" />
                    </div>
@@ -1450,14 +1491,13 @@ export default function App() {
                               {filteredCustomerList.map(c => (
                                 <tr key={c.email}>
                                   <td>
-                                    {/* ✨ Clickable Profile Link in Admin */}
                                     <button onClick={() => setSelectedProfileEmail(c.email)} className="font-bold text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">{c.name}</button>
                                     <p className="text-[10px] text-slate-400">{c.email}</p>
                                   </td>
                                   <td><span className="bg-[#FFF0F5] px-2 py-1 rounded text-[10px] font-black text-pink-600 border border-pink-100">{c.adminAssigned}</span></td>
                                   <td className="text-right font-black text-pink-600">₱{c.totalPHP.toLocaleString()}</td>
                                   <td className="text-center">
-                                     <button onClick={() => safeAwait(setDoc(doc(db, colPath('users'), c.email), { isPaid: !c.isPaid }, { merge: true }))} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${c.isPaid ? 'bg-emerald-50 text-emerald-600 border-emerald-200 shadow-sm' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
+                                     <button onClick={() => safeAwait(setDoc(doc(db, colPath('users'), c.email), { isPaid: !c.isPaid }, { merge: true }))} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all hover:scale-105 ${c.isPaid ? 'bg-emerald-50 text-emerald-600 border-emerald-200 shadow-sm' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
                                         {c.isPaid ? 'PAID ✅' : 'PENDING ❌'}
                                      </button>
                                   </td>
@@ -1524,7 +1564,7 @@ export default function App() {
                                      <button onClick={() => setSelectedProfileEmail(v.email)} className="font-bold text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">{v.name}</button>
                                      <p className="text-[10px] text-slate-400">{v.email}</p>
                                    </td>
-                                   <td className="text-center"><button onClick={() => executeTrim(v)} className="bg-rose-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md">Cut {v.amountToRemove} Vials</button></td>
+                                   <td className="text-center"><button onClick={() => executeTrim(v)} className="bg-rose-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md hover:scale-105 transition-transform">Cut {v.amountToRemove} Vials</button></td>
                                  </tr>
                                ))}
                             </tbody>
@@ -1551,7 +1591,7 @@ export default function App() {
                                   </td>
                                   <td className="text-[10px] text-slate-500">{u.address?.street ? `${u.address.street}, ${u.address.city} (${u.address.shipOpt})` : <span className="italic opacity-40">No address on file</span>}</td>
                                   <td className="font-black text-pink-600">{userQty} Vials</td>
-                                  <td className="text-center"><button onClick={() => safeAwait(deleteDoc(doc(db, colPath('users'), u.id)))} className="text-slate-300 hover:text-rose-500"><Trash2 size={16} /></button></td>
+                                  <td className="text-center"><button onClick={() => safeAwait(deleteDoc(doc(db, colPath('users'), u.id)))} className="text-slate-300 hover:text-rose-500 hover:scale-110 transition-transform"><Trash2 size={16} /></button></td>
                                 </tr>
                               )
                             })}
@@ -1576,15 +1616,15 @@ export default function App() {
                         
                         <section className="bg-white p-8 rounded-[32px] shadow-sm border-2 border-pink-50 space-y-4">
                            <h3 className="font-black text-xs text-pink-600 uppercase tracking-[0.2em] border-b-2 border-pink-50 pb-3">Mode Toggles & Actions</h3>
-                           <button onClick={()=>updateSetting('paymentsOpen', !settings.paymentsOpen)} className={`w-full py-4 rounded-2xl font-black uppercase text-xs tracking-widest border-2 ${settings.paymentsOpen ? 'bg-rose-50 border-rose-600 text-rose-600' : 'bg-emerald-50 border-emerald-600 text-emerald-600'}`}>
+                           <button onClick={()=>updateSetting('paymentsOpen', !settings.paymentsOpen)} className={`w-full py-4 rounded-2xl font-black uppercase text-xs tracking-widest border-2 ${settings.paymentsOpen ? 'bg-rose-50 border-rose-600 text-rose-600' : 'bg-emerald-50 border-emerald-600 text-emerald-600'} hover:scale-[0.98] transition-transform`}>
                               {settings.paymentsOpen ? '🔒 Close Payments' : '🟢 Open Payments'}
                            </button>
-                           <button onClick={()=>updateSetting('addOnly', !settings.addOnly)} className={`w-full py-4 rounded-2xl font-black uppercase text-xs tracking-widest border-2 ${settings.addOnly ? 'bg-amber-50 border-amber-600 text-amber-600' : 'bg-slate-50 border-slate-600 text-slate-600'}`}>
+                           <button onClick={()=>updateSetting('addOnly', !settings.addOnly)} className={`w-full py-4 rounded-2xl font-black uppercase text-xs tracking-widest border-2 ${settings.addOnly ? 'bg-amber-50 border-amber-600 text-amber-600' : 'bg-slate-50 border-slate-600 text-slate-600'} hover:scale-[0.98] transition-transform`}>
                               {settings.addOnly ? '⚠️ Disable Add-Only' : '⏳ Enable Add-Only'}
                            </button>
                            <div className="grid grid-cols-2 gap-4 mt-2">
-                             <button onClick={runCutoff} className="py-4 rounded-2xl bg-pink-100 text-pink-600 font-black uppercase text-[10px] tracking-widest border border-pink-200 hover:bg-pink-200 transition-colors">🛑 Run Cutoff</button>
-                             <button onClick={resetSystem} disabled={isBtnLoading} className="py-4 rounded-2xl bg-rose-100 text-rose-600 font-black uppercase text-[10px] tracking-widest border border-rose-200 hover:bg-rose-200 transition-colors disabled:opacity-50">🚨 Reset System</button>
+                             <button onClick={runCutoff} className="py-4 rounded-2xl bg-pink-100 text-pink-600 font-black uppercase text-[10px] tracking-widest border border-pink-200 hover:bg-pink-200 transition-colors hover:scale-105">🛑 Run Cutoff</button>
+                             <button onClick={resetSystem} disabled={isBtnLoading} className="py-4 rounded-2xl bg-rose-100 text-rose-600 font-black uppercase text-[10px] tracking-widest border border-rose-200 hover:bg-rose-200 transition-colors disabled:opacity-50 hover:scale-105">🚨 Reset System</button>
                            </div>
                         </section>
 
@@ -1608,7 +1648,7 @@ export default function App() {
                                  </div>
                                  <button onClick={() => {
                                    const newArr = [...settings.admins]; newArr.splice(idx, 1); updateSetting('admins', newArr);
-                                 }} className="text-rose-500 font-bold hover:text-rose-700 bg-white border border-rose-100 rounded-lg p-2">❌</button>
+                                 }} className="text-rose-500 font-bold hover:text-rose-700 bg-white border border-rose-100 rounded-lg p-2 hover:scale-110 transition-transform">❌</button>
                                </div>
                              ))}
                            </div>
@@ -1629,7 +1669,7 @@ export default function App() {
                                </div>
                              </div>
                              
-                             <button onClick={handleAddAdmin} className="bg-[#FF1493] text-white font-black uppercase tracking-widest py-3 rounded-xl text-xs hover:bg-[#D6006E] transition-colors shadow-md mt-2">➕ Save Admin</button>
+                             <button onClick={handleAddAdmin} className="bg-[#FF1493] text-white font-black uppercase tracking-widest py-3 rounded-xl text-xs hover:bg-[#D6006E] transition-colors shadow-md mt-2 hover:scale-[0.98]">➕ Save Admin</button>
                            </div>
                         </section>
 
@@ -1658,15 +1698,23 @@ export default function App() {
                         </section>
 
                         <section className="bg-white p-8 rounded-[32px] shadow-sm border-2 border-pink-50 space-y-4 md:col-span-2">
-                           <h3 className="font-black text-xs text-pink-600 uppercase tracking-[0.2em] border-b-2 border-pink-50 pb-3">Manage Products</h3>
+                           
+                           {/* ✨ NEW: Manage Products dedicated search bar */}
+                           <div className="flex justify-between items-center mb-4 border-b border-pink-100 pb-4 gap-4 flex-wrap">
+                             <h3 className="m-0 border-none p-0 font-black text-xs text-pink-600 uppercase tracking-[0.2em]">Manage Products <span className="text-[10px] text-pink-400 normal-case ml-2">({products.length} Total)</span></h3>
+                             <div className="relative w-full sm:w-auto min-w-[250px]">
+                               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-pink-400" size={14} />
+                               <input type="text" value={adminSettingsProductSearch} onChange={e => setAdminSettingsProductSearch(e.target.value)} placeholder="Search to edit product..." className={`${adminInputSm} pl-9 m-0`} />
+                             </div>
+                           </div>
                            
                            <div className="overflow-x-auto border-2 border-pink-100 rounded-xl mb-4 max-h-[300px] overflow-y-auto">
                             <table className="w-full text-sm text-left custom-table">
-                              <thead className="sticky top-0 shadow-sm bg-[#FFF0F5]">
+                              <thead className="sticky top-0 shadow-sm bg-[#FFF0F5] z-10">
                                 <tr><th>Name</th><th>Price (Vial)</th><th>Max Boxes</th><th>Status</th><th>Actions</th></tr>
                               </thead>
                               <tbody className="bg-white">
-                                {products.map(p => (
+                                {filteredSettingsProducts.map(p => (
                                   <tr key={p.id} className="border-b border-gray-100">
                                     <td className="font-bold text-[#4A042A]">{p.name}</td>
                                     <td className="text-[#D6006E] font-bold">${p.pricePerVialUSD.toFixed(2)}</td>
@@ -1674,15 +1722,16 @@ export default function App() {
                                       <input type="number" className="w-16 border-2 border-[#FFC0CB] rounded-lg p-1 text-center text-xs font-bold text-[#D6006E] outline-none" value={p.maxBoxes} onChange={e => safeAwait(setDoc(doc(db, colPath('products'), p.id), { maxBoxes: Number(e.target.value)||0 }, { merge: true }))}/>
                                     </td>
                                     <td>
-                                      <button onClick={()=>safeAwait(setDoc(doc(db, colPath('products'), p.id), { locked: !p.locked }, { merge: true }))} className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border-2 transition-all ${p.locked ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
+                                      <button onClick={()=>safeAwait(setDoc(doc(db, colPath('products'), p.id), { locked: !p.locked }, { merge: true }))} className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border-2 transition-all hover:scale-105 ${p.locked ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
                                         {p.locked ? 'LOCKED' : 'OPEN'}
                                       </button>
                                     </td>
                                     <td>
-                                      <button onClick={()=>safeAwait(deleteDoc(doc(db, colPath('products'), p.id)))} className="text-rose-500 font-bold hover:text-rose-700 text-xs uppercase tracking-widest">Remove</button>
+                                      <button onClick={()=>safeAwait(deleteDoc(doc(db, colPath('products'), p.id)))} className="text-rose-500 font-bold hover:text-rose-700 text-xs uppercase tracking-widest hover:scale-110 transition-transform">Remove</button>
                                     </td>
                                   </tr>
                                 ))}
+                                {filteredSettingsProducts.length === 0 && <tr><td colSpan="5" className="text-center p-8 text-pink-300 font-bold italic">No products found.</td></tr>}
                               </tbody>
                             </table>
                           </div>
@@ -1693,10 +1742,10 @@ export default function App() {
                               <p className="text-xs font-bold text-gray-500">Columns must match the template.<br/>⚠️ <span className="text-rose-500">Uploading replaces your current catalog!</span></p>
                             </div>
                             <div className="flex gap-2">
-                              <button onClick={downloadCSVTemplate} className="bg-white border-2 border-[#FFC0CB] text-[#D6006E] px-4 py-2 rounded-xl font-bold hover:bg-[#FFF0F5] transition-colors text-xs whitespace-nowrap">
+                              <button onClick={downloadCSVTemplate} className="bg-white border-2 border-[#FFC0CB] text-[#D6006E] px-4 py-2 rounded-xl font-bold hover:bg-[#FFF0F5] transition-colors text-xs whitespace-nowrap hover:scale-[0.98]">
                                 📥 Get Template
                               </button>
-                              <label className={`bg-[#D6006E] text-white px-4 py-2 rounded-xl font-bold cursor-pointer hover:bg-pink-700 transition-colors text-xs whitespace-nowrap shadow-md ${isBtnLoading ? 'opacity-50 pointer-events-none' : ''}`}>
+                              <label className={`bg-[#D6006E] text-white px-4 py-2 rounded-xl font-bold cursor-pointer hover:bg-pink-700 transition-colors text-xs whitespace-nowrap shadow-md hover:scale-[0.98] ${isBtnLoading ? 'opacity-50 pointer-events-none' : ''}`}>
                                 {isBtnLoading ? '⏳ Uploading...' : '📂 Upload CSV'}
                                 <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" disabled={isBtnLoading} />
                               </label>
@@ -1714,7 +1763,6 @@ export default function App() {
         )
       )}
 
-      {/* ✨ NEW: Customer Profile Modal (Used in both Shop & Admin views) */}
       {selectedProfileEmail && (() => {
         const profile = users.find(u => u.id === selectedProfileEmail.toLowerCase().trim()) || { id: selectedProfileEmail, name: 'Unknown Customer' };
         const curOrders = orders.filter(o => o.email === selectedProfileEmail.toLowerCase().trim());
@@ -1725,7 +1773,7 @@ export default function App() {
             <div className="bg-white rounded-[32px] w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
                <div className="bg-[#FFF0F5] p-5 flex justify-between items-center border-b-2 border-[#FFC0CB]">
                   <h2 className="brand-title text-2xl text-[#D6006E]">👤 Profile & History</h2>
-                  <button onClick={()=>setSelectedProfileEmail(null)} className="text-pink-600 font-black text-2xl hover:text-pink-800 transition-colors">&times;</button>
+                  <button onClick={()=>setSelectedProfileEmail(null)} className="text-pink-600 font-black text-2xl hover:text-pink-800 transition-colors hover:scale-110">&times;</button>
                </div>
                <div className="p-6 overflow-y-auto space-y-6 bg-slate-50">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
