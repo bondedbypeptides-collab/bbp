@@ -2,11 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, writeBatch } from 'firebase/firestore';
+import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { 
   ShieldCheck, Store, Settings, Info, LayoutDashboard, 
   BadgeDollarSign, Scissors, ClipboardList, Users, 
   Lock, Package, Search, ArrowRight, CreditCard, 
-  Home, LogOut, Trash2, ChevronRight, BookOpen
+  Home, LogOut, Trash2, ChevronRight, BookOpen, Printer, ImageIcon
 } from 'lucide-react';
 
 // --- FIREBASE SETUP ---
@@ -26,6 +27,7 @@ const firebaseConfig = isCanvas ? JSON.parse(__firebase_config) : userFirebaseCo
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app); 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const colPath = (name) => isCanvas ? `artifacts/${appId}/public/data/${name}` : name;
 
@@ -39,7 +41,6 @@ const CUTE_PLEAS = [
   "Help! I don't wanna be trimmed! 😭"
 ];
 
-// ✨ NEW: Comprehensive Peptide Wiki Data
 const WIKI_DATA = [
   { name: "Tirzepatide", tags: ["Weight Loss", "Blood Sugar"], desc: "A dual GIP and GLP-1 receptor agonist. Highly effective for weight management and metabolic health by reducing appetite and improving insulin sensitivity." },
   { name: "Retatrutide", tags: ["Weight Loss", "Metabolism"], desc: "A triple-agonist (GLP-1, GIP, Glucagon). An advanced compound currently showing unprecedented weight loss and liver fat reduction in trials." },
@@ -71,7 +72,7 @@ const WIKI_DATA = [
 const safeAwait = (promise, ms = 15000) => {
   return Promise.race([
     promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("Network timeout! Check your Firebase Firestore rules or internet connection.")), ms))
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Network timeout! Check your Firebase rules or connection.")), ms))
   ]);
 };
 
@@ -101,9 +102,12 @@ export default function App() {
   const [showPayModal, setShowPayModal] = useState(false);
   const [showHitListModal, setShowHitListModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
-  const [showWikiModal, setShowWikiModal] = useState(false); // ✨ NEW: Wiki Modal State
+  const [showWikiModal, setShowWikiModal] = useState(false); 
+  const [showAllProofsModal, setShowAllProofsModal] = useState(false);
   const [selectedProfileEmail, setSelectedProfileEmail] = useState(null);
   const [isBtnLoading, setIsBtnLoading] = useState(false);
+  const [proofFile, setProofFile] = useState(null);
+  const [hoveredProof, setHoveredProof] = useState(null);
   
   const [shakingField, setShakingField] = useState(null);
   const [shakingProd, setShakingProd] = useState(null);
@@ -141,13 +145,14 @@ export default function App() {
   const [cartItems, setCartItems] = useState({}); 
   const [addressForm, setAddressForm] = useState({ shipOpt: '', street: '', brgy: '', city: '', prov: '', zip: '', contact: '' });
   const [searchQuery, setSearchQuery] = useState('');
-  const [wikiSearchQuery, setWikiSearchQuery] = useState(''); // ✨ NEW: Wiki Search State
+  const [wikiSearchQuery, setWikiSearchQuery] = useState(''); 
   const [adminGlobalSearch, setAdminGlobalSearch] = useState('');
   const [adminSettingsProductSearch, setAdminSettingsProductSearch] = useState(''); 
 
   const [newProd, setNewProd] = useState({ name: '', kit: '', vial: '', max: '' });
   const [newAdmin, setNewAdmin] = useState({ name: '', bank1: '', qr1: '', bank2: '', qr2: '' });
 
+  // --- AUTHENTICATION ---
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -165,6 +170,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // --- DATA FETCHING ---
   useEffect(() => {
     if (!user) return;
     const unsubSettings = onSnapshot(collection(db, colPath('settings')), (snap) => { snap.forEach(d => { if (d.id === 'main') setSettings(d.data()); }); });
@@ -175,6 +181,7 @@ export default function App() {
     return () => { unsubSettings(); unsubProducts(); unsubOrders(); unsubUsers(); unsubHistory(); };
   }, [user]);
 
+  // --- DERIVED STATE ---
   const enrichedProducts = useMemo(() => {
     const productStats = {};
     orders.forEach(o => {
@@ -232,7 +239,7 @@ export default function App() {
         victims.push({
           id: row.id, prod: row.product, boxNum: openBoxNumbers[row.product], 
           missingSlots: 10 - (productStats[row.product] % 10),
-          name: row.name, email: row.email, qty: row.qty, amountToRemove
+          name: row.name, email: row.email, handle: row.handle, qty: row.qty, amountToRemove
         });
         toTrim[row.product] -= amountToRemove;
       }
@@ -256,7 +263,7 @@ export default function App() {
       });
       const tUSD = sub > 0 ? sub + (settings.adminFeePhp / settings.fxRate) : 0;
       const profile = users.find(u => u.id === c.email) || {};
-      return { ...c, totalPHP: tUSD * settings.fxRate, isPaid: profile.isPaid || false, adminAssigned: profile.adminAssigned || "Unassigned" };
+      return { ...c, totalPHP: tUSD * settings.fxRate, isPaid: profile.isPaid || false, adminAssigned: profile.adminAssigned || "Unassigned", proofUrl: profile.proofUrl || null, address: profile.address || null };
     });
   }, [orders, products, settings, users]);
 
@@ -289,7 +296,6 @@ export default function App() {
     return products.filter(p => !adminSettingsProductSearch || p.name.toLowerCase().includes(adminSettingsProductSearch.toLowerCase()));
   }, [products, adminSettingsProductSearch]);
 
-  // ✨ NEW: Filter Wiki Data
   const filteredWikiData = useMemo(() => {
     if (!wikiSearchQuery) return WIKI_DATA;
     const lowerQuery = wikiSearchQuery.toLowerCase();
@@ -317,12 +323,17 @@ export default function App() {
     return trimmingHitList.some(v => v.email === customerEmail.toLowerCase().trim());
   }, [trimmingHitList, customerEmail, settings.addOnly]);
 
+  // --- ACTIONS ---
   const triggerShake = (field) => {
     setShakingField(field);
     setTimeout(() => setShakingField(null), 500);
   };
 
-  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
+  // ✨ Added String() safety wrapper to prevent React Object crash
+  const showToast = (msg) => { 
+    setToast(String(msg)); 
+    setTimeout(() => setToast(null), 3000); 
+  };
 
   const handleAdminLogin = (e) => {
     if (e) e.preventDefault();
@@ -487,13 +498,88 @@ export default function App() {
   };
 
   const submitPayment = async () => {
-    if (!addressForm.shipOpt || !addressForm.street || !addressForm.city || !addressForm.contact) { showToast("Missing fields! 🏠"); return; }
+    if (!addressForm.shipOpt || !addressForm.street || !addressForm.city || !addressForm.prov || !addressForm.zip || !addressForm.contact) { 
+       showToast("Please fill all required shipping fields! 🏠"); return; 
+    }
+    if (!proofFile) {
+       showToast("Proof of payment image is required! 📸"); return;
+    }
+
     const emailLower = customerEmail.toLowerCase().trim();
+    setIsBtnLoading(true);
+    
     try {
-       await safeAwait(setDoc(doc(db, colPath('users'), emailLower), { address: addressForm, isPaid: true, proofUrl: 'mock_receipt.jpg' }, { merge: true }));
-       showToast("Payment submitted! ✅");
+       const fileExt = proofFile.name.split('.').pop();
+       const fileName = `${emailLower}_${Date.now()}.${fileExt}`;
+       const sRef = storageRef(storage, `${basePath}/proofs/${fileName}`);
+       
+       showToast("Uploading proof... ☁️");
+       await uploadBytesResumable(sRef, proofFile);
+       const downloadUrl = await getDownloadURL(sRef);
+       
+       await safeAwait(setDoc(doc(db, colPath('users'), emailLower), { 
+           address: addressForm, 
+           isPaid: true, 
+           proofUrl: downloadUrl 
+       }, { merge: true }));
+       
+       showToast("Payment submitted successfully! ✅");
        setShowPayModal(false);
-    } catch (err) { showToast("Error submitting payment."); }
+       setProofFile(null);
+    } catch (err) { 
+       console.error(err);
+       if (err.code === 'storage/unauthorized') {
+           showToast("Storage Error! Please check your Firebase Storage Rules.");
+       } else {
+           showToast("Error submitting payment."); 
+       }
+    }
+    setIsBtnLoading(false);
+  };
+
+  const generateLabels = () => {
+     const paidUsers = customerList.filter(c => c.isPaid && c.address?.street);
+     if (paidUsers.length === 0) { showToast("No paid users with valid addresses to print! ❌"); return; }
+     
+     let html = `
+     <html><head><title>Shipping Labels - ${settings.batchName}</title>
+     <style>
+       body { font-family: 'Helvetica Neue', Helvetica, sans-serif; padding: 20px; background: #f0f0f0; } 
+       .label-container { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; }
+       .label { background: white; border: 2px dashed #000; border-radius: 12px; padding: 20px; width: 400px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); page-break-inside: avoid; margin-bottom: 20px; } 
+       .label h2 { margin: 0 0 10px 0; border-bottom: 3px solid #D6006E; color: #000; padding-bottom: 5px; font-size: 24px; text-transform: uppercase; letter-spacing: 1px;} 
+       .meta { color: #666; font-size: 14px; margin-bottom: 15px; }
+       .address { background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 16px; line-height: 1.5; color: #000; }
+       .items { margin-top: 15px; } 
+       .items ul { padding-left: 20px; margin: 5px 0; font-size: 14px; }
+       .items li { margin-bottom: 4px; border-bottom: 1px solid #f0f0f0; padding-bottom: 2px; }
+       .footer { margin-top: 15px; text-align: center; font-size: 12px; color: #D6006E; font-weight: bold; border-top: 1px solid #eee; padding-top: 10px;}
+       @media print { body { background: white; padding: 0; } .label-container { gap: 10px; justify-content: flex-start; } .label { box-shadow: none; border: 1px solid #000; } }
+     </style></head><body>
+     <div class="label-container">`;
+     
+     paidUsers.forEach(c => {
+        const userOrders = orders.filter(o => o.email === c.email);
+        html += `<div class="label">
+            <h2>${c.name}</h2>
+            <div class="meta">Handle: <strong>${c.handle || 'N/A'}</strong><br/>Email: ${c.email}</div>
+            <div class="address">
+               <strong>📦 Ship via: ${c.address.shipOpt}</strong><br/><br/>
+               ${c.address.street}<br/>
+               ${c.address.brgy ? `${c.address.brgy}, ` : ''}${c.address.city}<br/>
+               ${c.address.prov} ${c.address.zip}<br/><br/>
+               📞 <strong>${c.address.contact}</strong>
+            </div>
+            <div class="items"><strong>Order Contents:</strong><ul>`;
+        userOrders.forEach(o => { html += `<li><strong>${o.qty}x</strong> ${o.product}</li>`; });
+        html += `</ul></div><div class="footer">Bonded By Peptides • ${settings.batchName}</div></div>`;
+     });
+     
+     html += '</div></body></html>';
+     const win = window.open('', '_blank');
+     win.document.write(html);
+     win.document.close();
+     setTimeout(() => win.print(), 1000);
   };
 
   const updateSetting = async (field, val) => {
@@ -588,115 +674,7 @@ export default function App() {
       await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), settings));
       const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
 
-      const fullProductList = [
-        { name: "5-amino-1mq 5mg", kit: 60, vial: 6 },
-        { name: "5-amino-1mq 50mg", kit: 80, vial: 8 },
-        { name: "AA Water 10 ml", kit: 10, vial: 1 },
-        { name: "AA Water 3 ml", kit: 8, vial: 0.8 },
-        { name: "AHKCU 100mg", kit: 65, vial: 6.5 },
-        { name: "AICAR", kit: 60, vial: 6 },
-        { name: "AOD 9604", kit: 95, vial: 9.5 },
-        { name: "ARA290 10mg", kit: 70, vial: 7 },
-        { name: "Bacteriostatic Water 10ml", kit: 14, vial: 1.4 },
-        { name: "Bacteriostatic Water 3ml", kit: 5, vial: 0.5 },
-        { name: "Bacteriostatic Water 5ml", kit: 9, vial: 0.9 },
-        { name: "BPC157 5mg", kit: 40, vial: 4 },
-        { name: "BPC157 10mg", kit: 70, vial: 7 },
-        { name: "Cagri-Sema 10g", kit: 190, vial: 19 },
-        { name: "Cagri-Sema 5g", kit: 100, vial: 10 },
-        { name: "Cagrilintide 10mg", kit: 150, vial: 15 },
-        { name: "Cagrilintide 5mg", kit: 90, vial: 9 },
-        { name: "Cerebrolysin 60mg", kit: 50, vial: 8.4 },
-        { name: "CJC No DAC 5mg + IPA5mg blend", kit: 85, vial: 8.5 },
-        { name: "CJC-1295 with DAC 5 mg", kit: 130, vial: 13 },
-        { name: "CJC-1295 No DAC 5mg", kit: 68, vial: 6.8 },
-        { name: "CJC-1295 No DAC 10mg", kit: 130, vial: 13 },
-        { name: "DSIP 5mg", kit: 32, vial: 3.2 },
-        { name: "Epithalon 10mg", kit: 45, vial: 4.5 },
-        { name: "Epithalon 50mg", kit: 120, vial: 12 },
-        { name: "GHKCU Powder 1 gram", kit: 60, vial: 6 },
-        { name: "GHK-Cu 100mg", kit: 48, vial: 4.8 },
-        { name: "GHK-Cu 50mg", kit: 24, vial: 2.4 },
-        { name: "GHRP-2 Acetate 5mg", kit: 20, vial: 2 },
-        { name: "GHRP-2 Acetate 10mg", kit: 40, vial: 4 },
-        { name: "GKP70", kit: 140, vial: 14 },
-        { name: "GLOW 50mg", kit: 160, vial: 16 },
-        { name: "GLOW 70mg", kit: 180, vial: 18 },
-        { name: "Glutathione 1500mg", kit: 85, vial: 8.5 },
-        { name: "HHB", kit: 210, vial: 21 },
-        { name: "HCG 10000IU", kit: 120, vial: 12 },
-        { name: "HCG 5000IU", kit: 60, vial: 6 },
-        { name: "HGH 191AA (Somatropin) (Customized Order) 10 iu", kit: 50, vial: 5 },
-        { name: "HGH 191AA (Somatropin) (Customized Order) 15 iu", kit: 70, vial: 7 },
-        { name: "IGF-1LR3", kit: 190, vial: 19 },
-        { name: "Ipamorelin 5mg", kit: 30, vial: 3 },
-        { name: "Ipamorelin 10mg", kit: 50, vial: 5 },
-        { name: "KissPeptin-10 5mg", kit: 48, vial: 4.8 },
-        { name: "KissPeptin-10 10mg", kit: 90, vial: 9 },
-        { name: "KLOW BPC 10mg+Tb500 10mg+GHK-Cu50mg+KPV10mg", kit: 220, vial: 22 },
-        { name: "KPV 5mg", kit: 35, vial: 3.5 },
-        { name: "KPV 10mg", kit: 55, vial: 5.5 },
-        { name: "L-carnatine 500mg/vial", kit: 80, vial: 8 },
-        { name: "Lemon Bottle 10ml", kit: 70, vial: 7 },
-        { name: "Lipo-C 120mg", kit: 70, vial: 7 },
-        { name: "Lipo-C 216mg", kit: 90, vial: 9 },
-        { name: "Lipo-C Fat Blaster", kit: 110, vial: 11 },
-        { name: "MOTS-c 10mg", kit: 50, vial: 5 },
-        { name: "MOTS-c 40mg", kit: 190, vial: 19 },
-        { name: "NAD+ 100mg", kit: 50, vial: 5 },
-        { name: "NAD+ 500mg", kit: 70, vial: 7 },
-        { name: "Oxytocin Acetate*2mg", kit: 24, vial: 2.4 },
-        { name: "Pharma Bac", kit: 8.5, vial: 0.85 },
-        { name: "Pinealon 10 mg", kit: 64, vial: 6.4 },
-        { name: "Pinealon 20 mg", kit: 95, vial: 9.5 },
-        { name: "Pinealon 5 mg", kit: 40, vial: 4 },
-        { name: "PT-141 10 mg", kit: 62, vial: 6.2 },
-        { name: "Retatrutide 5mg", kit: 68, vial: 6.8 },
-        { name: "Retatrutide 10mg", kit: 100, vial: 10 },
-        { name: "Retatrutide 15mg", kit: 140, vial: 14 },
-        { name: "Retatrutide 20mg", kit: 170, vial: 17 },
-        { name: "Retatrutide 24mg", kit: 190, vial: 19 },
-        { name: "Retatrutide 30mg", kit: 245, vial: 24.5 },
-        { name: "Retatrutide 36mg", kit: 260, vial: 26 },
-        { name: "Retatrutide 40mg", kit: 330, vial: 33 },
-        { name: "Retatrutide 50mg", kit: 375, vial: 37.5 },
-        { name: "Retatrutide 60mg", kit: 390, vial: 39 },
-        { name: "Selank 5mg", kit: 40, vial: 4 },
-        { name: "Selank 11mg", kit: 75, vial: 7.5 },
-        { name: "Semaglutide 5mg", kit: 38, vial: 3.8 },
-        { name: "Semaglutide 10mg", kit: 52, vial: 5.2 },
-        { name: "Semaglutide 15mg", kit: 68, vial: 6.8 },
-        { name: "Semaglutide 20mg", kit: 90, vial: 9 },
-        { name: "Semaglutide 30mg", kit: 116, vial: 11.6 },
-        { name: "Semax 5mg", kit: 35, vial: 3.5 },
-        { name: "Semax 11mg", kit: 53, vial: 5.3 },
-        { name: "Sermorelin Acetate 5mg", kit: 50, vial: 5 },
-        { name: "SLU-PP-332", kit: 140, vial: 14 },
-        { name: "Snap-8 10mg", kit: 45, vial: 4.5 },
-        { name: "SS-31 10mg", kit: 70, vial: 7 },
-        { name: "SS-31 50mg", kit: 340, vial: 34 },
-        { name: "TB10mg+BPC10mg blend", kit: 160, vial: 16 },
-        { name: "TB500 10mg", kit: 130, vial: 13 },
-        { name: "TB500 5mg", kit: 65, vial: 6.5 },
-        { name: "TB5mg+BPC 5mg blend", kit: 80, vial: 8 },
-        { name: "Tesamorelin 5mg", kit: 90, vial: 9 },
-        { name: "Tesamorelin 10mg", kit: 170, vial: 17 },
-        { name: "Tesamorelin 15mg", kit: 230, vial: 23 },
-        { name: "Thymalin 10mg", kit: 48, vial: 4.8 },
-        { name: "Thymosin Alpha-1 5mg", kit: 78, vial: 7.8 },
-        { name: "Thymosin Alpha-1 10mg", kit: 155, vial: 15.5 },
-        { name: "Tirzepatide 5mg", kit: 40, vial: 4 },
-        { name: "Tirzepatide 10mg", kit: 62, vial: 6.2 },
-        { name: "Tirzepatide 15mg", kit: 75, vial: 7.5 },
-        { name: "Tirzepatide 20mg", kit: 90, vial: 9 },
-        { name: "Tirzepatide 30mg", kit: 115, vial: 11.5 },
-        { name: "Tirzepatide 40mg", kit: 145, vial: 14.5 },
-        { name: "Tirzepatide 45mg", kit: 160, vial: 16 },
-        { name: "Tirzepatide 50mg", kit: 170, vial: 17 },
-        { name: "Tirzepatide 60mg", kit: 200, vial: 20 },
-        { name: "VP5mg", kit: 80, vial: 8 },
-        { name: "VP10mg", kit: 150, vial: 15 }
-      ];
+      const fullProductList = WIKI_DATA.map(w => ({ name: w.name, kit: 100, vial: 10 })); 
 
       for (const chunk of chunkArray(products, 250)) {
         const batch = writeBatch(db);
@@ -719,115 +697,7 @@ export default function App() {
         await safeAwait(batch.commit());
       }
 
-      const MOCK_ORDERS = [
-        { email: 'nglln.sdr25@gmail.com', name: 'Angelyn Dela Rosa', handle: 'looms', product: 'Retatrutide 20mg', qty: 5 },
-        { email: 'vinamarie.t@gmail.com', name: 'Vina Marie Trinidad', handle: 'Inah.T', product: 'Bacteriostatic Water 3ml', qty: 90 },
-        { email: 'vinamarie.t@gmail.com', name: 'Vina Marie Trinidad', handle: 'Inah.T', product: 'Tirzepatide 15mg', qty: 10 },
-        { email: 'vinamarie.t@gmail.com', name: 'Vina Marie Trinidad', handle: 'Inah.T', product: 'Tirzepatide 30mg', qty: 20 },
-        { email: 'gaizelanne.ella@gmail.com', name: 'Gaizel Anne Ella', handle: '@ms.gie28', product: 'GHK-Cu 50mg', qty: 2 },
-        { email: 'gaizelanne.ella@gmail.com', name: 'Gaizel Anne Ella', handle: '@ms.gie28', product: 'Lipo-C 120mg', qty: 2 },
-        { email: 'gaizelanne.ella@gmail.com', name: 'Gaizel Anne Ella', handle: '@ms.gie28', product: 'Retatrutide 10mg', qty: 2 },
-        { email: 'vinamarie.t@gmail.com', name: 'Vina Marie Trinidad', handle: 'Inah.T', product: '5-amino-1mq 50mg', qty: 5 },
-        { email: 'vinamarie.t@gmail.com', name: 'Vina Marie Trinidad', handle: 'Inah.T', product: 'GHK-Cu 50mg', qty: 10 },
-        { email: 'vinamarie.t@gmail.com', name: 'Vina Marie Trinidad', handle: 'Inah.T', product: 'Bacteriostatic Water 3ml', qty: 10 },
-        { email: 'hazel.cabundoc@gmail.com', name: 'Love Cabundoc', handle: 'LOVE / ILYLOVEC', product: 'Bacteriostatic Water 3ml', qty: 10 },
-        { email: 'hazel.cabundoc@gmail.com', name: 'Love Cabundoc', handle: 'LOVE / ILYLOVEC', product: 'Tirzepatide 15mg', qty: 6 },
-        { email: 'hazel.cabundoc@gmail.com', name: 'Love Cabundoc', handle: 'LOVE / ILYLOVEC', product: 'Tirzepatide 20mg', qty: 10 },
-        { email: 'marieletish@gmail.com', name: 'Let Miranda', handle: 'heyyy.ish', product: 'Cagrilintide 5mg', qty: 2 },
-        { email: 'marieletish@gmail.com', name: 'Let Miranda', handle: 'heyyy.ish', product: 'Lipo-C 120mg', qty: 2 },
-        { email: 'marieletish@gmail.com', name: 'Let Miranda', handle: 'heyyy.ish', product: 'Retatrutide 10mg', qty: 3 },
-        { email: 'vinamarie.t@gmail.com', name: 'Vina Marie Trinidad', handle: 'Inah.T', product: 'Pharma Bac', qty: 10 },
-        { email: 'jalexander1111999@gmail.com', name: 'Jean Marie Alexander', handle: 'JM A', product: '5-amino-1mq 50mg', qty: 5 },
-        { email: 'jalexander1111999@gmail.com', name: 'Jean Marie Alexander', handle: 'JM A', product: 'AOD 9604', qty: 5 },
-        { email: 'jalexander1111999@gmail.com', name: 'Jean Marie Alexander', handle: 'JM A', product: 'Bacteriostatic Water 3ml', qty: 100 },
-        { email: 'jalexander1111999@gmail.com', name: 'Jean Marie Alexander', handle: 'JM A', product: 'Cagrilintide 10mg', qty: 5 },
-        { email: 'jalexander1111999@gmail.com', name: 'Jean Marie Alexander', handle: 'JM A', product: 'Retatrutide 10mg', qty: 5 },
-        { email: 'jalexander1111999@gmail.com', name: 'Jean Marie Alexander', handle: 'JM A', product: 'Tirzepatide 15mg', qty: 25 },
-        { email: 'jalexander1111999@gmail.com', name: 'Jean Marie Alexander', handle: 'JM A', product: 'Tirzepatide 20mg', qty: 5 },
-        { email: 'jalexander1111999@gmail.com', name: 'Jean Marie Alexander', handle: 'JM A', product: 'Tirzepatide 30mg', qty: 25 },
-        { email: 'ebronamita@gmail.com', name: 'Amita Ebron', handle: 'Amii', product: 'Glutathione 1500mg', qty: 2 },
-        { email: 'ebronamita@gmail.com', name: 'Amita Ebron', handle: 'Amii', product: 'KPV 10mg', qty: 3 },
-        { email: 'ebronamita@gmail.com', name: 'Amita Ebron', handle: 'Amii', product: 'PT-141 10 mg', qty: 2 },
-        { email: 'ebronamita@gmail.com', name: 'Amita Ebron', handle: 'Amii', product: 'Retatrutide 5mg', qty: 3 },
-        { email: 'ebronamita@gmail.com', name: 'Amita Ebron', handle: 'Amii', product: 'Retatrutide 10mg', qty: 2 },
-        { email: 'crishleyva@gmail.com', name: 'Kim Crisha Leyva', handle: '@Mikavyel', product: 'MOTS-c 10mg', qty: 3 },
-        { email: 'crishleyva@gmail.com', name: 'Kim Crisha Leyva', handle: '@Mikavyel', product: 'Pharma Bac', qty: 10 },
-        { email: 'karenlucillescabusa@gmail.com', name: 'Karen Lucille Escabusa', handle: '@iyenamazing', product: 'AHKCU 100mg', qty: 3 },
-        { email: 'karenlucillescabusa@gmail.com', name: 'Karen Lucille Escabusa', handle: '@iyenamazing', product: 'AOD 9604', qty: 2 },
-        { email: 'karenlucillescabusa@gmail.com', name: 'Karen Lucille Escabusa', handle: '@iyenamazing', product: 'DSIP 5mg', qty: 2 },
-        { email: 'karenlucillescabusa@gmail.com', name: 'Karen Lucille Escabusa', handle: '@iyenamazing', product: 'GHK-Cu 100mg', qty: 3 },
-        { email: 'karenlucillescabusa@gmail.com', name: 'Karen Lucille Escabusa', handle: '@iyenamazing', product: 'Glutathione 1500mg', qty: 3 },
-        { email: 'karenlucillescabusa@gmail.com', name: 'Karen Lucille Escabusa', handle: '@iyenamazing', product: 'Pharma Bac', qty: 5 },
-        { email: 'karenlucillescabusa@gmail.com', name: 'Karen Lucille Escabusa', handle: '@iyenamazing', product: 'SLU-PP-332', qty: 2 },
-        { email: 'karenlucillescabusa@gmail.com', name: 'Karen Lucille Escabusa', handle: '@iyenamazing', product: 'Snap-8 10mg', qty: 3 },
-        { email: 'ebronamita@gmail.com', name: 'Amita Ebron', handle: 'Amii', product: 'Pharma Bac', qty: 5 },
-        { email: 'clarizza.garcia1@gmail.com', name: 'Clarizza Garcia', handle: 'Fugazzi', product: 'Bacteriostatic Water 3ml', qty: 10 },
-        { email: 'clarizza.garcia1@gmail.com', name: 'Clarizza Garcia', handle: 'Fugazzi', product: 'CJC No DAC 5mg + IPA5mg blend', qty: 2 },
-        { email: 'clarizza.garcia1@gmail.com', name: 'Clarizza Garcia', handle: 'Fugazzi', product: 'KPV 10mg', qty: 4 },
-        { email: 'clarizza.garcia1@gmail.com', name: 'Clarizza Garcia', handle: 'Fugazzi', product: 'Retatrutide 10mg', qty: 2 },
-        { email: 'arazoerika03@gmail.com', name: 'Erika Arazo', handle: 'gabdlp25', product: 'Bacteriostatic Water 3ml', qty: 10 },
-        { email: 'arazoerika03@gmail.com', name: 'Erika Arazo', handle: 'gabdlp25', product: 'Tirzepatide 20mg', qty: 10 },
-        { email: 'antonetteperido@gmail.com', name: 'Maan Perido', handle: 'MaanP', product: '5-amino-1mq 50mg', qty: 3 },
-        { email: 'antonetteperido@gmail.com', name: 'Maan Perido', handle: 'MaanP', product: 'Bacteriostatic Water 3ml', qty: 10 },
-        { email: 'antonetteperido@gmail.com', name: 'Maan Perido', handle: 'MaanP', product: 'Snap-8 10mg', qty: 5 },
-        { email: 'svcafino@gmail.com', name: 'Steffany Cafino', handle: 'LaChica', product: 'Bacteriostatic Water 3ml', qty: 10 },
-        { email: 'svcafino@gmail.com', name: 'Steffany Cafino', handle: 'LaChica', product: 'Tirzepatide 30mg', qty: 10 },
-        { email: 'veronicacmdrvmendoza@gmail.con', name: 'Veronica Christiane Marie V Mendoza', handle: 'NikkiVMen', product: 'Tirzepatide 15mg', qty: 2 },
-        { email: 'jenellenival25@gmail.com', name: 'Jenelle Patricia Nival', handle: '@notjen', product: 'AHKCU 100mg', qty: 2 },
-        { email: 'jenellenival25@gmail.com', name: 'Jenelle Patricia Nival', handle: '@notjen', product: 'Tirzepatide 45mg', qty: 2 },
-        { email: 'jenellenival25@gmail.com', name: 'Jenelle Patricia Nival', handle: '@notjen', product: 'AOD 9604', qty: 2 },
-        { email: 'chechiecarlos@gmail.com', name: 'Cecile Carlos', handle: '@cheeky25', product: 'Bacteriostatic Water 10ml', qty: 10 },
-        { email: 'chechiecarlos@gmail.com', name: 'Cecile Carlos', handle: '@cheeky25', product: 'GHK-Cu 50mg', qty: 2 },
-        { email: 'chechiecarlos@gmail.com', name: 'Cecile Carlos', handle: '@cheeky25', product: 'KPV 10mg', qty: 2 },
-        { email: 'chechiecarlos@gmail.com', name: 'Cecile Carlos', handle: '@cheeky25', product: 'NAD+ 500mg', qty: 2 },
-        { email: 'chechiecarlos@gmail.com', name: 'Cecile Carlos', handle: '@cheeky25', product: 'Pharma Bac', qty: 10 },
-        { email: 'chechiecarlos@gmail.com', name: 'Cecile Carlos', handle: '@cheeky25', product: 'Selank 5mg', qty: 2 },
-        { email: 'chechiecarlos@gmail.com', name: 'Cecile Carlos', handle: '@cheeky25', product: 'Semax 5mg', qty: 2 },
-        { email: 'chechiecarlos@gmail.com', name: 'Cecile Carlos', handle: '@cheeky25', product: 'Thymosin Alpha-1 10mg', qty: 3 },
-        { email: 'chechiecarlos@gmail.com', name: 'Cecile Carlos', handle: '@cheeky25', product: 'Tirzepatide 30mg', qty: 3 },
-        { email: 'ciara.albino92@gmail.com', name: 'Ciara Dawn Albino', handle: 'Cici', product: 'AOD 9604', qty: 2 },
-        { email: 'ciara.albino92@gmail.com', name: 'Ciara Dawn Albino', handle: 'Cici', product: 'KPV 10mg', qty: 2 },
-        { email: 'ciara.albino92@gmail.com', name: 'Ciara Dawn Albino', handle: 'Cici', product: 'Lipo-C 120mg', qty: 2 },
-        { email: 'ciara.albino92@gmail.com', name: 'Ciara Dawn Albino', handle: 'Cici', product: 'MOTS-c 10mg', qty: 3 },
-        { email: 'ciara.albino92@gmail.com', name: 'Ciara Dawn Albino', handle: 'Cici', product: 'SS-31 10mg', qty: 3 },
-        { email: 'ciara.albino92@gmail.com', name: 'Ciara Dawn Albino', handle: 'Cici', product: 'Tirzepatide 30mg', qty: 10 },
-        { email: 'jalexander1111999@gmail.com', name: 'Jean Marie Alexander', handle: 'JM A', product: 'AOD 9604', qty: 5 },
-        { email: 'maryannsoliscatalan@gmail.com', name: 'Mary Ann Catalan', handle: '@itsmhean', product: 'Bacteriostatic Water 3ml', qty: 10 },
-        { email: 'maryannsoliscatalan@gmail.com', name: 'Mary Ann Catalan', handle: '@itsmhean', product: 'KissPeptin-10 10mg', qty: 5 },
-        { email: 'maryannsoliscatalan@gmail.com', name: 'Mary Ann Catalan', handle: '@itsmhean', product: 'Tirzepatide 30mg', qty: 10 },
-        { email: 'cdmentrada@gmail.com', name: 'Clarice', handle: 'ClaDia', product: 'CJC No DAC 5mg + IPA5mg blend', qty: 2 },
-        { email: 'cdmentrada@gmail.com', name: 'Clarice', handle: 'ClaDia', product: 'Epithalon 10mg', qty: 6 },
-        { email: 'cdmentrada@gmail.com', name: 'Clarice', handle: 'ClaDia', product: 'Pharma Bac', qty: 10 },
-        { email: 'cdmentrada@gmail.com', name: 'Clarice', handle: 'ClaDia', product: 'Retatrutide 30mg', qty: 2 },
-        { email: 'cdmentrada@gmail.com', name: 'Clarice', handle: 'ClaDia', product: 'Selank 5mg', qty: 2 },
-        { email: 'cdmentrada@gmail.com', name: 'Clarice', handle: 'ClaDia', product: 'Semax 5mg', qty: 2 },
-        { email: 'cdmentrada@gmail.com', name: 'Clarice', handle: 'ClaDia', product: 'Thymosin Alpha-1 5mg', qty: 2 },
-        { email: '0429jmdantes@gmail.com', name: 'JM Dantes', handle: 'JM Dantes', product: 'GHK-Cu 100mg', qty: 5 },
-        { email: '0429jmdantes@gmail.com', name: 'JM Dantes', handle: 'JM Dantes', product: 'NAD+ 100mg', qty: 5 },
-        { email: 'jyamwilliams@gmail.com', name: 'Hannah Santos', handle: 'xxfelina_', product: 'Bacteriostatic Water 3ml', qty: 35 },
-        { email: 'jyamwilliams@gmail.com', name: 'Hannah Santos', handle: 'xxfelina_', product: 'Pharma Bac', qty: 5 },
-        { email: 'jyamwilliams@gmail.com', name: 'Hannah Santos', handle: 'xxfelina_', product: 'Tirzepatide 15mg', qty: 5 },
-        { email: 'jyamwilliams@gmail.com', name: 'Hannah Santos', handle: 'xxfelina_', product: 'Tirzepatide 20mg', qty: 10 },
-        { email: 'jyamwilliams@gmail.com', name: 'Hannah Santos', handle: 'xxfelina_', product: 'Tirzepatide 30mg', qty: 15 },
-        { email: 'icah_sulat@yahoo.com', name: 'April Sulat', handle: 'lavander_bunny_', product: 'Pharma Bac', qty: 2 }
-      ];
-
-      for (const chunk of chunkArray(MOCK_ORDERS, 150)) {
-         const batch = writeBatch(db);
-         chunk.forEach(o => {
-            let assignedAdmin = settings.admins[Math.floor(Math.random() * settings.admins.length)]?.name || "Admin";
-            batch.set(doc(db, colPath('users'), o.email.toLowerCase()), { 
-               name: o.name, handle: o.handle, adminAssigned: assignedAdmin, 
-               address: { shipOpt: 'Lalamove', street: '123 Test St', city: 'Makati', contact: '09171234567' }
-            }, { merge: true });
-            batch.set(doc(collection(db, colPath('orders'))), { 
-               email: o.email.toLowerCase(), name: o.name, handle: o.handle, product: o.product, qty: o.qty, timestamp: Date.now() 
-            });
-         });
-         await safeAwait(batch.commit());
-      }
-
-      showToast("Massive Product & Mock Order List Seeded! 🎉");
+      showToast("Products Seeded! 🎉");
     } catch(err) {
       console.error(err);
       showToast(`❌ Error seeding: ${err.message}`);
@@ -1011,9 +881,13 @@ export default function App() {
         }
         .animate-shake { animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both; }
         
-        .brand-title, .brand-title * { 
-          font-family: 'Pacifico', cursive !important; 
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
         }
+        .animate-fadeIn { animation: fadeIn 0.2s ease-out forwards; }
+
+        .brand-title, .brand-title * { font-family: 'Pacifico', cursive !important; }
         .brand-title { transform: rotate(-2deg); text-shadow: 2px 2px 0px rgba(0,0,0,0.1); }
         .glass-card { background: white; border: 2px solid #FF1493; border-radius: 1.5rem; }
         .hide-scroll::-webkit-scrollbar { display: none; }
@@ -1024,10 +898,22 @@ export default function App() {
         .custom-table td { padding: 1rem; border-bottom: 1px solid #FFE4E1; font-weight: 600; font-size: 13px; }
       `}} />
 
+      {/* ✨ NEW: Sticky Top Header for Wiki & Admin */}
+      <div className="fixed top-2 right-2 sm:top-4 sm:right-4 z-[60] flex gap-2">
+        <button onClick={()=>setShowWikiModal(true)} className="bg-white/90 backdrop-blur-md text-[#D6006E] border-2 border-pink-200 px-3 sm:px-4 py-2 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-widest shadow-md flex items-center gap-1.5 hover:bg-white hover:scale-105 transition-all">
+           <BookOpen size={14}/> <span className="hidden sm:inline">Peptide</span> Wiki
+        </button>
+        {view === 'shop' && (
+          <button onClick={()=>setView('admin')} className="bg-[#4A042A]/90 backdrop-blur-md text-white border-2 border-[#4A042A] px-3 sm:px-4 py-2 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-widest shadow-md flex items-center gap-1.5 hover:bg-[#4A042A] hover:scale-105 transition-all">
+             <Lock size={14}/> Admin
+          </button>
+        )}
+      </div>
+
       {view === 'shop' ? (
         <div className="min-h-screen w-full text-[#4A042A] pb-24 lg:pb-8 selection:bg-pink-300" style={{ background: 'linear-gradient(135deg, #FFC3EB 0%, #FF8EBD 100%)', backgroundAttachment: 'fixed' }}>
-          <div className="w-full max-w-[1600px] mx-auto p-4 pt-6 relative">
-            <h1 className="brand-title text-3xl sm:text-5xl text-center text-white mb-2 flex items-center justify-center gap-3">
+          <div className="w-full max-w-[1600px] mx-auto p-4 pt-12 sm:pt-6 relative">
+            <h1 className="brand-title text-3xl sm:text-5xl text-center text-white mb-2 flex items-center justify-center gap-3 mt-4 sm:mt-0">
               ✨ Bonded <span className="text-sm font-black uppercase tracking-widest text-white/80 transform translate-y-2" style={{fontFamily: "'Quicksand', sans-serif !important"}}>by</span> Peptides ✨
             </h1>
             <div className="text-center mb-8">
@@ -1242,16 +1128,8 @@ export default function App() {
             </div>
           )}
 
-          {/* ✨ NEW: Always Accessible Wiki Button */}
-          <button onClick={()=>setShowWikiModal(true)} className="fixed bottom-24 lg:bottom-6 left-4 bg-white text-[#D6006E] px-4 sm:px-5 py-3 rounded-full font-bold text-xs uppercase tracking-widest shadow-xl z-[40] flex items-center gap-2 hover:scale-105 transition-transform border-2 border-pink-200">
-             <BookOpen size={16}/> <span className="hidden sm:inline">Peptide</span> Wiki
-          </button>
+          {/* ✨ MODALS FOR SHOP */}
 
-          <button onClick={()=>setView('admin')} className="fixed bottom-24 lg:bottom-6 right-4 bg-[#4A042A] text-white px-4 sm:px-5 py-3 rounded-full font-bold text-xs uppercase tracking-widest shadow-xl z-[40] flex items-center gap-2 hover:scale-105 transition-transform">
-             <Lock size={14}/> Admin
-          </button>
-
-          {/* Modals for Shop View */}
           {showPayModal && (
             <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
                <div className="bg-white rounded-[32px] w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
@@ -1268,32 +1146,34 @@ export default function App() {
                            const assignedAdminName = customerList.find(c => c.email === customerEmail.toLowerCase().trim())?.adminAssigned || "Admin";
                            const adminObj = settings.admins.find(a => a.name === assignedAdminName) || settings.admins[0];
                            
+                           const hash = customerEmail.toLowerCase().trim().split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+                           const useOption1 = (adminObj.bank2 || adminObj.qr2) ? (hash % 2 === 0) : true;
+                           
                            return (
                              <div>
                                <p className="font-bold text-emerald-900 mb-3">{adminObj?.name || "Admin"}</p>
                                
-                               <div className="space-y-4">
-                                 {(adminObj?.bank1 || adminObj?.qr1) && (
-                                   <div className="bg-white p-3 rounded-xl border border-emerald-100 shadow-sm">
-                                      <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-2 border-b border-emerald-50 pb-1">Option 1</p>
-                                      {adminObj.qr1 ? (
-                                        <img src={adminObj.qr1} alt="QR Code 1" className="w-full max-w-[200px] mx-auto rounded-lg" />
-                                      ) : (
-                                        <pre className="font-mono text-xs text-emerald-700 whitespace-pre-wrap">{adminObj.bank1}</pre>
-                                      )}
-                                   </div>
-                                 )}
-                                 {(adminObj?.bank2 || adminObj?.qr2) && (
-                                   <div className="bg-white p-3 rounded-xl border border-emerald-100 shadow-sm">
-                                      <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-2 border-b border-emerald-50 pb-1">Option 2</p>
-                                      {adminObj.qr2 ? (
-                                        <img src={adminObj.qr2} alt="QR Code 2" className="w-full max-w-[200px] mx-auto rounded-lg" />
-                                      ) : (
-                                        <pre className="font-mono text-xs text-emerald-700 whitespace-pre-wrap">{adminObj.bank2}</pre>
-                                      )}
-                                   </div>
-                                 )}
-                               </div>
+                               {useOption1 && (adminObj?.bank1 || adminObj?.qr1) && (
+                                 <div className="bg-white p-3 rounded-xl border border-emerald-100 shadow-sm">
+                                    <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-2 border-b border-emerald-50 pb-1">Option 1</p>
+                                    {adminObj.qr1 ? (
+                                      <img src={adminObj.qr1} alt="QR Code" className="w-full max-w-[200px] mx-auto rounded-lg" />
+                                    ) : (
+                                      <pre className="font-mono text-xs text-emerald-700 whitespace-pre-wrap">{adminObj.bank1}</pre>
+                                    )}
+                                 </div>
+                               )}
+
+                               {!useOption1 && (adminObj?.bank2 || adminObj?.qr2) && (
+                                 <div className="bg-white p-3 rounded-xl border border-emerald-100 shadow-sm">
+                                    <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-2 border-b border-emerald-50 pb-1">Option 2</p>
+                                    {adminObj.qr2 ? (
+                                      <img src={adminObj.qr2} alt="QR Code" className="w-full max-w-[200px] mx-auto rounded-lg" />
+                                    ) : (
+                                      <pre className="font-mono text-xs text-emerald-700 whitespace-pre-wrap">{adminObj.bank2}</pre>
+                                    )}
+                                 </div>
+                               )}
                              </div>
                            );
                         })()}
@@ -1307,16 +1187,26 @@ export default function App() {
                         <input type="text" value={addressForm.street} onChange={e=>setAddressForm({...addressForm, street:e.target.value})} className={originalInput} placeholder="Street & Barangay" />
                         <div className="grid grid-cols-2 gap-3">
                           <input type="text" value={addressForm.city} onChange={e=>setAddressForm({...addressForm, city:e.target.value})} className={originalInput} placeholder="City" />
+                          <input type="text" value={addressForm.prov} onChange={e=>setAddressForm({...addressForm, prov:e.target.value})} className={originalInput} placeholder="Province" />
+                          <input type="text" value={addressForm.zip} onChange={e=>setAddressForm({...addressForm, zip:e.target.value})} className={originalInput} placeholder="Zip Code" />
                           <input type="text" value={addressForm.contact} onChange={e=>setAddressForm({...addressForm, contact:e.target.value})} className={originalInput} placeholder="Contact #" />
                         </div>
                      </div>
+                     
+                     <div className="bg-pink-50 p-4 rounded-2xl border-2 dashed border-pink-200">
+                        <label className="block text-[10px] font-black text-[#D6006E] uppercase mb-2">📸 Upload Proof of Payment</label>
+                        <input type="file" accept="image/*" onChange={(e) => setProofFile(e.target.files[0])} className="w-full text-xs font-bold text-pink-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-black file:bg-[#FF1493] file:text-white hover:file:bg-[#D6006E] cursor-pointer"/>
+                     </div>
+
                   </div>
                   <div className="p-6 border-t-2 border-pink-50 bg-[#FFF0F5]">
                      <div className="flex justify-between items-center mb-4">
                         <span className="font-bold text-pink-400">TOTAL PHP</span>
                         <span className="text-2xl font-black text-pink-600">₱{totalPHP.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                      </div>
-                     <button onClick={submitPayment} className={originalBtn + " w-full"}>Upload Proof & Complete ✅</button>
+                     <button onClick={submitPayment} disabled={isBtnLoading} className={`${originalBtn} w-full`}>
+                       {isBtnLoading ? 'Uploading... ⏳' : 'Upload Proof & Complete ✅'}
+                     </button>
                   </div>
                </div>
             </div>
@@ -1389,7 +1279,7 @@ export default function App() {
                                </div>
                                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 w-full text-center sm:text-right">
                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">On the chopping block</p>
-                                 <p className="font-bold text-slate-700 text-sm"><strong>{v.name}</strong> <span className="text-rose-600 font-black ml-1 bg-rose-100 px-2 py-0.5 rounded">-{v.amountToRemove} vials</span></p>
+                                 <p className="font-bold text-slate-700 text-sm"><strong>{v.handle || 'Guest'}</strong> <span className="text-rose-600 font-black ml-1 bg-rose-100 px-2 py-0.5 rounded">-{v.amountToRemove} vials</span></p>
                                </div>
                              </div>
                              
@@ -1405,7 +1295,6 @@ export default function App() {
             </div>
           )}
 
-          {/* ✨ NEW: Peptide Wiki Modal */}
           {showWikiModal && (
             <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[400] flex items-center justify-center p-4">
                <div className="bg-white rounded-[32px] w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
@@ -1542,7 +1431,18 @@ export default function App() {
 
                  {adminTab === 'payments' && (
                    <div className="space-y-6">
-                      <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight mb-2">Customer Payments Management</h2>
+                      <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
+                        <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Customer Payments Management</h2>
+                        
+                        <div className="flex gap-2">
+                           <button onClick={generateLabels} className="bg-white border-2 border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-[#D6006E] hover:text-[#D6006E] transition-colors flex items-center gap-2">
+                              <Printer size={16} /> Print Labels
+                           </button>
+                           <button onClick={()=>setShowAllProofsModal(true)} className="bg-white border-2 border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-[#D6006E] hover:text-[#D6006E] transition-colors flex items-center gap-2">
+                              <ImageIcon size={16} /> View All Proofs
+                           </button>
+                        </div>
+                      </div>
                       
                       {(() => {
                         const totalExpectedPHP = customerList.reduce((acc, c) => acc + c.totalPHP, 0);
@@ -1590,9 +1490,16 @@ export default function App() {
                         );
                       })()}
 
-                      <div className="bg-white rounded-[24px] shadow-sm border-2 border-pink-50 overflow-hidden">
+                      <div className="bg-white rounded-[24px] shadow-sm border-2 border-pink-50 overflow-hidden relative">
+                        {hoveredProof && (
+                          <div className="fixed z-[1000] pointer-events-none bg-white p-2 rounded-xl shadow-2xl border-4 border-pink-200" 
+                               style={{ bottom: '40px', right: '40px' }}>
+                             <img src={hoveredProof} alt="Proof Preview" className="max-w-[250px] max-h-[350px] object-contain rounded-lg" />
+                          </div>
+                        )}
+
                         <table className="w-full text-left custom-table">
-                           <thead><tr><th>Customer</th><th>Assigned Admin</th><th className="text-right">Total PHP</th><th className="text-center">Status</th></tr></thead>
+                           <thead><tr><th>Customer</th><th>Assigned Admin</th><th className="text-right">Total PHP</th><th className="text-center">Proof</th><th className="text-center">Status</th></tr></thead>
                            <tbody className="divide-y divide-pink-50">
                               {filteredCustomerList.map(c => (
                                 <tr key={c.email}>
@@ -1603,13 +1510,25 @@ export default function App() {
                                   <td><span className="bg-[#FFF0F5] px-2 py-1 rounded text-[10px] font-black text-pink-600 border border-pink-100">{c.adminAssigned}</span></td>
                                   <td className="text-right font-black text-pink-600">₱{c.totalPHP.toLocaleString()}</td>
                                   <td className="text-center">
+                                     {c.proofUrl ? (
+                                        <a href={c.proofUrl} target="_blank" rel="noreferrer" 
+                                           onMouseEnter={() => setHoveredProof(c.proofUrl)}
+                                           onMouseLeave={() => setHoveredProof(null)}
+                                           className="text-[#D6006E] font-bold text-[10px] uppercase tracking-widest hover:underline cursor-pointer">
+                                           Hover 👀
+                                        </a>
+                                     ) : (
+                                        <span className="text-slate-400 text-[10px] italic">No Proof</span>
+                                     )}
+                                  </td>
+                                  <td className="text-center">
                                      <button onClick={() => safeAwait(setDoc(doc(db, colPath('users'), c.email), { isPaid: !c.isPaid }, { merge: true }))} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all hover:scale-105 ${c.isPaid ? 'bg-emerald-50 text-emerald-600 border-emerald-200 shadow-sm' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
                                         {c.isPaid ? 'PAID ✅' : 'PENDING ❌'}
                                      </button>
                                   </td>
                                 </tr>
                               ))}
-                              {filteredCustomerList.length === 0 && <tr><td colSpan="4" className="text-center p-8 text-pink-300 font-bold italic">No customers found.</td></tr>}
+                              {filteredCustomerList.length === 0 && <tr><td colSpan="5" className="text-center p-8 text-pink-300 font-bold italic">No customers found.</td></tr>}
                            </tbody>
                         </table>
                       </div>
@@ -1618,7 +1537,13 @@ export default function App() {
 
                  {adminTab === 'packing' && (
                    <div className="space-y-6">
-                     <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Packing Logistics Guide</h2>
+                     <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
+                        <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Packing Logistics Guide</h2>
+                        <button onClick={generateLabels} className="bg-white border-2 border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-[#D6006E] hover:text-[#D6006E] transition-colors flex items-center gap-2">
+                           <Printer size={16} /> Print Labels
+                        </button>
+                     </div>
+                     
                      <div className="bg-white rounded-[24px] shadow-sm border-2 border-pink-50 overflow-hidden">
                         <table className="w-full text-left custom-table">
                            <thead><tr style={{background: '#F3E5F5'}}><th style={{color: '#7B1FA2'}}>Product</th><th className="text-center" style={{color: '#7B1FA2'}}>Box #</th><th style={{color: '#7B1FA2'}}>Customer</th><th className="text-center" style={{color: '#7B1FA2'}}>Take</th></tr></thead>
@@ -1667,7 +1592,7 @@ export default function App() {
                                    <td className="font-bold">{v.prod}</td>
                                    <td className="text-[10px] font-black text-rose-500 uppercase">Box {v.boxNum} needs {v.missingSlots} more</td>
                                    <td>
-                                     <button onClick={() => setSelectedProfileEmail(v.email)} className="font-bold text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">{v.name}</button>
+                                     <button onClick={() => setSelectedProfileEmail(v.email)} className="font-bold text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">{v.handle || 'Guest'}</button>
                                      <p className="text-[10px] text-slate-400">{v.email}</p>
                                    </td>
                                    <td className="text-center"><button onClick={() => executeTrim(v)} className="bg-rose-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md hover:scale-105 transition-transform">Cut {v.amountToRemove} Vials</button></td>
@@ -1787,8 +1712,6 @@ export default function App() {
                         <section className="bg-white p-8 rounded-[32px] shadow-sm border-2 border-pink-50 space-y-4 md:col-span-2 xl:col-span-1">
                            <h3 className="font-black text-xs text-pink-600 uppercase tracking-[0.2em] border-b-2 border-pink-50 pb-3">System Utilities</h3>
                            <div className="space-y-4">
-                             <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Proofs Folder Name (Placeholder)</label><input type="text" className={originalInput} value={settings.proofFolder || ''} onChange={e=>updateSetting('proofFolder', e.target.value)} /></div>
-                             <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Labels Folder Name (Placeholder)</label><input type="text" className={originalInput} value={settings.labelsFolder || ''} onChange={e=>updateSetting('labelsFolder', e.target.value)} /></div>
                              <div>
                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Shipping Options (Comma-Separated)</label>
                                <input 
@@ -1873,6 +1796,36 @@ export default function App() {
         )
       )}
 
+      {/* ✨ ALL PROOFS GALLERY MODAL */}
+      {showAllProofsModal && (
+        <div className="fixed inset-0 bg-[#4A042A]/90 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
+          <div className="bg-slate-50 rounded-[32px] w-full max-w-6xl overflow-hidden shadow-2xl flex flex-col h-[90vh] border-4 border-white">
+             <div className="bg-white p-5 flex justify-between items-center border-b-2 border-slate-200">
+                <h2 className="brand-title text-2xl text-[#D6006E]">📸 All Payment Proofs</h2>
+                <button onClick={()=>setShowAllProofsModal(false)} className="text-slate-400 hover:text-[#D6006E] font-black text-3xl transition-colors">&times;</button>
+             </div>
+             <div className="p-6 overflow-y-auto flex-1">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                  {customerList.filter(c => c.proofUrl).length === 0 ? (
+                    <div className="col-span-full text-center py-12 text-slate-400 font-bold italic">No proofs uploaded yet.</div>
+                  ) : (
+                    customerList.filter(c => c.proofUrl).map((c, idx) => (
+                      <div key={idx} className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col group">
+                        <a href={c.proofUrl} target="_blank" rel="noreferrer" className="flex-1 min-h-[150px] bg-slate-100 rounded-xl overflow-hidden mb-2 relative">
+                          <img src={c.proofUrl} alt="Proof" className="absolute inset-0 w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
+                        </a>
+                        <p className="text-[10px] font-black text-slate-800 truncate">{c.name}</p>
+                        <p className="text-[9px] text-slate-400 truncate">{c.email}</p>
+                        <span className="mt-1 bg-emerald-50 text-emerald-600 border border-emerald-100 px-2 py-0.5 rounded text-[8px] font-black uppercase text-center">Paid</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
+
       {/* Profile Viewer Modal */}
       {selectedProfileEmail && (() => {
         const profile = users.find(u => u.id === selectedProfileEmail.toLowerCase().trim()) || { id: selectedProfileEmail, name: 'Unknown Customer' };
@@ -1899,7 +1852,8 @@ export default function App() {
                        {profile.address?.street ? (
                          <p className="text-sm font-bold text-slate-700 leading-tight">
                            {profile.address.street}<br/>
-                           {profile.address.city}, {profile.address.prov} {profile.address.zip}<br/>
+                           {profile.address.brgy ? `${profile.address.brgy}, ` : ''}{profile.address.city}<br/>
+                           {profile.address.prov} {profile.address.zip}<br/>
                            <span className="text-emerald-600 mt-1 inline-block">Courier: {profile.address.shipOpt}</span><br/>
                            <span className="text-slate-500">📞 {profile.address.contact}</span>
                          </p>
