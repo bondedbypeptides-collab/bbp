@@ -107,10 +107,15 @@ export default function App() {
   const [selectedProfileEmail, setSelectedProfileEmail] = useState(null);
   const [isBtnLoading, setIsBtnLoading] = useState(false);
   const [proofFile, setProofFile] = useState(null);
-  const [hoveredProof, setHoveredProof] = useState(null);
   
+  // ✨ Image Preview States
+  const [hoveredProof, setHoveredProof] = useState(null);
+  const [fullScreenProof, setFullScreenProof] = useState(null);
+  
+  // ✨ Animation States
   const [shakingField, setShakingField] = useState(null);
   const [shakingProd, setShakingProd] = useState(null);
+  const [addressErrors, setAddressErrors] = useState({});
 
   const [adminPassword, setAdminPassword] = useState('');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
@@ -151,6 +156,14 @@ export default function App() {
 
   const [newProd, setNewProd] = useState({ name: '', kit: '', vial: '', max: '' });
   const [newAdmin, setNewAdmin] = useState({ name: '', bank1: '', qr1: '', bank2: '', qr2: '' });
+  const [isScrolled, setIsScrolled] = useState(false); // ✨ NEW: Scroll tracking state
+
+  // --- SCROLL LISTENER ---
+  useEffect(() => {
+    const handleScroll = () => setIsScrolled(window.scrollY > 40);
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // --- AUTHENTICATION ---
   useEffect(() => {
@@ -267,6 +280,7 @@ export default function App() {
     });
   }, [orders, products, settings, users]);
 
+  // ✨ GLOBAL ADMIN SEARCH FILTERS
   const filteredAdminProducts = useMemo(() => {
     return enrichedProducts.filter(p => !adminGlobalSearch || p.name.toLowerCase().includes(adminGlobalSearch.toLowerCase()));
   }, [enrichedProducts, adminGlobalSearch]);
@@ -324,18 +338,17 @@ export default function App() {
   }, [trimmingHitList, customerEmail, settings.addOnly]);
 
   // --- ACTIONS ---
-  const triggerShake = (field) => {
+  function triggerShake(field) {
     setShakingField(field);
     setTimeout(() => setShakingField(null), 500);
-  };
+  }
 
-  // ✨ Added String() safety wrapper to prevent React Object crash
-  const showToast = (msg) => { 
+  function showToast(msg) { 
     setToast(String(msg)); 
     setTimeout(() => setToast(null), 3000); 
-  };
+  }
 
-  const handleAdminLogin = (e) => {
+  function handleAdminLogin(e) {
     if (e) e.preventDefault();
     if (adminPassword === (settings.adminPass || 'admin123')) {
       setIsAdminAuthenticated(true);
@@ -344,9 +357,9 @@ export default function App() {
     } else {
       setLoginError('Incorrect password. Access denied.');
     }
-  };
+  }
 
-  const handleLookup = () => {
+  function handleLookup() {
     if (!customerEmail) return;
     if (customerProfile) {
       setCustomerName(customerProfile.name || '');
@@ -364,9 +377,9 @@ export default function App() {
     } else {
       showToast(settings.storeOpen !== false ? "No existing profile found. Welcome! ✨" : "No profile found for this email.");
     }
-  };
+  }
 
-  const handleActionChange = (newAction) => {
+  function handleActionChange(newAction) {
     setAction(newAction);
     if (newAction === 'replace') {
       const prefill = {};
@@ -378,15 +391,15 @@ export default function App() {
     } else {
       setCartItems({});
     }
-  };
+  }
 
-  const handleCartChange = (prodName, field, val) => {
+  function handleCartChange(prodName, field, val) {
     let num = parseInt(val) || 0;
     if (field === 'v' && num > 9) { num = 9; showToast("Use Kits for 10+ vials ✨"); }
     setCartItems(prev => ({ ...prev, [prodName]: { k: prev[prodName]?.k || 0, v: prev[prodName]?.v || 0, [field]: num } }));
-  };
+  }
 
-  const handleCartBlur = (prodName) => {
+  function handleCartBlur(prodName) {
     const cart = cartItems[prodName];
     if (!cart) return;
     
@@ -400,9 +413,9 @@ export default function App() {
       setShakingProd(prodName);
       setTimeout(() => setShakingProd(null), 500); 
     }
-  };
+  }
 
-  const submitOrder = async () => {
+  async function submitOrder() {
     if (!customerEmail) { triggerShake('email'); showToast("Email Address is required! 💌"); return; }
     if (!customerName) { triggerShake('name'); showToast("Your Name is required! 🌸"); return; }
     if (!action) { triggerShake('action'); showToast("Please choose an Action! ⚡"); return; }
@@ -495,14 +508,24 @@ export default function App() {
       setCartItems({}); if (action === 'replace') setAction('');
     } catch (err) { console.error(err); showToast(`Error saving: ${err.message}`); }
     setIsBtnLoading(false);
-  };
+  }
 
-  const submitPayment = async () => {
-    if (!addressForm.shipOpt || !addressForm.street || !addressForm.city || !addressForm.prov || !addressForm.zip || !addressForm.contact) { 
-       showToast("Please fill all required shipping fields! 🏠"); return; 
-    }
-    if (!proofFile) {
-       showToast("Proof of payment image is required! 📸"); return;
+  // ✨ IMPROVED: Strict Address Validation with visual shakes
+  async function submitPayment() {
+    const errs = {};
+    if (!addressForm.shipOpt) errs.shipOpt = true;
+    if (!addressForm.street?.trim()) errs.street = true;
+    if (!addressForm.city?.trim()) errs.city = true;
+    if (!addressForm.prov?.trim()) errs.prov = true;
+    if (!addressForm.zip?.trim()) errs.zip = true;
+    if (!addressForm.contact?.trim()) errs.contact = true;
+    if (!proofFile) errs.proofFile = true;
+
+    if (Object.keys(errs).length > 0) {
+      setAddressErrors(errs);
+      showToast("Please fill all required highlighted fields! 🏠");
+      setTimeout(() => setAddressErrors({}), 600); // Remove animation after playing
+      return; 
     }
 
     const emailLower = customerEmail.toLowerCase().trim();
@@ -511,7 +534,8 @@ export default function App() {
     try {
        const fileExt = proofFile.name.split('.').pop();
        const fileName = `${emailLower}_${Date.now()}.${fileExt}`;
-       const sRef = storageRef(storage, `${basePath}/proofs/${fileName}`);
+       const sRefPath = isCanvas ? `artifacts/${appId}/public/proofs/${fileName}` : `proofs/${fileName}`;
+       const sRef = storageRef(storage, sRefPath);
        
        showToast("Uploading proof... ☁️");
        await uploadBytesResumable(sRef, proofFile);
@@ -535,12 +559,21 @@ export default function App() {
        }
     }
     setIsBtnLoading(false);
-  };
+  }
 
-  const generateLabels = () => {
+  function generateBulkLabels() {
      const paidUsers = customerList.filter(c => c.isPaid && c.address?.street);
      if (paidUsers.length === 0) { showToast("No paid users with valid addresses to print! ❌"); return; }
-     
+     buildAndPrintLabelsHTML(paidUsers);
+  }
+
+  // ✨ NEW: Print Single Label Function
+  function generateSingleLabel(c) {
+     if (!c.address?.street) { showToast("This customer has no valid address to print! ❌"); return; }
+     buildAndPrintLabelsHTML([c]);
+  }
+
+  function buildAndPrintLabelsHTML(usersToPrint) {
      let html = `
      <html><head><title>Shipping Labels - ${settings.batchName}</title>
      <style>
@@ -558,7 +591,7 @@ export default function App() {
      </style></head><body>
      <div class="label-container">`;
      
-     paidUsers.forEach(c => {
+     usersToPrint.forEach(c => {
         const userOrders = orders.filter(o => o.email === c.email);
         html += `<div class="label">
             <h2>${c.name}</h2>
@@ -580,23 +613,111 @@ export default function App() {
      win.document.write(html);
      win.document.close();
      setTimeout(() => win.print(), 1000);
+  }
+
+  // ✨ NEW: CSV Export for Google Sheets Backup
+  const exportCustomersCSV = () => {
+    const headers = ["Email", "Name", "Handle", "Subtotal USD", "Total USD", "Total PHP", "Proof Link", "Assigned Admin", "Bank Account", "Label Link", "Street", "Barangay", "City", "Province", "Zip", "Contact", "Shipping Option", "Is Paid"];
+    let csvContent = headers.join(",") + "\n";
+
+    customerList.forEach(c => {
+      const subtotalUSD = c.totalPHP / settings.fxRate - (settings.adminFeePhp / settings.fxRate);
+      const totalUSD = c.totalPHP / settings.fxRate;
+      const bankAcc = settings.admins.find(a => a.name === c.adminAssigned)?.bank1 || ''; // Simplify for export
+      
+      const row = [
+        `"${c.email}"`, `"${c.name}"`, `"${c.handle || ''}"`, `"${subtotalUSD.toFixed(2)}"`, `"${totalUSD.toFixed(2)}"`, `"${c.totalPHP}"`, 
+        `"${c.proofUrl || ''}"`, `"${c.adminAssigned || ''}"`, `"${bankAcc}"`, `"N/A (Generated on Demand)"`,
+        `"${c.address?.street || ''}"`, `"${c.address?.brgy || ''}"`, `"${c.address?.city || ''}"`, `"${c.address?.prov || ''}"`,
+        `"${c.address?.zip || ''}"`, `"${c.address?.contact || ''}"`, `"${c.address?.shipOpt || ''}"`, `"${c.isPaid ? 'TRUE' : 'FALSE'}"`
+      ];
+      csvContent += row.join(",") + "\n";
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `BBP_Customers_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
-  const updateSetting = async (field, val) => {
+  // ✨ NEW: CSV Import to Sync changes from Google Sheets back to Firebase
+  const importCustomersCSV = async (e) => {
+    const file = e.target?.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target.result;
+        const rows = text.split(/\r?\n/);
+        if (rows.length < 2) return;
+
+        setIsBtnLoading(true);
+        showToast("Syncing Database from CSV... ⏳");
+        
+        const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+        const updates = [];
+
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i].trim();
+          if (!row) continue;
+          const cols = parseCSVLine(row);
+          if (cols.length >= 17 && cols[0].trim() !== '') {
+            const email = cols[0].replace(/^"|"$/g, '').trim().toLowerCase();
+            const adminAssigned = cols[7].replace(/^"|"$/g, '').trim();
+            const street = cols[10].replace(/^"|"$/g, '').trim();
+            const brgy = cols[11].replace(/^"|"$/g, '').trim();
+            const city = cols[12].replace(/^"|"$/g, '').trim();
+            const prov = cols[13].replace(/^"|"$/g, '').trim();
+            const zip = cols[14].replace(/^"|"$/g, '').trim();
+            const contact = cols[15].replace(/^"|"$/g, '').trim();
+            const shipOpt = cols[16].replace(/^"|"$/g, '').trim();
+            const isPaid = cols[17] ? cols[17].replace(/^"|"$/g, '').trim().toUpperCase() === 'TRUE' : false;
+            
+            const address = { street, brgy, city, prov, zip, contact, shipOpt };
+            updates.push({ email, adminAssigned, isPaid, address });
+          }
+        }
+
+        for (const chunk of chunkArray(updates, 250)) {
+           const batch = writeBatch(db);
+           chunk.forEach(upd => {
+             const ref = doc(db, colPath('users'), upd.email);
+             batch.set(ref, { adminAssigned: upd.adminAssigned, isPaid: upd.isPaid, address: upd.address }, { merge: true });
+           });
+           await safeAwait(batch.commit());
+        }
+        
+        showToast("✅ Customers synced successfully!");
+      } catch (err) {
+        console.error(err);
+        showToast("❌ Error syncing customers.");
+      }
+      setIsBtnLoading(false);
+    };
+    reader.readAsText(file);
+    if (e.target) e.target.value = null;
+  };
+
+  async function updateSetting(field, val) {
     const newSettings = { ...settings, [field]: val };
     setSettings(newSettings);
     await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), newSettings));
-  };
+  }
 
-  const executeTrim = async (victim) => {
+  async function executeTrim(victim) {
     if (victim.qty === victim.amountToRemove) {
       await safeAwait(deleteDoc(doc(db, colPath('orders'), victim.id)));
     } else {
       await safeAwait(setDoc(doc(db, colPath('orders'), victim.id), { qty: victim.qty - victim.amountToRemove }, { merge: true }));
     }
-  };
+  }
 
-  const autoTrimAll = async () => {
+  async function autoTrimAll() {
     if(!window.confirm('⚠️ Auto-Trim will reduce/delete loose vials from the bottom up. Proceed?')) return;
     const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
     try {
@@ -613,9 +734,9 @@ export default function App() {
       }
       showToast('Auto-Trim Complete! ✂️');
     } catch(err) { console.error(err); showToast('Error during auto-trim.'); }
-  };
+  }
 
-  const runCutoff = async () => {
+  async function runCutoff() {
     let lockedCount = 0;
     const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
     try {
@@ -630,9 +751,9 @@ export default function App() {
       }
       showToast(lockedCount > 0 ? `Cutoff Complete! Locked ${lockedCount} products.` : `Cutoff Complete! No open boxes needed locking.`);
     } catch(err) { console.error(err); showToast("Error running cutoff."); }
-  };
+  }
 
-  const resetSystem = async () => {
+  async function resetSystem() {
     if(!window.confirm('🚨 RESET SYSTEM: This will archive all current orders into History and clear the board. Proceed?')) return;
     setIsBtnLoading(true);
     showToast('Archiving and resetting... ⏳');
@@ -665,9 +786,9 @@ export default function App() {
       showToast('✅ System Reset & Archived!');
     } catch (err) { console.error(err); showToast(`❌ Error resetting system: ${err.message}`); }
     setIsBtnLoading(false);
-  };
+  }
 
-  const seedDemoData = async () => {
+  async function seedDemoData() {
     setIsBtnLoading(true);
     showToast("Starting Seed Process... Please Wait ⏳");
     try {
@@ -703,9 +824,9 @@ export default function App() {
       showToast(`❌ Error seeding: ${err.message}`);
     }
     setIsBtnLoading(false);
-  };
+  }
 
-  const downloadCSVTemplate = () => {
+  function downloadCSVTemplate() {
     const headers = "Peptide Name,CODE,Price per KIT(USD),Price per vial (USD)\n";
     const sampleRow1 = "5-amino-1mq 5mg,5AM,60.00,6.00\n";
     const sampleRow2 = "BPC157 10mg,BC10,70.00,7.00\n";
@@ -715,74 +836,81 @@ export default function App() {
     a.setAttribute('href', url);
     a.setAttribute('download', 'BBP_Products_Template.csv');
     a.click();
-  };
+  }
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const text = event.target.result;
-      const rows = text.split(/\r?\n/);
-      const newProducts = [];
+  async function handleFileUpload(e) {
+    try {
+      const file = e.target?.files?.[0];
+      if (!file) return;
       
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i].trim();
-        if (!row) continue;
-        
-        const cols = parseCSVLine(row);
-        
-        if (cols.length >= 4 && cols[0].trim() !== '') {
-          const name = cols[0].replace(/^"|"$/g, '').trim();
-          const kitPriceRaw = cols[2].replace(/[^0-9.]/g, '');
-          const vialPriceRaw = cols[3].replace(/[^0-9.]/g, '');
-          
-          let kit = parseFloat(kitPriceRaw) || 0;
-          let vial = parseFloat(vialPriceRaw) || 0;
-          
-          if(kit === 0 && vial > 0) kit = vial * 10;
-          if(vial === 0 && kit > 0) vial = kit / 10;
-          
-          newProducts.push({ name, pricePerKitUSD: kit, pricePerVialUSD: vial, locked: false, maxBoxes: 0 });
-        }
-      }
-      
-      if (newProducts.length > 0) {
-        setIsBtnLoading(true);
-        showToast("Uploading CSV... ⏳");
+      const reader = new FileReader();
+      reader.onload = async (event) => {
         try {
-          const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+          const text = event.target.result;
+          const rows = text.split(/\r?\n/);
+          const newProducts = [];
           
-          for (const chunk of chunkArray(products, 250)) {
-             const batch = writeBatch(db);
-             chunk.forEach(p => batch.delete(doc(db, colPath('products'), p.id)));
-             await safeAwait(batch.commit());
+          for (let i = 1; i < rows.length; i++) {
+            const row = rows[i].trim();
+            if (!row) continue;
+            
+            const cols = parseCSVLine(row);
+            
+            if (cols.length >= 4 && cols[0].trim() !== '') {
+              const name = cols[0].replace(/^"|"$/g, '').trim();
+              const kitPriceRaw = cols[2].replace(/[^0-9.]/g, '');
+              const vialPriceRaw = cols[3].replace(/[^0-9.]/g, '');
+              
+              let kit = parseFloat(kitPriceRaw) || 0;
+              let vial = parseFloat(vialPriceRaw) || 0;
+              
+              if(kit === 0 && vial > 0) kit = vial * 10;
+              if(vial === 0 && kit > 0) vial = kit / 10;
+              
+              newProducts.push({ name, pricePerKitUSD: kit, pricePerVialUSD: vial, locked: false, maxBoxes: 0 });
+            }
           }
           
-          for (const chunk of chunkArray(newProducts, 250)) {
-             const batch = writeBatch(db);
-             chunk.forEach(p => {
-               const ref = doc(collection(db, colPath('products')));
-               batch.set(ref, p);
-             });
-             await safeAwait(batch.commit());
+          if (newProducts.length > 0) {
+            setIsBtnLoading(true);
+            showToast("Uploading CSV... ⏳");
+            
+            const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+            
+            for (const chunk of chunkArray(products, 250)) {
+               const batch = writeBatch(db);
+               chunk.forEach(p => batch.delete(doc(db, colPath('products'), p.id)));
+               await safeAwait(batch.commit());
+            }
+            
+            for (const chunk of chunkArray(newProducts, 250)) {
+               const batch = writeBatch(db);
+               chunk.forEach(p => {
+                 const ref = doc(collection(db, colPath('products')));
+                 batch.set(ref, p);
+               });
+               await safeAwait(batch.commit());
+            }
+            showToast(`✅ Imported ${newProducts.length} products successfully!`);
+            setIsBtnLoading(false);
+          } else {
+            showToast("❌ No valid products found in CSV. Check your columns.");
           }
-          showToast(`✅ Imported ${newProducts.length} products successfully!`);
         } catch(err) {
           console.error(err);
           showToast(`❌ Error saving products: ${err.message}`);
+          setIsBtnLoading(false);
         }
-        setIsBtnLoading(false);
-      } else {
-        showToast("❌ No valid products found in CSV. Check your columns.");
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = null;
-  };
+      };
+      reader.readAsText(file);
+    } catch(err) {
+      console.error(err);
+      showToast("❌ Error reading file");
+    }
+    if (e.target) e.target.value = null;
+  }
 
-  const handleAddProduct = async () => {
+  async function handleAddProduct() {
     if (!newProd.name || !newProd.vial) { showToast('Enter name and vial price!'); return; }
     await safeAwait(addDoc(collection(db, colPath('products')), {
       name: newProd.name,
@@ -793,9 +921,9 @@ export default function App() {
     }));
     setNewProd({ name: '', kit: '', vial: '', max: '' });
     showToast('Product added! ✅');
-  };
+  }
 
-  const handleAddAdmin = async () => {
+  async function handleAddAdmin() {
     if (!newAdmin.name) { showToast('Enter an Admin Name!'); return; }
     const updatedAdmins = [...settings.admins, { 
       name: newAdmin.name, 
@@ -807,7 +935,7 @@ export default function App() {
     await updateSetting('admins', updatedAdmins);
     setNewAdmin({ name: '', bank1: '', qr1: '', bank2: '', qr2: '' });
     showToast('Admin added successfully! ✅');
-  };
+  }
 
   // --- STYLES ---
   const originalInput = "w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-2xl px-4 py-3 outline-none focus:border-[#D6006E] font-bold text-[#4A042A]";
@@ -898,22 +1026,22 @@ export default function App() {
         .custom-table td { padding: 1rem; border-bottom: 1px solid #FFE4E1; font-weight: 600; font-size: 13px; }
       `}} />
 
-      {/* ✨ NEW: Sticky Top Header for Wiki & Admin */}
-      <div className="fixed top-2 right-2 sm:top-4 sm:right-4 z-[60] flex gap-2">
-        <button onClick={()=>setShowWikiModal(true)} className="bg-white/90 backdrop-blur-md text-[#D6006E] border-2 border-pink-200 px-3 sm:px-4 py-2 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-widest shadow-md flex items-center gap-1.5 hover:bg-white hover:scale-105 transition-all">
-           <BookOpen size={14}/> <span className="hidden sm:inline">Peptide</span> Wiki
-        </button>
-        {view === 'shop' && (
-          <button onClick={()=>setView('admin')} className="bg-[#4A042A]/90 backdrop-blur-md text-white border-2 border-[#4A042A] px-3 sm:px-4 py-2 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-widest shadow-md flex items-center gap-1.5 hover:bg-[#4A042A] hover:scale-105 transition-all">
-             <Lock size={14}/> Admin
-          </button>
-        )}
-      </div>
+      {/* ✨ REFINED: Scroll-Reactive Wiki Button (Always accessible, shrinks when scrolling) */}
+      <button onClick={()=>setShowWikiModal(true)} className={`fixed z-[60] bg-white/90 backdrop-blur-md text-[#D6006E] border-2 border-pink-200 shadow-md flex items-center justify-center hover:bg-white transition-all duration-300 ease-in-out ${isScrolled ? 'top-4 left-4 w-10 h-10 rounded-full px-0 opacity-60 hover:opacity-100' : 'top-4 left-4 px-4 py-2 rounded-full gap-2 hover:scale-105'}`}>
+         <BookOpen size={16} className="shrink-0"/> 
+         <span className={`font-black uppercase tracking-widest text-[10px] sm:text-xs whitespace-nowrap overflow-hidden transition-all duration-300 ${isScrolled ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Wiki</span>
+      </button>
 
       {view === 'shop' ? (
-        <div className="min-h-screen w-full text-[#4A042A] pb-24 lg:pb-8 selection:bg-pink-300" style={{ background: 'linear-gradient(135deg, #FFC3EB 0%, #FF8EBD 100%)', backgroundAttachment: 'fixed' }}>
-          <div className="w-full max-w-[1600px] mx-auto p-4 pt-12 sm:pt-6 relative">
-            <h1 className="brand-title text-3xl sm:text-5xl text-center text-white mb-2 flex items-center justify-center gap-3 mt-4 sm:mt-0">
+        <div className="min-h-screen w-full text-[#4A042A] pb-24 lg:pb-8 selection:bg-pink-300 relative" style={{ background: 'linear-gradient(135deg, #FFC3EB 0%, #FF8EBD 100%)', backgroundAttachment: 'fixed' }}>
+          
+          {/* ✨ FIXED: Absolute positioned Padlock (Scrolls away) */}
+          <button onClick={()=>setView('admin')} className="absolute top-4 right-4 z-[40] bg-white/30 backdrop-blur-sm text-[#4A042A] border border-[#4A042A]/20 w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/60 transition-all hover:scale-105" title="Admin Access">
+             <Lock size={16}/>
+          </button>
+
+          <div className="w-full max-w-[1600px] mx-auto p-4 pt-16 sm:pt-10 relative">
+            <h1 className="brand-title text-3xl sm:text-5xl text-center text-white mb-2 flex items-center justify-center gap-3">
               ✨ Bonded <span className="text-sm font-black uppercase tracking-widest text-white/80 transform translate-y-2" style={{fontFamily: "'Quicksand', sans-serif !important"}}>by</span> Peptides ✨
             </h1>
             <div className="text-center mb-8">
@@ -923,7 +1051,6 @@ export default function App() {
             </div>
 
             {settings.storeOpen === false ? (
-              // CLOSED STORE UI
               <div className="glass-card p-8 sm:p-12 shadow-xl max-w-2xl mx-auto text-center mt-8 mb-24 relative overflow-hidden bg-white/95 backdrop-blur-md">
                 <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#FF1493] to-[#FFC3EB]"></div>
                 <Package size={64} className="mx-auto text-pink-200 mb-4" />
@@ -949,7 +1076,6 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              // --- NORMAL STORE UI ---
               <>
                 {settings.paymentsOpen && (
                   <div className="bg-white border-l-4 border-[#FF1493] p-3 rounded-lg mb-4 text-sm font-bold shadow-sm">🔒 PAYMENTS OPEN: Check email below to pay.</div>
@@ -1106,7 +1232,6 @@ export default function App() {
             )}
           </div>
 
-          {/* Sticky Mobile Footer ONLY when Store is Open */}
           {settings.storeOpen !== false && (
             <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t-2 border-[#FF1493] p-4 rounded-t-3xl shadow-[0_-10px_20px_rgba(0,0,0,0.1)] z-50 flex justify-between items-center gap-2">
               <div className="shrink-0">
@@ -1179,23 +1304,24 @@ export default function App() {
                         })()}
                      </div>
 
+                     {/* ✨ REFINED: Shaking Error Validation for missing inputs */}
                      <div className="space-y-3">
-                        <select value={addressForm.shipOpt} onChange={e=>setAddressForm({...addressForm, shipOpt:e.target.value})} className={originalInput}>
+                        <select value={addressForm.shipOpt} onChange={e=>setAddressForm({...addressForm, shipOpt:e.target.value})} className={`${originalInput} transition-all duration-300 ${addressErrors.shipOpt ? 'animate-shake border-red-500 bg-red-50' : ''}`}>
                           <option value="" disabled>Select Courier...</option>
                           {settings.shippingOptions.map(o => <option key={o} value={o}>{o}</option>)}
                         </select>
-                        <input type="text" value={addressForm.street} onChange={e=>setAddressForm({...addressForm, street:e.target.value})} className={originalInput} placeholder="Street & Barangay" />
+                        <input type="text" value={addressForm.street} onChange={e=>setAddressForm({...addressForm, street:e.target.value})} className={`${originalInput} transition-all duration-300 ${addressErrors.street ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : ''}`} placeholder="Street & Barangay *" />
                         <div className="grid grid-cols-2 gap-3">
-                          <input type="text" value={addressForm.city} onChange={e=>setAddressForm({...addressForm, city:e.target.value})} className={originalInput} placeholder="City" />
-                          <input type="text" value={addressForm.prov} onChange={e=>setAddressForm({...addressForm, prov:e.target.value})} className={originalInput} placeholder="Province" />
-                          <input type="text" value={addressForm.zip} onChange={e=>setAddressForm({...addressForm, zip:e.target.value})} className={originalInput} placeholder="Zip Code" />
-                          <input type="text" value={addressForm.contact} onChange={e=>setAddressForm({...addressForm, contact:e.target.value})} className={originalInput} placeholder="Contact #" />
+                          <input type="text" value={addressForm.city} onChange={e=>setAddressForm({...addressForm, city:e.target.value})} className={`${originalInput} transition-all duration-300 ${addressErrors.city ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : ''}`} placeholder="City *" />
+                          <input type="text" value={addressForm.prov} onChange={e=>setAddressForm({...addressForm, prov:e.target.value})} className={`${originalInput} transition-all duration-300 ${addressErrors.prov ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : ''}`} placeholder="Province *" />
+                          <input type="text" value={addressForm.zip} onChange={e=>setAddressForm({...addressForm, zip:e.target.value})} className={`${originalInput} transition-all duration-300 ${addressErrors.zip ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : ''}`} placeholder="Zip Code *" />
+                          <input type="text" value={addressForm.contact} onChange={e=>setAddressForm({...addressForm, contact:e.target.value})} className={`${originalInput} transition-all duration-300 ${addressErrors.contact ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : ''}`} placeholder="Contact # *" />
                         </div>
                      </div>
                      
-                     <div className="bg-pink-50 p-4 rounded-2xl border-2 dashed border-pink-200">
-                        <label className="block text-[10px] font-black text-[#D6006E] uppercase mb-2">📸 Upload Proof of Payment</label>
-                        <input type="file" accept="image/*" onChange={(e) => setProofFile(e.target.files[0])} className="w-full text-xs font-bold text-pink-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-black file:bg-[#FF1493] file:text-white hover:file:bg-[#D6006E] cursor-pointer"/>
+                     <div className={`p-4 rounded-2xl border-2 dashed transition-all duration-300 ${addressErrors.proofFile ? 'animate-shake border-red-500 bg-red-50' : 'bg-pink-50 border-pink-200'}`}>
+                        <label className={`block text-[10px] font-black uppercase mb-2 ${addressErrors.proofFile ? 'text-red-600' : 'text-[#D6006E]'}`}>📸 Upload Proof of Payment *</label>
+                        <input type="file" accept="image/*" onChange={(e) => setProofFile(e.target?.files?.[0] || null)} className={`w-full text-xs font-bold file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-black file:text-white cursor-pointer ${addressErrors.proofFile ? 'text-red-600 file:bg-red-500' : 'text-pink-600 file:bg-[#FF1493] hover:file:bg-[#D6006E]'}`}/>
                      </div>
 
                   </div>
@@ -1295,6 +1421,7 @@ export default function App() {
             </div>
           )}
 
+          {/* ✨ NEW: Peptide Wiki Modal */}
           {showWikiModal && (
             <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[400] flex items-center justify-center p-4">
                <div className="bg-white rounded-[32px] w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
@@ -1435,8 +1562,8 @@ export default function App() {
                         <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Customer Payments Management</h2>
                         
                         <div className="flex gap-2">
-                           <button onClick={generateLabels} className="bg-white border-2 border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-[#D6006E] hover:text-[#D6006E] transition-colors flex items-center gap-2">
-                              <Printer size={16} /> Print Labels
+                           <button onClick={generateBulkLabels} className="bg-white border-2 border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-[#D6006E] hover:text-[#D6006E] transition-colors flex items-center gap-2">
+                              <Printer size={16} /> Bulk Print Labels
                            </button>
                            <button onClick={()=>setShowAllProofsModal(true)} className="bg-white border-2 border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-[#D6006E] hover:text-[#D6006E] transition-colors flex items-center gap-2">
                               <ImageIcon size={16} /> View All Proofs
@@ -1491,15 +1618,18 @@ export default function App() {
                       })()}
 
                       <div className="bg-white rounded-[24px] shadow-sm border-2 border-pink-50 overflow-hidden relative">
+                        {/* ✨ Hover Proof Popup (Enlarged) */}
                         {hoveredProof && (
                           <div className="fixed z-[1000] pointer-events-none bg-white p-2 rounded-xl shadow-2xl border-4 border-pink-200" 
                                style={{ bottom: '40px', right: '40px' }}>
-                             <img src={hoveredProof} alt="Proof Preview" className="max-w-[250px] max-h-[350px] object-contain rounded-lg" />
+                             <img src={hoveredProof} alt="Proof Preview" className="max-w-[350px] max-h-[450px] object-contain rounded-lg" />
+                             <p className="text-center text-xs font-bold text-pink-500 mt-2">Click to View Full Screen</p>
                           </div>
                         )}
 
                         <table className="w-full text-left custom-table">
-                           <thead><tr><th>Customer</th><th>Assigned Admin</th><th className="text-right">Total PHP</th><th className="text-center">Proof</th><th className="text-center">Status</th></tr></thead>
+                           {/* ✨ ADDED: Label Column */}
+                           <thead><tr><th>Customer</th><th>Assigned Admin</th><th className="text-right">Total PHP</th><th className="text-center">Proof</th><th className="text-center">Label</th><th className="text-center">Status</th></tr></thead>
                            <tbody className="divide-y divide-pink-50">
                               {filteredCustomerList.map(c => (
                                 <tr key={c.email}>
@@ -1511,14 +1641,24 @@ export default function App() {
                                   <td className="text-right font-black text-pink-600">₱{c.totalPHP.toLocaleString()}</td>
                                   <td className="text-center">
                                      {c.proofUrl ? (
-                                        <a href={c.proofUrl} target="_blank" rel="noreferrer" 
+                                        <button onClick={() => setFullScreenProof(c.proofUrl)}
                                            onMouseEnter={() => setHoveredProof(c.proofUrl)}
                                            onMouseLeave={() => setHoveredProof(null)}
-                                           className="text-[#D6006E] font-bold text-[10px] uppercase tracking-widest hover:underline cursor-pointer">
+                                           className="text-[#D6006E] font-bold text-[10px] uppercase tracking-widest hover:underline cursor-pointer bg-transparent border-none m-0 p-0">
                                            Hover 👀
-                                        </a>
+                                        </button>
                                      ) : (
                                         <span className="text-slate-400 text-[10px] italic">No Proof</span>
+                                     )}
+                                  </td>
+                                  <td className="text-center">
+                                     {/* ✨ NEW: Individual Label Printing */}
+                                     {c.address?.street ? (
+                                        <button onClick={() => generateSingleLabel(c)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">
+                                           🖨️ Print
+                                        </button>
+                                     ) : (
+                                        <span className="text-slate-400 text-[10px] italic">No Address</span>
                                      )}
                                   </td>
                                   <td className="text-center">
@@ -1528,7 +1668,7 @@ export default function App() {
                                   </td>
                                 </tr>
                               ))}
-                              {filteredCustomerList.length === 0 && <tr><td colSpan="5" className="text-center p-8 text-pink-300 font-bold italic">No customers found.</td></tr>}
+                              {filteredCustomerList.length === 0 && <tr><td colSpan="6" className="text-center p-8 text-pink-300 font-bold italic">No customers found.</td></tr>}
                            </tbody>
                         </table>
                       </div>
@@ -1539,8 +1679,8 @@ export default function App() {
                    <div className="space-y-6">
                      <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
                         <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Packing Logistics Guide</h2>
-                        <button onClick={generateLabels} className="bg-white border-2 border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-[#D6006E] hover:text-[#D6006E] transition-colors flex items-center gap-2">
-                           <Printer size={16} /> Print Labels
+                        <button onClick={generateBulkLabels} className="bg-white border-2 border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-[#D6006E] hover:text-[#D6006E] transition-colors flex items-center gap-2">
+                           <Printer size={16} /> Bulk Print Labels
                         </button>
                      </div>
                      
@@ -1607,7 +1747,21 @@ export default function App() {
 
                  {adminTab === 'customers' && (
                    <div className="space-y-6">
-                     <div className="flex justify-between items-center"><h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Customer Database</h2></div>
+                     <div className="flex justify-between items-center flex-wrap gap-4">
+                       <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Customer Database</h2>
+                       
+                       {/* ✨ NEW: Google Sheets Export/Import Synchronization */}
+                       <div className="flex gap-2">
+                         <button onClick={exportCustomersCSV} className="bg-white border-2 border-emerald-200 text-emerald-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-emerald-500 transition-colors">
+                           📥 Export CSV
+                         </button>
+                         <label className={`bg-emerald-50 border-2 border-emerald-200 text-emerald-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-emerald-500 transition-colors cursor-pointer ${isBtnLoading ? 'opacity-50 pointer-events-none' : ''}`}>
+                           {isBtnLoading ? '⏳ Syncing...' : '📂 Sync Changes from CSV'}
+                           <input type="file" accept=".csv" onChange={importCustomersCSV} className="hidden" disabled={isBtnLoading} />
+                         </label>
+                       </div>
+                     </div>
+
                      <div className="bg-white rounded-[24px] shadow-sm border-2 border-pink-50 overflow-hidden">
                        <table className="w-full text-left custom-table">
                          <thead><tr><th>Customer Info</th><th>Address</th><th>Reserved</th><th className="text-center">Del</th></tr></thead>
@@ -1796,6 +1950,14 @@ export default function App() {
         )
       )}
 
+      {/* ✨ FULL SCREEN PROOF MODAL */}
+      {fullScreenProof && (
+        <div className="fixed inset-0 bg-black/90 z-[2000] flex flex-col items-center justify-center p-4 cursor-pointer" onClick={() => setFullScreenProof(null)}>
+           <button className="absolute top-4 right-4 sm:top-8 sm:right-8 text-white/80 hover:text-white text-4xl font-black transition-colors">&times;</button>
+           <img src={fullScreenProof} alt="Full Screen Proof" className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" />
+        </div>
+      )}
+
       {/* ✨ ALL PROOFS GALLERY MODAL */}
       {showAllProofsModal && (
         <div className="fixed inset-0 bg-[#4A042A]/90 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
@@ -1811,9 +1973,9 @@ export default function App() {
                   ) : (
                     customerList.filter(c => c.proofUrl).map((c, idx) => (
                       <div key={idx} className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col group">
-                        <a href={c.proofUrl} target="_blank" rel="noreferrer" className="flex-1 min-h-[150px] bg-slate-100 rounded-xl overflow-hidden mb-2 relative">
+                        <button onClick={() => setFullScreenProof(c.proofUrl)} className="flex-1 min-h-[150px] bg-slate-100 rounded-xl overflow-hidden mb-2 relative cursor-zoom-in border-none p-0 m-0">
                           <img src={c.proofUrl} alt="Proof" className="absolute inset-0 w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
-                        </a>
+                        </button>
                         <p className="text-[10px] font-black text-slate-800 truncate">{c.name}</p>
                         <p className="text-[9px] text-slate-400 truncate">{c.email}</p>
                         <span className="mt-1 bg-emerald-50 text-emerald-600 border border-emerald-100 px-2 py-0.5 rounded text-[8px] font-black uppercase text-center">Paid</span>
