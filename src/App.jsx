@@ -6,7 +6,7 @@ import {
   ShieldCheck, Store, Settings, Info, LayoutDashboard, 
   BadgeDollarSign, Scissors, ClipboardList, Users, 
   Lock, Package, Search, ArrowRight, CreditCard, 
-  Home, LogOut, Trash2, ChevronRight 
+  Home, LogOut, Trash2, ChevronRight, BookOpen
 } from 'lucide-react';
 
 // --- FIREBASE SETUP ---
@@ -37,6 +37,35 @@ const CUTE_PLEAS = [
   "Save my spot! 🙏",
   "Looking for box buddies! 👯‍♀️",
   "Help! I don't wanna be trimmed! 😭"
+];
+
+// ✨ NEW: Comprehensive Peptide Wiki Data
+const WIKI_DATA = [
+  { name: "Tirzepatide", tags: ["Weight Loss", "Blood Sugar"], desc: "A dual GIP and GLP-1 receptor agonist. Highly effective for weight management and metabolic health by reducing appetite and improving insulin sensitivity." },
+  { name: "Retatrutide", tags: ["Weight Loss", "Metabolism"], desc: "A triple-agonist (GLP-1, GIP, Glucagon). An advanced compound currently showing unprecedented weight loss and liver fat reduction in trials." },
+  { name: "Semaglutide", tags: ["Weight Loss"], desc: "A GLP-1 receptor agonist. The active ingredient in popular weight loss medications, excellent for appetite suppression and steady weight management." },
+  { name: "BPC-157", tags: ["Healing", "Gut Health", "Recovery"], desc: "Body Protection Compound. Rapidly accelerates the healing of tendons, ligaments, muscles, and the nervous system. Highly protective of gastric organs." },
+  { name: "TB-500", tags: ["Healing", "Inflammation", "Muscle"], desc: "Synthetic fraction of Thymosin Beta-4. Promotes new blood vessel formation (angiogenesis), reduces inflammation, and repairs muscle tears." },
+  { name: "GHK-Cu", tags: ["Skin", "Hair", "Anti-Aging"], desc: "A naturally occurring copper peptide. Promotes collagen and elastin production, accelerates wound healing, and stimulates hair growth." },
+  { name: "NAD+", tags: ["Energy", "Anti-Aging", "Cellular Health"], desc: "A critical coenzyme found in every cell. Supplementation boosts mitochondrial function, aids in DNA repair, and increases overall energy levels." },
+  { name: "Glutathione", tags: ["Detox", "Antioxidant", "Skin"], desc: "The body's master antioxidant. Vital for liver detoxification, reducing oxidative stress, immune support, and promoting skin brightness." },
+  { name: "5-amino-1mq", tags: ["Fat Loss", "Energy"], desc: "A small molecule that blocks the NNMT enzyme. Effectively reverses diet-induced obesity and enhances cellular energy metabolism without jitteriness." },
+  { name: "AOD 9604", tags: ["Fat Loss"], desc: "Anti-Obesity Drug. A modified fragment of human growth hormone that specifically stimulates fat burning without affecting blood sugar or tissue growth." },
+  { name: "Cagrilintide", tags: ["Weight Loss"], desc: "A long-acting amylin analog. Works synergistically with GLP-1s to significantly increase feelings of fullness and slow gastric emptying." },
+  { name: "Epithalon", tags: ["Anti-Aging", "Sleep", "Longevity"], desc: "A pineal gland peptide that regulates the sleep-wake cycle and has been shown to lengthen telomeres, extending the lifespan of cells." },
+  { name: "MOTS-c", tags: ["Metabolism", "Exercise Mimetic"], desc: "A mitochondrial-derived peptide. Acts as an 'exercise mimetic' by boosting metabolism, improving insulin sensitivity, and enhancing physical performance." },
+  { name: "SS-31 (Elamipretide)", tags: ["Mitochondria", "Organ Health"], desc: "Targets the inner mitochondrial membrane to restore cellular energy production, drastically reducing oxidative stress and protecting organs." },
+  { name: "Selank", tags: ["Anxiety", "Nootropic", "Focus"], desc: "A synthetic peptide with anxiolytic (anti-anxiety) and nootropic properties. Improves learning and stabilizes mood without causing sedation." },
+  { name: "Semax", tags: ["Cognition", "Nootropic", "Focus"], desc: "A neuroactive peptide that increases Brain-Derived Neurotrophic Factor (BDNF). Enhances focus, memory, and offers neuroprotection." },
+  { name: "Tesamorelin", tags: ["Fat Loss", "Growth Hormone"], desc: "A GHRH analog heavily researched and known specifically for its unique ability to reduce visceral adipose tissue (stubborn belly fat)." },
+  { name: "Ipamorelin", tags: ["Growth Hormone", "Anti-Aging"], desc: "A selective GHRP that stimulates a massive release of natural growth hormone without significantly spiking cortisol or prolactin (no hunger spikes)." },
+  { name: "CJC-1295", tags: ["Growth Hormone", "Recovery"], desc: "A synthetic GHRH analog that increases basal growth hormone levels and IGF-1, deeply improving sleep, recovery, and muscle growth." },
+  { name: "PT-141 (Bremelanotide)", tags: ["Libido", "Sexual Health"], desc: "Works directly through the nervous system to significantly increase sexual desire and treat sexual dysfunction in both men and women." },
+  { name: "KPV", tags: ["Anti-Inflammatory", "Gut", "Skin"], desc: "A powerful, naturally occurring anti-inflammatory peptide. Extremely effective for inflammatory bowel diseases (IBD), psoriasis, and systemic inflammation." },
+  { name: "Cerebrolysin", tags: ["Brain Health", "Nootropic"], desc: "A peptide blend that mimics neurotrophic factors. Used for cognitive enhancement, stroke recovery, and protecting against neurodegenerative diseases." },
+  { name: "Thymosin Alpha-1", tags: ["Immune Support", "Healing"], desc: "A major component of the thymus gland. Restores immune function, helps fight chronic infections, and acts as a powerful immunomodulator." },
+  { name: "Pinealon", tags: ["Brain Health", "Circadian Rhythm"], desc: "A short peptide that interacts directly with DNA to protect brain cells from hypoxia and regulate the circadian rhythm." },
+  { name: "L-Carnitine", tags: ["Fat Loss", "Energy"], desc: "An amino acid derivative that transports fatty acids into your cells' mitochondria to be burned for usable energy." }
 ];
 
 const safeAwait = (promise, ms = 15000) => {
@@ -72,19 +101,17 @@ export default function App() {
   const [showPayModal, setShowPayModal] = useState(false);
   const [showHitListModal, setShowHitListModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [showWikiModal, setShowWikiModal] = useState(false); // ✨ NEW: Wiki Modal State
   const [selectedProfileEmail, setSelectedProfileEmail] = useState(null);
   const [isBtnLoading, setIsBtnLoading] = useState(false);
   
-  // ✨ Animation States
   const [shakingField, setShakingField] = useState(null);
   const [shakingProd, setShakingProd] = useState(null);
 
-  // Admin Security State
   const [adminPassword, setAdminPassword] = useState('');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [loginError, setLoginError] = useState('');
 
-  // Database State
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]); 
@@ -94,6 +121,7 @@ export default function App() {
     fxRate: 60,
     adminFeePhp: 150,
     minOrder: 3,
+    storeOpen: true, 
     paymentsOpen: false,
     addOnly: false,
     proofFolder: 'proof of payments',
@@ -106,7 +134,6 @@ export default function App() {
     ]
   });
 
-  // Shop Form State
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerHandle, setCustomerHandle] = useState('');
@@ -114,14 +141,13 @@ export default function App() {
   const [cartItems, setCartItems] = useState({}); 
   const [addressForm, setAddressForm] = useState({ shipOpt: '', street: '', brgy: '', city: '', prov: '', zip: '', contact: '' });
   const [searchQuery, setSearchQuery] = useState('');
+  const [wikiSearchQuery, setWikiSearchQuery] = useState(''); // ✨ NEW: Wiki Search State
   const [adminGlobalSearch, setAdminGlobalSearch] = useState('');
-  const [adminSettingsProductSearch, setAdminSettingsProductSearch] = useState(''); // ✨ NEW: Dedicated search for Manage Products
+  const [adminSettingsProductSearch, setAdminSettingsProductSearch] = useState(''); 
 
-  // Admin New Product/Admin State
   const [newProd, setNewProd] = useState({ name: '', kit: '', vial: '', max: '' });
   const [newAdmin, setNewAdmin] = useState({ name: '', bank1: '', qr1: '', bank2: '', qr2: '' });
 
-  // --- AUTHENTICATION ---
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -139,7 +165,6 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // --- DATA FETCHING ---
   useEffect(() => {
     if (!user) return;
     const unsubSettings = onSnapshot(collection(db, colPath('settings')), (snap) => { snap.forEach(d => { if (d.id === 'main') setSettings(d.data()); }); });
@@ -150,7 +175,6 @@ export default function App() {
     return () => { unsubSettings(); unsubProducts(); unsubOrders(); unsubUsers(); unsubHistory(); };
   }, [user]);
 
-  // --- DERIVED STATE ---
   const enrichedProducts = useMemo(() => {
     const productStats = {};
     orders.forEach(o => {
@@ -236,7 +260,6 @@ export default function App() {
     });
   }, [orders, products, settings, users]);
 
-  // ✨ GLOBAL ADMIN SEARCH FILTERS
   const filteredAdminProducts = useMemo(() => {
     return enrichedProducts.filter(p => !adminGlobalSearch || p.name.toLowerCase().includes(adminGlobalSearch.toLowerCase()));
   }, [enrichedProducts, adminGlobalSearch]);
@@ -266,6 +289,17 @@ export default function App() {
     return products.filter(p => !adminSettingsProductSearch || p.name.toLowerCase().includes(adminSettingsProductSearch.toLowerCase()));
   }, [products, adminSettingsProductSearch]);
 
+  // ✨ NEW: Filter Wiki Data
+  const filteredWikiData = useMemo(() => {
+    if (!wikiSearchQuery) return WIKI_DATA;
+    const lowerQuery = wikiSearchQuery.toLowerCase();
+    return WIKI_DATA.filter(w => 
+      w.name.toLowerCase().includes(lowerQuery) || 
+      w.tags.some(t => t.toLowerCase().includes(lowerQuery)) ||
+      w.desc.toLowerCase().includes(lowerQuery)
+    );
+  }, [wikiSearchQuery]);
+
   const customerProfile = useMemo(() => users.find(u => u.id === customerEmail.toLowerCase().trim()) || null, [users, customerEmail]);
 
   const existingOrderData = useMemo(() => {
@@ -283,7 +317,6 @@ export default function App() {
     return trimmingHitList.some(v => v.email === customerEmail.toLowerCase().trim());
   }, [trimmingHitList, customerEmail, settings.addOnly]);
 
-  // --- ACTIONS ---
   const triggerShake = (field) => {
     setShakingField(field);
     setTimeout(() => setShakingField(null), 500);
@@ -310,7 +343,7 @@ export default function App() {
       if (customerProfile.address) setAddressForm(customerProfile.address);
       
       const atRisk = trimmingHitList.some(v => v.email === customerEmail.toLowerCase().trim());
-      if (settings.addOnly && atRisk) {
+      if (settings.addOnly && atRisk && settings.storeOpen !== false) {
         showToast(`🚨 URGENT ${customerProfile.name}: Your vials are on the Hit List!`);
       } else {
         showToast(`Welcome back, ${customerProfile.name}! 💖 Profile loaded.`);
@@ -318,7 +351,7 @@ export default function App() {
       
       if (settings.addOnly && !settings.paymentsOpen) setAction('add');
     } else {
-      showToast("No existing profile found. Welcome! ✨");
+      showToast(settings.storeOpen !== false ? "No existing profile found. Welcome! ✨" : "No profile found for this email.");
     }
   };
 
@@ -342,7 +375,6 @@ export default function App() {
     setCartItems(prev => ({ ...prev, [prodName]: { k: prev[prodName]?.k || 0, v: prev[prodName]?.v || 0, [field]: num } }));
   };
 
-  // ✨ IMPROVED: Shake and autocorrect on blur
   const handleCartBlur = (prodName) => {
     const cart = cartItems[prodName];
     if (!cart) return;
@@ -355,12 +387,11 @@ export default function App() {
       showToast(`Minimum ${settings.minOrder} vials required per item! 🎀`);
       setCartItems(prev => ({ ...prev, [prodName]: { ...cart, v: settings.minOrder } }));
       setShakingProd(prodName);
-      setTimeout(() => setShakingProd(null), 500); // Trigger physical card shake
+      setTimeout(() => setShakingProd(null), 500); 
     }
   };
 
   const submitOrder = async () => {
-    // ✨ Visual Shakes for Missing Fields!
     if (!customerEmail) { triggerShake('email'); showToast("Email Address is required! 💌"); return; }
     if (!customerName) { triggerShake('name'); showToast("Your Name is required! 🌸"); return; }
     if (!action) { triggerShake('action'); showToast("Please choose an Action! ⚡"); return; }
@@ -402,7 +433,6 @@ export default function App() {
         newOrderItems.push({ email: emailLower, name: customerName, handle: customerHandle, product: prodName, qty, timestamp });
       });
 
-      // Prevent submitting empty selections
       if (action === 'replace' && newlyAddedQty === 0) {
          showToast("Your cart is empty! Add items or choose 'Cancel Order'. 🛍️");
          setIsBtnLoading(false);
@@ -414,7 +444,6 @@ export default function App() {
          return;
       }
 
-      // Check global minimums based on action
       let finalTotalQty = 0;
       if (action === 'replace') {
          finalTotalQty = newlyAddedQty;
@@ -431,7 +460,6 @@ export default function App() {
 
       if (errors.length > 0) { showToast(errors.join(' | ')); setIsBtnLoading(false); return; }
 
-      // Database Commit with Batched Writes
       if (action === 'replace') {
         const toDelete = orders.filter(o => o.email === emailLower);
         for (const chunk of chunkArray(toDelete, 250)) {
@@ -547,7 +575,7 @@ export default function App() {
         await safeAwait(batch.commit());
       }
 
-      await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), { ...settings, paymentsOpen: false, addOnly: false }));
+      await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), { ...settings, paymentsOpen: false, addOnly: false, storeOpen: true }));
       showToast('✅ System Reset & Archived!');
     } catch (err) { console.error(err); showToast(`❌ Error resetting system: ${err.message}`); }
     setIsBtnLoading(false);
@@ -921,9 +949,8 @@ export default function App() {
   const existingMap = {};
   userOrders.forEach(o => existingMap[o.product] = o.qty);
 
-  // ✨ FIXED: Perfectly calculates cartList whether adding new items, replacing, or just viewing.
   const finalItems = {};
-  if (settings.paymentsOpen || action === '' || action === 'cancel') {
+  if (settings.paymentsOpen || action === '' || action === 'cancel' || settings.storeOpen === false) {
     Object.assign(finalItems, existingMap);
   } else if (action === 'replace') {
     Object.entries(cartItems).forEach(([p, a]) => {
@@ -975,7 +1002,6 @@ export default function App() {
           appearance: textfield;
         }
 
-        /* ✨ NEW: Bounce & Shake Animations */
         @keyframes shake {
           0%, 100% { transform: translateX(0); }
           20% { transform: translateX(-6px); }
@@ -1000,7 +1026,7 @@ export default function App() {
 
       {view === 'shop' ? (
         <div className="min-h-screen w-full text-[#4A042A] pb-24 lg:pb-8 selection:bg-pink-300" style={{ background: 'linear-gradient(135deg, #FFC3EB 0%, #FF8EBD 100%)', backgroundAttachment: 'fixed' }}>
-          <div className="w-full max-w-[1600px] mx-auto p-4 pt-6">
+          <div className="w-full max-w-[1600px] mx-auto p-4 pt-6 relative">
             <h1 className="brand-title text-3xl sm:text-5xl text-center text-white mb-2 flex items-center justify-center gap-3">
               ✨ Bonded <span className="text-sm font-black uppercase tracking-widest text-white/80 transform translate-y-2" style={{fontFamily: "'Quicksand', sans-serif !important"}}>by</span> Peptides ✨
             </h1>
@@ -1010,182 +1036,222 @@ export default function App() {
               </span>
             </div>
 
-            {settings.paymentsOpen && (
-              <div className="bg-white border-l-4 border-[#FF1493] p-3 rounded-lg mb-4 text-sm font-bold shadow-sm">🔒 PAYMENTS OPEN: Check email below to pay.</div>
-            )}
-            {settings.addOnly && !settings.paymentsOpen && (
-              <div className="bg-white border-l-4 border-amber-500 p-4 rounded-2xl mb-6 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div>
-                  <div className="text-sm font-black text-amber-600 mb-1">⚠️ ADD-ONLY MODE ACTIVE</div>
-                  <div className="text-xs font-bold text-slate-500">No edits allowed. Help save incomplete boxes!</div>
-                </div>
-                <button onClick={() => setShowHitListModal(true)} className="bg-amber-100 text-amber-700 px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-200 transition-colors shadow-sm whitespace-nowrap">
-                  ✂️ View Hit List
-                </button>
-              </div>
-            )}
-
-            <div className="flex flex-col lg:grid lg:grid-cols-[1fr_380px] xl:grid-cols-[1fr_450px] gap-6 items-start">
-              <div className="space-y-4 w-full">
+            {settings.storeOpen === false ? (
+              // CLOSED STORE UI
+              <div className="glass-card p-8 sm:p-12 shadow-xl max-w-2xl mx-auto text-center mt-8 mb-24 relative overflow-hidden bg-white/95 backdrop-blur-md">
+                <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#FF1493] to-[#FFC3EB]"></div>
+                <Package size={64} className="mx-auto text-pink-200 mb-4" />
+                <h2 className="brand-title text-3xl sm:text-4xl text-[#D6006E] mb-4">The Group Buy is Closed! 🌸</h2>
+                <p className="text-sm sm:text-base text-gray-600 font-bold mb-8 leading-relaxed">
+                  All orders have been finalized and the current batch is being processed. 
+                  Thank you for participating! You can still check your profile, saved shipping address, and past order history below.
+                </p>
                 
-                {isCurrentUserAtRisk && (
-                   <div className="bg-rose-100 border-2 border-rose-500 p-4 rounded-2xl shadow-sm animate-pulse flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                     <div>
-                       <h3 className="text-rose-700 font-black text-sm mb-1">🚨 YOUR VIALS ARE AT RISK!</h3>
-                       <p className="text-xs text-rose-600 font-bold">You have loose vials on the Hit List. If the box isn't completed before cutoff, they will be deleted. Help fill the box!</p>
-                     </div>
-                     <button onClick={() => setShowHitListModal(true)} className="bg-rose-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md hover:bg-rose-700 whitespace-nowrap transition-transform hover:scale-105">
-                       Click Here 👉 View Hit List
-                     </button>
-                   </div>
-                )}
-
-                <div className="glass-card p-6 shadow-sm">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="sm:col-span-2">
-                      <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">💌 Email Address</label>
-                      <input type="email" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)} onBlur={handleLookup} className={`${originalInput} transition-all duration-300 ${shakingField === 'email' ? 'animate-shake border-red-500 bg-red-50 text-red-700 placeholder:text-red-300' : ''}`} placeholder="Enter email to lookup profile..."/>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">🌸 Name</label>
-                      <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} className={`${originalInput} transition-all duration-300 ${shakingField === 'name' ? 'animate-shake border-red-500 bg-red-50 text-red-700 placeholder:text-red-300' : ''}`} placeholder="Full name" disabled={settings.paymentsOpen}/>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">💬 Handle</label>
-                      <input type="text" value={customerHandle} onChange={e => setCustomerHandle(e.target.value)} className={originalInput} placeholder="@username" disabled={settings.paymentsOpen}/>
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">⚡ Action</label>
-                      <select value={action} onChange={e => handleActionChange(e.target.value)} className={`${originalInput} transition-all duration-300 ${shakingField === 'action' ? 'animate-shake border-red-500 bg-red-50 text-red-700' : ''}`} disabled={settings.paymentsOpen}>
-                        <option value="" disabled>Choose an action...</option>
-                        <option value="replace" disabled={settings.addOnly}>Create / Replace Order</option>
-                        <option value="add">Add Items (Keep Existing)</option>
-                        <option value="cancel" disabled={settings.addOnly}>Cancel Order</option>
-                      </select>
-                    </div>
+                <div className="max-w-sm mx-auto space-y-4 bg-slate-50 p-6 rounded-2xl border border-pink-100 shadow-inner">
+                  <div>
+                    <label className="block text-[10px] font-black text-[#D6006E] uppercase mb-2 text-center tracking-widest">💌 Enter your Email to view history</label>
+                    <input type="email" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)} onBlur={handleLookup} className={`${originalInput} text-center ${shakingField === 'email' ? 'animate-shake border-red-500 bg-red-50' : ''}`} placeholder="your@email.com"/>
                   </div>
                   
-                  <div className="mt-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs text-[#9E2A5E] bg-[#FFF0F5] p-3 rounded-xl border border-[#FFC0CB] font-semibold">
-                     <span>{customerProfile?.address?.street ? `✅ Profile Active: Shipping to ${customerProfile.address.city}` : "ℹ️ New customer? Your address will be saved securely upon payment."}</span>
-                     {customerProfile && (
-                       <button onClick={() => setSelectedProfileEmail(customerEmail)} className="text-[#D6006E] font-black hover:underline flex items-center gap-1 whitespace-nowrap bg-white px-2 py-1 rounded-md border border-pink-200 shadow-sm"><Users size={12}/> View Profile & History</button>
-                     )}
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-3xl border-2 border-[#FF1493] shadow-sm relative z-10">
-                  <div className="sticky top-0 z-30 p-4 sm:p-5 border-b-2 border-[#FFC0CB] flex flex-col sm:flex-row justify-between items-center gap-4 bg-white/95 backdrop-blur-xl rounded-t-[1.3rem] shadow-sm">
-                     <h2 className="font-black text-[#D6006E] uppercase tracking-widest text-base sm:text-lg flex items-center gap-2 whitespace-nowrap">
-                       <Package size={22} className="text-[#FF1493]"/> Shop Catalog
-                     </h2>
-                     <div className="relative w-full">
-                       <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-400" size={18} />
-                       <input type="text" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Search products..." className="w-full pl-11 pr-4 py-3 rounded-2xl text-sm font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-[#FFF0F5] placeholder:text-pink-300 text-[#4A042A] shadow-inner"/>
-                     </div>
-                  </div>
-                  
-                  {products.length === 0 ? (
-                    <div className="p-12 text-center text-pink-400 font-bold italic">No products available yet.</div>
+                  {customerProfile ? (
+                    <button onClick={() => setSelectedProfileEmail(customerEmail)} className="w-full bg-gradient-to-r from-[#FF1493] to-[#FF69B4] text-white font-black py-4 rounded-xl uppercase tracking-widest shadow-md hover:scale-[0.98] transition-transform flex items-center justify-center gap-2 mt-4">
+                      <Users size={18} /> View Profile & History
+                    </button>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-4 p-2 sm:p-6 bg-slate-50/50 rounded-b-3xl">
-                      {filteredShopProducts.map(p => {
-                         const cart = cartItems[p.name] || { k:0, v:0 };
-                         const active = cart.k > 0 || cart.v > 0;
-                         const exist = existingMap[p.name] || 0;
-                         
-                         return (
-                          <div key={p.id} className={`p-3 sm:p-5 rounded-xl sm:rounded-2xl border-2 transition-all duration-300 ${shakingProd === p.name ? 'animate-shake border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)] z-20 bg-red-50' : (active ? 'bg-[#FFF0F5] border-[#D6006E] shadow-md scale-[1.01] z-10' : 'bg-white border-[#FFE4E1] hover:border-pink-300')}`}>
-                            <div className="flex justify-between items-start mb-2 sm:mb-4 gap-2">
-                              <div className="min-w-0 flex-1">
-                                <h3 className="font-black text-sm sm:text-lg text-[#4A042A] leading-tight">{p.name}</h3>
-                                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-1 sm:mt-1.5">
-                                  <span className="bg-[#FF1493] text-white px-2 sm:px-2.5 py-0.5 rounded-full text-[9px] sm:text-xs font-bold shadow-sm">${p.pricePerVialUSD.toFixed(2)} / vial</span>
-                                  {exist > 0 && <span className="bg-[#9C27B0] text-white px-2 sm:px-2.5 py-0.5 rounded-full text-[9px] sm:text-xs font-bold shadow-sm">📦 Has {exist}</span>}
-                                </div>
-                              </div>
-                              <span className={`shrink-0 text-[8px] sm:text-[10px] font-black uppercase px-2 sm:px-3 py-1 sm:py-1.5 rounded-full border shadow-sm whitespace-nowrap ${p.statusKey === 'available' ? 'bg-[#E6F6EC] text-[#079E51] border-[#bbf7d0]' : p.statusKey === 'full' ? 'bg-[#FFEBEE] text-[#D32F2F] border-[#ffcdd2]' : p.statusKey === 'locked' ? 'bg-gray-100 text-gray-500 border-gray-300' : 'bg-[#F3E5F5] text-[#7B1FA2] border-[#e1bee7]'}`}>
-                                {p.statusText}
-                              </span>
-                            </div>
-                            
-                            <div className={`flex gap-2 sm:gap-3 ${p.isClosed ? 'opacity-40 pointer-events-none' : ''}`}>
-                              <label className="bg-slate-50 border border-pink-100 rounded-md sm:rounded-lg p-1 sm:p-1.5 flex-1 flex justify-between items-center transition-colors focus-within:border-pink-400 focus-within:bg-white shadow-inner cursor-text">
-                                <span className="text-[8px] sm:text-[9px] font-black uppercase text-pink-400 ml-1 shrink-0">Kits<span className="hidden sm:inline"> (10x)</span></span>
-                                <input type="number" min="0" value={cart.k || ''} onChange={e=>handleCartChange(p.name, 'k', e.target.value)} onBlur={()=>handleCartBlur(p.name)} className={`w-full ml-1 sm:ml-2 text-right font-black text-sm sm:text-base outline-none bg-transparent placeholder:text-pink-200 ${shakingProd === p.name ? 'text-red-600' : 'text-[#D6006E]'}`} placeholder="0" disabled={p.isClosed}/>
-                              </label>
-                              <label className="bg-slate-50 border border-pink-100 rounded-md sm:rounded-lg p-1 sm:p-1.5 flex-1 flex justify-between items-center transition-colors focus-within:border-pink-400 focus-within:bg-white shadow-inner cursor-text">
-                                <span className="text-[8px] sm:text-[9px] font-black uppercase text-pink-400 ml-1 shrink-0">Vials<span className="hidden sm:inline"> (1x)</span></span>
-                                <input type="number" min="0" max="9" value={cart.v || ''} onChange={e=>handleCartChange(p.name, 'v', e.target.value)} onBlur={()=>handleCartBlur(p.name)} className={`w-full ml-1 sm:ml-2 text-right font-black text-sm sm:text-base outline-none bg-transparent placeholder:text-pink-200 ${shakingProd === p.name ? 'text-red-600' : 'text-[#D6006E]'}`} placeholder="0" disabled={p.isClosed}/>
-                              </label>
-                            </div>
-                          </div>
-                         );
-                      })}
-                    </div>
+                    <p className="text-[10px] text-pink-400 font-bold italic mt-4 px-4">Enter an email with past orders to unlock your profile dashboard.</p>
                   )}
                 </div>
               </div>
+            ) : (
+              // --- NORMAL STORE UI ---
+              <>
+                {settings.paymentsOpen && (
+                  <div className="bg-white border-l-4 border-[#FF1493] p-3 rounded-lg mb-4 text-sm font-bold shadow-sm">🔒 PAYMENTS OPEN: Check email below to pay.</div>
+                )}
+                {settings.addOnly && !settings.paymentsOpen && (
+                  <div className="bg-white border-l-4 border-amber-500 p-4 rounded-2xl mb-6 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div>
+                      <div className="text-sm font-black text-amber-600 mb-1">⚠️ ADD-ONLY MODE ACTIVE</div>
+                      <div className="text-xs font-bold text-slate-500">No edits allowed. Help save incomplete boxes!</div>
+                    </div>
+                    <button onClick={() => setShowHitListModal(true)} className="bg-amber-100 text-amber-700 px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-200 transition-colors shadow-sm whitespace-nowrap">
+                      ✂️ View Hit List
+                    </button>
+                  </div>
+                )}
 
-              <aside className="hidden lg:block sticky top-6 w-full self-start">
-                <div className="glass-card p-6 shadow-xl">
-                  <h3 className="brand-title text-2xl text-[#D6006E] border-b-2 border-pink-100 pb-2 mb-4 text-center">Your Cart 🛍️</h3>
-                  <div className="max-h-[350px] overflow-y-auto mb-4 space-y-2 pr-2">
-                    {cartList.length === 0 ? <div className="text-center text-pink-300 font-bold italic py-8">No items selected yet!</div> : cartList.map((i, idx) => (
-                      <div key={idx} className="flex justify-between items-center text-sm xl:text-base border-b border-pink-50 border-dashed pb-2">
-                        <div className="font-bold">{i.product}</div>
-                        <div className="text-right">
-                          <span className="text-[#D6006E] font-black">x{i.qty}</span>
-                          <span className="text-gray-400 ml-2 font-bold">${(i.price * i.qty).toFixed(2)}</span>
+                <div className="flex flex-col lg:grid lg:grid-cols-[1fr_380px] xl:grid-cols-[1fr_450px] gap-6 items-start">
+                  <div className="space-y-4 w-full">
+                    
+                    {isCurrentUserAtRisk && (
+                       <div className="bg-rose-100 border-2 border-rose-500 p-4 rounded-2xl shadow-sm animate-pulse flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                         <div>
+                           <h3 className="text-rose-700 font-black text-sm mb-1">🚨 YOUR VIALS ARE AT RISK!</h3>
+                           <p className="text-xs text-rose-600 font-bold">You have loose vials on the Hit List. If the box isn't completed before cutoff, they will be deleted. Help fill the box!</p>
+                         </div>
+                         <button onClick={() => setShowHitListModal(true)} className="bg-rose-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md hover:bg-rose-700 whitespace-nowrap transition-transform hover:scale-105">
+                           Click Here 👉 View Hit List
+                         </button>
+                       </div>
+                    )}
+
+                    <div className="glass-card p-6 shadow-sm">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="sm:col-span-2">
+                          <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">💌 Email Address</label>
+                          <input type="email" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)} onBlur={handleLookup} className={`${originalInput} transition-all duration-300 ${shakingField === 'email' ? 'animate-shake border-red-500 bg-red-50 text-red-700 placeholder:text-red-300' : ''}`} placeholder="Enter email to lookup profile..."/>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">🌸 Name</label>
+                          <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} className={`${originalInput} transition-all duration-300 ${shakingField === 'name' ? 'animate-shake border-red-500 bg-red-50 text-red-700 placeholder:text-red-300' : ''}`} placeholder="Full name" disabled={settings.paymentsOpen}/>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">💬 Handle</label>
+                          <input type="text" value={customerHandle} onChange={e => setCustomerHandle(e.target.value)} className={originalInput} placeholder="@username" disabled={settings.paymentsOpen}/>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">⚡ Action</label>
+                          <select value={action} onChange={e => handleActionChange(e.target.value)} className={`${originalInput} transition-all duration-300 ${shakingField === 'action' ? 'animate-shake border-red-500 bg-red-50 text-red-700' : ''}`} disabled={settings.paymentsOpen}>
+                            <option value="" disabled>Choose an action...</option>
+                            <option value="replace" disabled={settings.addOnly}>Create / Replace Order</option>
+                            <option value="add">Add Items (Keep Existing)</option>
+                            <option value="cancel" disabled={settings.addOnly}>Cancel Order</option>
+                          </select>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                  <div className="pt-4 border-t-2 border-pink-100 space-y-1 text-sm xl:text-base">
-                    <div className="flex justify-between text-xs font-bold text-gray-500 uppercase"><span>Subtotal</span><span>${subtotalUSD.toFixed(2)}</span></div>
-                    <div className="flex justify-between text-xs font-bold text-gray-500 uppercase"><span>Admin Fee</span><span>₱{settings.adminFeePhp}</span></div>
-                    <div className="flex flex-col items-end pt-2">
-                      <span className="text-3xl xl:text-4xl font-black text-[#D6006E]">₱{totalPHP.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                      
+                      <div className="mt-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs text-[#9E2A5E] bg-[#FFF0F5] p-3 rounded-xl border border-[#FFC0CB] font-semibold">
+                         <span>{customerProfile?.address?.street ? `✅ Profile Active: Shipping to ${customerProfile.address.city}` : "ℹ️ New customer? Your address will be saved securely upon payment."}</span>
+                         {customerProfile && (
+                           <button onClick={() => setSelectedProfileEmail(customerEmail)} className="text-[#D6006E] font-black hover:underline flex items-center gap-1 whitespace-nowrap bg-white px-2 py-1 rounded-md border border-pink-200 shadow-sm"><Users size={12}/> View Profile & History</button>
+                         )}
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-3xl border-2 border-[#FF1493] shadow-sm relative z-10">
+                      <div className="sticky top-0 z-30 p-4 sm:p-5 border-b-2 border-[#FFC0CB] flex flex-col sm:flex-row justify-between items-center gap-4 bg-white/95 backdrop-blur-xl rounded-t-[1.3rem] shadow-sm">
+                         <h2 className="font-black text-[#D6006E] uppercase tracking-widest text-base sm:text-lg flex items-center gap-2 whitespace-nowrap">
+                           <Package size={22} className="text-[#FF1493]"/> Shop Catalog
+                         </h2>
+                         <div className="relative w-full">
+                           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-400" size={18} />
+                           <input type="text" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Search products..." className="w-full pl-11 pr-4 py-3 rounded-2xl text-sm font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-[#FFF0F5] placeholder:text-pink-300 text-[#4A042A] shadow-inner"/>
+                         </div>
+                      </div>
+                      
+                      {products.length === 0 ? (
+                        <div className="p-12 text-center text-pink-400 font-bold italic">No products available yet.</div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-4 p-2 sm:p-6 bg-slate-50/50 rounded-b-3xl">
+                          {filteredShopProducts.map(p => {
+                             const cart = cartItems[p.name] || { k:0, v:0 };
+                             const active = cart.k > 0 || cart.v > 0;
+                             const exist = existingMap[p.name] || 0;
+                             
+                             return (
+                              <div key={p.id} className={`p-3 sm:p-5 rounded-xl sm:rounded-2xl border-2 transition-all duration-300 ${shakingProd === p.name ? 'animate-shake border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)] z-20 bg-red-50' : (active ? 'bg-[#FFF0F5] border-[#D6006E] shadow-md scale-[1.01] z-10' : 'bg-white border-[#FFE4E1] hover:border-pink-300')}`}>
+                                <div className="flex justify-between items-start mb-2 sm:mb-4 gap-2">
+                                  <div className="min-w-0 flex-1">
+                                    <h3 className="font-black text-sm sm:text-lg text-[#4A042A] leading-tight">{p.name}</h3>
+                                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-1 sm:mt-1.5">
+                                      <span className="bg-[#FF1493] text-white px-2 sm:px-2.5 py-0.5 rounded-full text-[9px] sm:text-xs font-bold shadow-sm">${p.pricePerVialUSD.toFixed(2)} / vial</span>
+                                      {exist > 0 && <span className="bg-[#9C27B0] text-white px-2 sm:px-2.5 py-0.5 rounded-full text-[9px] sm:text-xs font-bold shadow-sm">📦 Has {exist}</span>}
+                                    </div>
+                                  </div>
+                                  <span className={`shrink-0 text-[8px] sm:text-[10px] font-black uppercase px-2 sm:px-3 py-1 sm:py-1.5 rounded-full border shadow-sm whitespace-nowrap ${p.statusKey === 'available' ? 'bg-[#E6F6EC] text-[#079E51] border-[#bbf7d0]' : p.statusKey === 'full' ? 'bg-[#FFEBEE] text-[#D32F2F] border-[#ffcdd2]' : p.statusKey === 'locked' ? 'bg-gray-100 text-gray-500 border-gray-300' : 'bg-[#F3E5F5] text-[#7B1FA2] border-[#e1bee7]'}`}>
+                                    {p.statusText}
+                                  </span>
+                                </div>
+                                
+                                <div className={`flex gap-2 sm:gap-3 ${p.isClosed ? 'opacity-40 pointer-events-none' : ''}`}>
+                                  <label className="bg-slate-50 border border-pink-100 rounded-md sm:rounded-lg p-1 sm:p-1.5 flex-1 flex justify-between items-center transition-colors focus-within:border-pink-400 focus-within:bg-white shadow-inner cursor-text">
+                                    <span className="text-[8px] sm:text-[9px] font-black uppercase text-pink-400 ml-1 shrink-0">Kits<span className="hidden sm:inline"> (10x)</span></span>
+                                    <input type="number" min="0" value={cart.k || ''} onChange={e=>handleCartChange(p.name, 'k', e.target.value)} onBlur={()=>handleCartBlur(p.name)} className={`w-full ml-1 sm:ml-2 text-right font-black text-sm sm:text-base outline-none bg-transparent placeholder:text-pink-200 ${shakingProd === p.name ? 'text-red-600' : 'text-[#D6006E]'}`} placeholder="0" disabled={p.isClosed}/>
+                                  </label>
+                                  <label className="bg-slate-50 border border-pink-100 rounded-md sm:rounded-lg p-1 sm:p-1.5 flex-1 flex justify-between items-center transition-colors focus-within:border-pink-400 focus-within:bg-white shadow-inner cursor-text">
+                                    <span className="text-[8px] sm:text-[9px] font-black uppercase text-pink-400 ml-1 shrink-0">Vials<span className="hidden sm:inline"> (1x)</span></span>
+                                    <input type="number" min="0" max="9" value={cart.v || ''} onChange={e=>handleCartChange(p.name, 'v', e.target.value)} onBlur={()=>handleCartBlur(p.name)} className={`w-full ml-1 sm:ml-2 text-right font-black text-sm sm:text-base outline-none bg-transparent placeholder:text-pink-200 ${shakingProd === p.name ? 'text-red-600' : 'text-[#D6006E]'}`} placeholder="0" disabled={p.isClosed}/>
+                                  </label>
+                                </div>
+                              </div>
+                             );
+                          })}
+                        </div>
+                      )}
                     </div>
                   </div>
-                  
-                  <div className="flex flex-col gap-2 mt-6">
-                    <button onClick={() => setShowPreviewModal(true)} disabled={cartList.length === 0} className="w-full bg-white text-[#D6006E] border-2 border-pink-200 font-bold py-4 rounded-full uppercase tracking-widest text-sm shadow-sm hover:bg-pink-50 disabled:opacity-50 transition-transform hover:scale-[0.98] active:scale-95">Preview 👀</button>
-                    {!settings.paymentsOpen ? (
-                      <button onClick={submitOrder} disabled={isBtnLoading} className={`${originalBtn} w-full py-4`}>
-                        {isBtnLoading ? "Saving... ⏳" : action === 'cancel' ? "Confirm Cancel" : "Submit Order 💖"}
-                      </button>
-                    ) : (
-                      <button onClick={()=>setShowPayModal(true)} disabled={cartList.length === 0} className="w-full bg-[#008040] text-white font-bold py-4 rounded-full uppercase tracking-widest text-sm shadow-md hover:scale-[0.98] transition-transform active:scale-95 disabled:opacity-50">Pay Now 💸</button>
-                    )}
-                  </div>
+
+                  <aside className="hidden lg:block sticky top-6 w-full self-start">
+                    <div className="glass-card p-6 shadow-xl">
+                      <h3 className="brand-title text-2xl text-[#D6006E] border-b-2 border-pink-100 pb-2 mb-4 text-center">Your Cart 🛍️</h3>
+                      <div className="max-h-[350px] overflow-y-auto mb-4 space-y-2 pr-2">
+                        {cartList.length === 0 ? <div className="text-center text-pink-300 font-bold italic py-8">No items selected yet!</div> : cartList.map((i, idx) => (
+                          <div key={idx} className="flex justify-between items-center text-sm xl:text-base border-b border-pink-50 border-dashed pb-2">
+                            <div className="font-bold">{i.product}</div>
+                            <div className="text-right">
+                              <span className="text-[#D6006E] font-black">x{i.qty}</span>
+                              <span className="text-gray-400 ml-2 font-bold">${(i.price * i.qty).toFixed(2)}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="pt-4 border-t-2 border-pink-100 space-y-1 text-sm xl:text-base">
+                        <div className="flex justify-between text-xs font-bold text-gray-500 uppercase"><span>Subtotal</span><span>${subtotalUSD.toFixed(2)}</span></div>
+                        <div className="flex justify-between text-xs font-bold text-gray-500 uppercase"><span>Admin Fee</span><span>₱{settings.adminFeePhp}</span></div>
+                        <div className="flex flex-col items-end pt-2">
+                          <span className="text-3xl xl:text-4xl font-black text-[#D6006E]">₱{totalPHP.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-col gap-2 mt-6">
+                        <button onClick={() => setShowPreviewModal(true)} disabled={cartList.length === 0} className="w-full bg-white text-[#D6006E] border-2 border-pink-200 font-bold py-4 rounded-full uppercase tracking-widest text-sm shadow-sm hover:bg-pink-50 disabled:opacity-50 transition-transform hover:scale-[0.98] active:scale-95">Preview 👀</button>
+                        {!settings.paymentsOpen ? (
+                          <button onClick={submitOrder} disabled={isBtnLoading} className={`${originalBtn} w-full py-4`}>
+                            {isBtnLoading ? "Saving... ⏳" : action === 'cancel' ? "Confirm Cancel" : "Submit Order 💖"}
+                          </button>
+                        ) : (
+                          <button onClick={()=>setShowPayModal(true)} disabled={cartList.length === 0} className="w-full bg-[#008040] text-white font-bold py-4 rounded-full uppercase tracking-widest text-sm shadow-md hover:scale-[0.98] transition-transform active:scale-95 disabled:opacity-50">Pay Now 💸</button>
+                        )}
+                      </div>
+                    </div>
+                  </aside>
                 </div>
-              </aside>
-            </div>
+              </>
+            )}
           </div>
 
-          <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t-2 border-[#FF1493] p-4 rounded-t-3xl shadow-[0_-10px_20px_rgba(0,0,0,0.1)] z-50 flex justify-between items-center gap-2">
-            <div className="shrink-0">
-              <div className="text-[10px] font-black text-[#D6006E] uppercase">Total Estimate</div>
-              <div className="text-xl sm:text-2xl font-black text-[#D6006E]">₱{totalPHP.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
-            </div>
-            
-            <div className="flex gap-2 w-full justify-end">
-              <button onClick={() => setShowPreviewModal(true)} disabled={cartList.length === 0} className="bg-white text-[#D6006E] border-2 border-pink-200 px-3 sm:px-4 py-2 sm:py-3 rounded-full font-bold uppercase text-[10px] sm:text-sm shadow-sm disabled:opacity-50 whitespace-nowrap active:scale-95 transition-transform">Preview 👀</button>
+          {/* Sticky Mobile Footer ONLY when Store is Open */}
+          {settings.storeOpen !== false && (
+            <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t-2 border-[#FF1493] p-4 rounded-t-3xl shadow-[0_-10px_20px_rgba(0,0,0,0.1)] z-50 flex justify-between items-center gap-2">
+              <div className="shrink-0">
+                <div className="text-[10px] font-black text-[#D6006E] uppercase">Total Estimate</div>
+                <div className="text-xl sm:text-2xl font-black text-[#D6006E]">₱{totalPHP.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+              </div>
               
-              {settings.paymentsOpen ? (
-                <button onClick={() => setShowPayModal(true)} disabled={cartList.length===0} className="bg-[#008040] text-white px-4 sm:px-6 py-2 sm:py-3 rounded-full font-bold uppercase text-[10px] sm:text-sm shadow-md disabled:opacity-50 whitespace-nowrap active:scale-95 transition-transform">Pay Now 💸</button>
-              ) : (
-                <button onClick={submitOrder} disabled={isBtnLoading} className="bg-[#D6006E] text-white px-4 sm:px-6 py-2 sm:py-3 rounded-full font-black uppercase text-[10px] sm:text-sm shadow-md disabled:opacity-50 whitespace-nowrap active:scale-95 transition-transform">
-                  {action === 'cancel' ? 'Cancel' : 'Submit 💖'}
-                </button>
-              )}
+              <div className="flex gap-2 w-full justify-end">
+                <button onClick={() => setShowPreviewModal(true)} disabled={cartList.length === 0} className="bg-white text-[#D6006E] border-2 border-pink-200 px-3 sm:px-4 py-2 sm:py-3 rounded-full font-bold uppercase text-[10px] sm:text-sm shadow-sm disabled:opacity-50 whitespace-nowrap active:scale-95 transition-transform">Preview 👀</button>
+                
+                {settings.paymentsOpen ? (
+                  <button onClick={() => setShowPayModal(true)} disabled={cartList.length===0} className="bg-[#008040] text-white px-4 sm:px-6 py-2 sm:py-3 rounded-full font-bold uppercase text-[10px] sm:text-sm shadow-md disabled:opacity-50 whitespace-nowrap active:scale-95 transition-transform">Pay Now 💸</button>
+                ) : (
+                  <button onClick={submitOrder} disabled={isBtnLoading} className="bg-[#D6006E] text-white px-4 sm:px-6 py-2 sm:py-3 rounded-full font-black uppercase text-[10px] sm:text-sm shadow-md disabled:opacity-50 whitespace-nowrap active:scale-95 transition-transform">
+                    {action === 'cancel' ? 'Cancel' : 'Submit 💖'}
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
-          <button onClick={()=>setView('admin')} className="fixed bottom-24 lg:bottom-6 right-4 bg-[#4A042A] text-white px-5 py-3 rounded-full font-bold text-xs uppercase tracking-widest shadow-xl z-[40] flex items-center gap-2 hover:scale-105 transition-transform">
-             <Lock size={14}/> Admin Access
+          {/* ✨ NEW: Always Accessible Wiki Button */}
+          <button onClick={()=>setShowWikiModal(true)} className="fixed bottom-24 lg:bottom-6 left-4 bg-white text-[#D6006E] px-4 sm:px-5 py-3 rounded-full font-bold text-xs uppercase tracking-widest shadow-xl z-[40] flex items-center gap-2 hover:scale-105 transition-transform border-2 border-pink-200">
+             <BookOpen size={16}/> <span className="hidden sm:inline">Peptide</span> Wiki
           </button>
 
+          <button onClick={()=>setView('admin')} className="fixed bottom-24 lg:bottom-6 right-4 bg-[#4A042A] text-white px-4 sm:px-5 py-3 rounded-full font-bold text-xs uppercase tracking-widest shadow-xl z-[40] flex items-center gap-2 hover:scale-105 transition-transform">
+             <Lock size={14}/> Admin
+          </button>
+
+          {/* Modals for Shop View */}
           {showPayModal && (
             <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
                <div className="bg-white rounded-[32px] w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
@@ -1339,9 +1405,49 @@ export default function App() {
             </div>
           )}
 
-          {toast && (
-            <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[500] bg-white border-2 border-pink-600 text-pink-600 px-6 py-3 rounded-full shadow-2xl font-black text-xs uppercase tracking-widest flex items-center gap-2">
-              <Info size={16}/> {toast}
+          {/* ✨ NEW: Peptide Wiki Modal */}
+          {showWikiModal && (
+            <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[400] flex items-center justify-center p-4">
+               <div className="bg-white rounded-[32px] w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
+                  
+                  <div className="bg-gradient-to-r from-[#FF1493] to-[#FF69B4] p-6 sm:p-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 relative">
+                     <button onClick={()=>setShowWikiModal(false)} className="absolute top-4 right-4 text-white/80 hover:text-white font-black text-3xl hover:scale-110 transition-transform">&times;</button>
+                     <div className="text-white">
+                       <h2 className="brand-title text-3xl sm:text-4xl m-0 text-white shadow-none">Peptide Wiki 📖</h2>
+                       <p className="text-white/90 font-bold text-sm mt-2 max-w-md">Your quick-reference knowledge base for understanding the benefits and uses of the compounds we offer.</p>
+                     </div>
+                  </div>
+                  
+                  <div className="bg-[#FFF0F5] p-4 border-b-2 border-[#FFC0CB]">
+                     <div className="relative w-full max-w-md mx-auto">
+                       <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-400" size={18} />
+                       <input type="text" value={wikiSearchQuery} onChange={e=>setWikiSearchQuery(e.target.value)} placeholder="Search by name, tag, or benefit..." className="w-full pl-11 pr-4 py-3 rounded-2xl text-sm font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-white text-[#4A042A] shadow-sm"/>
+                     </div>
+                  </div>
+
+                  <div className="p-4 sm:p-6 overflow-y-auto bg-slate-50 hide-scroll">
+                     {filteredWikiData.length === 0 ? (
+                       <div className="text-center p-12 text-slate-400 font-bold italic">No peptides found matching your search.</div>
+                     ) : (
+                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                         {filteredWikiData.map((item, idx) => (
+                           <div key={idx} className="bg-white p-5 rounded-2xl border border-pink-100 shadow-sm hover:border-pink-300 transition-colors">
+                             <div className="flex flex-col mb-3">
+                               <h3 className="font-black text-lg text-[#D6006E]">{item.name}</h3>
+                               <div className="flex flex-wrap gap-1.5 mt-2">
+                                 {item.tags.map((tag, tIdx) => (
+                                   <span key={tIdx} className="bg-pink-50 text-pink-600 border border-pink-200 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest">{tag}</span>
+                                 ))}
+                               </div>
+                             </div>
+                             <p className="text-sm text-slate-600 font-semibold leading-relaxed border-t border-slate-100 pt-3">{item.desc}</p>
+                           </div>
+                         ))}
+                       </div>
+                     )}
+                  </div>
+                  
+               </div>
             </div>
           )}
         </div>
@@ -1616,6 +1722,11 @@ export default function App() {
                         
                         <section className="bg-white p-8 rounded-[32px] shadow-sm border-2 border-pink-50 space-y-4">
                            <h3 className="font-black text-xs text-pink-600 uppercase tracking-[0.2em] border-b-2 border-pink-50 pb-3">Mode Toggles & Actions</h3>
+                           
+                           <button onClick={()=>updateSetting('storeOpen', settings.storeOpen === false ? true : false)} className={`w-full py-4 rounded-2xl font-black uppercase text-xs tracking-widest border-2 ${settings.storeOpen !== false ? 'bg-emerald-50 border-emerald-600 text-emerald-600' : 'bg-rose-50 border-rose-600 text-rose-600'} hover:scale-[0.98] transition-transform shadow-sm`}>
+                              {settings.storeOpen !== false ? '🟢 Store is OPEN' : '🛑 Store is CLOSED'}
+                           </button>
+
                            <button onClick={()=>updateSetting('paymentsOpen', !settings.paymentsOpen)} className={`w-full py-4 rounded-2xl font-black uppercase text-xs tracking-widest border-2 ${settings.paymentsOpen ? 'bg-rose-50 border-rose-600 text-rose-600' : 'bg-emerald-50 border-emerald-600 text-emerald-600'} hover:scale-[0.98] transition-transform`}>
                               {settings.paymentsOpen ? '🔒 Close Payments' : '🟢 Open Payments'}
                            </button>
@@ -1699,7 +1810,6 @@ export default function App() {
 
                         <section className="bg-white p-8 rounded-[32px] shadow-sm border-2 border-pink-50 space-y-4 md:col-span-2">
                            
-                           {/* ✨ NEW: Manage Products dedicated search bar */}
                            <div className="flex justify-between items-center mb-4 border-b border-pink-100 pb-4 gap-4 flex-wrap">
                              <h3 className="m-0 border-none p-0 font-black text-xs text-pink-600 uppercase tracking-[0.2em]">Manage Products <span className="text-[10px] text-pink-400 normal-case ml-2">({products.length} Total)</span></h3>
                              <div className="relative w-full sm:w-auto min-w-[250px]">
@@ -1763,6 +1873,7 @@ export default function App() {
         )
       )}
 
+      {/* Profile Viewer Modal */}
       {selectedProfileEmail && (() => {
         const profile = users.find(u => u.id === selectedProfileEmail.toLowerCase().trim()) || { id: selectedProfileEmail, name: 'Unknown Customer' };
         const curOrders = orders.filter(o => o.email === selectedProfileEmail.toLowerCase().trim());
