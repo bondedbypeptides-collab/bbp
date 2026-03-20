@@ -108,11 +108,9 @@ export default function App() {
   const [isBtnLoading, setIsBtnLoading] = useState(false);
   const [proofFile, setProofFile] = useState(null);
   
-  // ✨ Image Preview States
   const [hoveredProof, setHoveredProof] = useState(null);
   const [fullScreenProof, setFullScreenProof] = useState(null);
   
-  // ✨ Animation States
   const [shakingField, setShakingField] = useState(null);
   const [shakingProd, setShakingProd] = useState(null);
   const [addressErrors, setAddressErrors] = useState({});
@@ -120,6 +118,9 @@ export default function App() {
   const [adminPassword, setAdminPassword] = useState('');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [loginError, setLoginError] = useState('');
+
+  const [paymentFilterStatus, setPaymentFilterStatus] = useState('All'); 
+  const [paymentFilterAdmin, setPaymentFilterAdmin] = useState('All'); 
 
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -156,11 +157,16 @@ export default function App() {
 
   const [newProd, setNewProd] = useState({ name: '', kit: '', vial: '', max: '' });
   const [newAdmin, setNewAdmin] = useState({ name: '', bank1: '', qr1: '', bank2: '', qr2: '' });
-  const [isScrolled, setIsScrolled] = useState(false); // ✨ NEW: Scroll tracking state
+  const [isScrolled, setIsScrolled] = useState(false); 
 
-  // --- SCROLL LISTENER ---
+  // ✨ FIXED: Scroll listener now fully optimized to prevent re-renders
   useEffect(() => {
-    const handleScroll = () => setIsScrolled(window.scrollY > 40);
+    const handleScroll = () => {
+      setIsScrolled(prev => {
+        const scrolled = window.scrollY > 40;
+        return prev !== scrolled ? scrolled : prev; 
+      });
+    };
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
@@ -280,7 +286,6 @@ export default function App() {
     });
   }, [orders, products, settings, users]);
 
-  // ✨ GLOBAL ADMIN SEARCH FILTERS
   const filteredAdminProducts = useMemo(() => {
     return enrichedProducts.filter(p => !adminGlobalSearch || p.name.toLowerCase().includes(adminGlobalSearch.toLowerCase()));
   }, [enrichedProducts, adminGlobalSearch]);
@@ -510,7 +515,6 @@ export default function App() {
     setIsBtnLoading(false);
   }
 
-  // ✨ IMPROVED: Strict Address Validation with visual shakes
   async function submitPayment() {
     const errs = {};
     if (!addressForm.shipOpt) errs.shipOpt = true;
@@ -524,7 +528,7 @@ export default function App() {
     if (Object.keys(errs).length > 0) {
       setAddressErrors(errs);
       showToast("Please fill all required highlighted fields! 🏠");
-      setTimeout(() => setAddressErrors({}), 600); // Remove animation after playing
+      setTimeout(() => setAddressErrors({}), 600); 
       return; 
     }
 
@@ -567,7 +571,6 @@ export default function App() {
      buildAndPrintLabelsHTML(paidUsers);
   }
 
-  // ✨ NEW: Print Single Label Function
   function generateSingleLabel(c) {
      if (!c.address?.street) { showToast("This customer has no valid address to print! ❌"); return; }
      buildAndPrintLabelsHTML([c]);
@@ -615,7 +618,6 @@ export default function App() {
      setTimeout(() => win.print(), 1000);
   }
 
-  // ✨ NEW: CSV Export for Google Sheets Backup
   const exportCustomersCSV = () => {
     const headers = ["Email", "Name", "Handle", "Subtotal USD", "Total USD", "Total PHP", "Proof Link", "Assigned Admin", "Bank Account", "Label Link", "Street", "Barangay", "City", "Province", "Zip", "Contact", "Shipping Option", "Is Paid"];
     let csvContent = headers.join(",") + "\n";
@@ -623,7 +625,7 @@ export default function App() {
     customerList.forEach(c => {
       const subtotalUSD = c.totalPHP / settings.fxRate - (settings.adminFeePhp / settings.fxRate);
       const totalUSD = c.totalPHP / settings.fxRate;
-      const bankAcc = settings.admins.find(a => a.name === c.adminAssigned)?.bank1 || ''; // Simplify for export
+      const bankAcc = settings.admins.find(a => a.name === c.adminAssigned)?.bank1 || ''; 
       
       const row = [
         `"${c.email}"`, `"${c.name}"`, `"${c.handle || ''}"`, `"${subtotalUSD.toFixed(2)}"`, `"${totalUSD.toFixed(2)}"`, `"${c.totalPHP}"`, 
@@ -644,7 +646,6 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  // ✨ NEW: CSV Import to Sync changes from Google Sheets back to Firebase
   const importCustomersCSV = async (e) => {
     const file = e.target?.files?.[0];
     if (!file) return;
@@ -923,7 +924,7 @@ export default function App() {
     showToast('Product added! ✅');
   }
 
-  async function handleAddAdmin() {
+  const handleAddAdmin = async () => {
     if (!newAdmin.name) { showToast('Enter an Admin Name!'); return; }
     const updatedAdmins = [...settings.admins, { 
       name: newAdmin.name, 
@@ -935,11 +936,11 @@ export default function App() {
     await updateSetting('admins', updatedAdmins);
     setNewAdmin({ name: '', bank1: '', qr1: '', bank2: '', qr2: '' });
     showToast('Admin added successfully! ✅');
-  }
+  };
 
   // --- STYLES ---
-  const originalInput = "w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-2xl px-4 py-3 outline-none focus:border-[#D6006E] font-bold text-[#4A042A]";
-  const adminInputSm = "w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs outline-none focus:border-[#D6006E] font-bold text-[#4A042A]";
+  const originalInput = "w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-2xl px-4 py-3 outline-none focus:border-[#D6006E] font-bold text-[#4A042A] text-base";
+  const adminInputSm = "w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-base sm:text-xs outline-none focus:border-[#D6006E] font-bold text-[#4A042A]";
   const originalBtn = "bg-gradient-to-r from-[#FF1493] to-[#FF69B4] text-white font-bold px-6 py-4 rounded-full shadow-[0_4px_10px_rgba(255,20,147,0.3)] uppercase tracking-wider hover:scale-[0.98] transition-all";
 
   // --- PREPARE DATA ---
@@ -982,6 +983,21 @@ export default function App() {
       <style dangerouslySetInnerHTML={{__html: `
         @import url('https://fonts.googleapis.com/css2?family=Pacifico&family=Quicksand:wght@500;600;700;800&display=swap');
         
+        /* 🚀 SCROLL PERFORMANCE FIXES 🚀 */
+        html { scroll-behavior: smooth; }
+        body { 
+          -webkit-overflow-scrolling: touch; 
+        }
+        /* Mobile background-attachment: fixed causes massive jank. Use pseudo-element instead! */
+        body::before {
+          content: '';
+          position: fixed;
+          top: 0; left: 0; width: 100%; height: 100%;
+          background: linear-gradient(135deg, #FFC3EB 0%, #FF8EBD 100%);
+          z-index: -1;
+          transform: translateZ(0); /* Force GPU acceleration */
+        }
+        
         html, body { width: 100% !important; min-height: 100vh !important; margin: 0 !important; padding: 0 !important; overflow-x: clip !important; display: block !important; }
         #root { width: 100% !important; max-width: 100% !important; min-height: 100vh !important; margin: 0 !important; padding: 0 !important; text-align: left !important; display: block !important; }
         
@@ -1000,6 +1016,13 @@ export default function App() {
           appearance: textfield;
         }
 
+        /* ✨ FIX: Stop iOS Safari Auto-Zooming on Focus */
+        @media screen and (max-width: 768px) {
+          input, select, textarea {
+            font-size: 16px !important;
+          }
+        }
+
         @keyframes shake {
           0%, 100% { transform: translateX(0); }
           20% { transform: translateX(-6px); }
@@ -1007,7 +1030,7 @@ export default function App() {
           60% { transform: translateX(-6px); }
           80% { transform: translateX(6px); }
         }
-        .animate-shake { animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both; }
+        .animate-shake { animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both; will-change: transform; }
         
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(10px); }
@@ -1018,6 +1041,9 @@ export default function App() {
         .brand-title, .brand-title * { font-family: 'Pacifico', cursive !important; }
         .brand-title { transform: rotate(-2deg); text-shadow: 2px 2px 0px rgba(0,0,0,0.1); }
         .glass-card { background: white; border: 2px solid #FF1493; border-radius: 1.5rem; }
+        
+        /* Momentum scrolling inside specific elements */
+        .hide-scroll { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
         .hide-scroll::-webkit-scrollbar { display: none; }
         
         .admin-sidebar { width: 280px; background: #4A042A; flex-shrink: 0; }
@@ -1026,22 +1052,26 @@ export default function App() {
         .custom-table td { padding: 1rem; border-bottom: 1px solid #FFE4E1; font-weight: 600; font-size: 13px; }
       `}} />
 
-      {/* ✨ REFINED: Scroll-Reactive Wiki Button (Always accessible, shrinks when scrolling) */}
-      <button onClick={()=>setShowWikiModal(true)} className={`fixed z-[60] bg-white/90 backdrop-blur-md text-[#D6006E] border-2 border-pink-200 shadow-md flex items-center justify-center hover:bg-white transition-all duration-300 ease-in-out ${isScrolled ? 'top-4 left-4 w-10 h-10 rounded-full px-0 opacity-60 hover:opacity-100' : 'top-4 left-4 px-4 py-2 rounded-full gap-2 hover:scale-105'}`}>
-         <BookOpen size={16} className="shrink-0"/> 
-         <span className={`font-black uppercase tracking-widest text-[10px] sm:text-xs whitespace-nowrap overflow-hidden transition-all duration-300 ${isScrolled ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Wiki</span>
-      </button>
+      {/* ✨ REFINED: Wiki on Top-Left, fixed and scroll-reactive */}
+      {view === 'shop' && (
+        <div className="fixed top-2 left-2 sm:top-4 sm:left-4 z-[60]">
+          <button onClick={()=>setShowWikiModal(true)} className={`bg-white/90 backdrop-blur-md text-[#D6006E] border-2 border-pink-200 shadow-md flex items-center justify-center hover:bg-white transition-all duration-300 ease-in-out ${isScrolled ? 'w-10 h-10 rounded-full px-0 opacity-60 hover:opacity-100' : 'px-4 py-2 rounded-full gap-2 hover:scale-105'}`}>
+             <BookOpen size={16} className="shrink-0"/> 
+             <span className={`font-black uppercase tracking-widest text-[10px] sm:text-xs whitespace-nowrap overflow-hidden transition-all duration-300 ${isScrolled ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Wiki</span>
+          </button>
+        </div>
+      )}
 
       {view === 'shop' ? (
-        <div className="min-h-screen w-full text-[#4A042A] pb-24 lg:pb-8 selection:bg-pink-300 relative" style={{ background: 'linear-gradient(135deg, #FFC3EB 0%, #FF8EBD 100%)', backgroundAttachment: 'fixed' }}>
+        <div className="min-h-screen w-full text-[#4A042A] pb-24 lg:pb-8 selection:bg-pink-300 relative">
           
-          {/* ✨ FIXED: Absolute positioned Padlock (Scrolls away) */}
-          <button onClick={()=>setView('admin')} className="absolute top-4 right-4 z-[40] bg-white/30 backdrop-blur-sm text-[#4A042A] border border-[#4A042A]/20 w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/60 transition-all hover:scale-105" title="Admin Access">
+          {/* ✨ REFINED: Admin button is absolute, NOT sticky, top-right */}
+          <button onClick={()=>setView('admin')} className="absolute top-4 right-4 sm:top-6 sm:right-6 bg-white/30 backdrop-blur-sm text-[#4A042A] border border-[#4A042A]/20 w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/60 transition-all hover:scale-105 z-[40]" title="Admin Access">
              <Lock size={16}/>
           </button>
 
           <div className="w-full max-w-[1600px] mx-auto p-4 pt-16 sm:pt-10 relative">
-            <h1 className="brand-title text-3xl sm:text-5xl text-center text-white mb-2 flex items-center justify-center gap-3">
+            <h1 className="brand-title text-3xl sm:text-5xl text-center text-white mb-2 flex items-center justify-center gap-3 mt-4 sm:mt-0">
               ✨ Bonded <span className="text-sm font-black uppercase tracking-widest text-white/80 transform translate-y-2" style={{fontFamily: "'Quicksand', sans-serif !important"}}>by</span> Peptides ✨
             </h1>
             <div className="text-center mb-8">
@@ -1051,6 +1081,7 @@ export default function App() {
             </div>
 
             {settings.storeOpen === false ? (
+              // CLOSED STORE UI
               <div className="glass-card p-8 sm:p-12 shadow-xl max-w-2xl mx-auto text-center mt-8 mb-24 relative overflow-hidden bg-white/95 backdrop-blur-md">
                 <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#FF1493] to-[#FFC3EB]"></div>
                 <Package size={64} className="mx-auto text-pink-200 mb-4" />
@@ -1076,6 +1107,7 @@ export default function App() {
                 </div>
               </div>
             ) : (
+              // --- NORMAL STORE UI ---
               <>
                 {settings.paymentsOpen && (
                   <div className="bg-white border-l-4 border-[#FF1493] p-3 rounded-lg mb-4 text-sm font-bold shadow-sm">🔒 PAYMENTS OPEN: Check email below to pay.</div>
@@ -1147,7 +1179,7 @@ export default function App() {
                          </h2>
                          <div className="relative w-full">
                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-400" size={18} />
-                           <input type="text" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Search products..." className="w-full pl-11 pr-4 py-3 rounded-2xl text-sm font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-[#FFF0F5] placeholder:text-pink-300 text-[#4A042A] shadow-inner"/>
+                           <input type="text" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Search products..." className="w-full pl-11 pr-4 py-3 rounded-2xl text-base font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-[#FFF0F5] placeholder:text-pink-300 text-[#4A042A] shadow-inner"/>
                          </div>
                       </div>
                       
@@ -1178,11 +1210,11 @@ export default function App() {
                                 <div className={`flex gap-2 sm:gap-3 ${p.isClosed ? 'opacity-40 pointer-events-none' : ''}`}>
                                   <label className="bg-slate-50 border border-pink-100 rounded-md sm:rounded-lg p-1 sm:p-1.5 flex-1 flex justify-between items-center transition-colors focus-within:border-pink-400 focus-within:bg-white shadow-inner cursor-text">
                                     <span className="text-[8px] sm:text-[9px] font-black uppercase text-pink-400 ml-1 shrink-0">Kits<span className="hidden sm:inline"> (10x)</span></span>
-                                    <input type="number" min="0" value={cart.k || ''} onChange={e=>handleCartChange(p.name, 'k', e.target.value)} onBlur={()=>handleCartBlur(p.name)} className={`w-full ml-1 sm:ml-2 text-right font-black text-sm sm:text-base outline-none bg-transparent placeholder:text-pink-200 ${shakingProd === p.name ? 'text-red-600' : 'text-[#D6006E]'}`} placeholder="0" disabled={p.isClosed}/>
+                                    <input type="number" min="0" value={cart.k || ''} onChange={e=>handleCartChange(p.name, 'k', e.target.value)} onBlur={()=>handleCartBlur(p.name)} className={`w-full ml-1 sm:ml-2 text-right font-black text-base outline-none bg-transparent placeholder:text-pink-200 ${shakingProd === p.name ? 'text-red-600' : 'text-[#D6006E]'}`} placeholder="0" disabled={p.isClosed}/>
                                   </label>
                                   <label className="bg-slate-50 border border-pink-100 rounded-md sm:rounded-lg p-1 sm:p-1.5 flex-1 flex justify-between items-center transition-colors focus-within:border-pink-400 focus-within:bg-white shadow-inner cursor-text">
                                     <span className="text-[8px] sm:text-[9px] font-black uppercase text-pink-400 ml-1 shrink-0">Vials<span className="hidden sm:inline"> (1x)</span></span>
-                                    <input type="number" min="0" max="9" value={cart.v || ''} onChange={e=>handleCartChange(p.name, 'v', e.target.value)} onBlur={()=>handleCartBlur(p.name)} className={`w-full ml-1 sm:ml-2 text-right font-black text-sm sm:text-base outline-none bg-transparent placeholder:text-pink-200 ${shakingProd === p.name ? 'text-red-600' : 'text-[#D6006E]'}`} placeholder="0" disabled={p.isClosed}/>
+                                    <input type="number" min="0" max="9" value={cart.v || ''} onChange={e=>handleCartChange(p.name, 'v', e.target.value)} onBlur={()=>handleCartBlur(p.name)} className={`w-full ml-1 sm:ml-2 text-right font-black text-base outline-none bg-transparent placeholder:text-pink-200 ${shakingProd === p.name ? 'text-red-600' : 'text-[#D6006E]'}`} placeholder="0" disabled={p.isClosed}/>
                                   </label>
                                 </div>
                               </div>
@@ -1196,7 +1228,7 @@ export default function App() {
                   <aside className="hidden lg:block sticky top-6 w-full self-start">
                     <div className="glass-card p-6 shadow-xl">
                       <h3 className="brand-title text-2xl text-[#D6006E] border-b-2 border-pink-100 pb-2 mb-4 text-center">Your Cart 🛍️</h3>
-                      <div className="max-h-[350px] overflow-y-auto mb-4 space-y-2 pr-2">
+                      <div className="max-h-[350px] overflow-y-auto mb-4 space-y-2 pr-2 hide-scroll">
                         {cartList.length === 0 ? <div className="text-center text-pink-300 font-bold italic py-8">No items selected yet!</div> : cartList.map((i, idx) => (
                           <div key={idx} className="flex justify-between items-center text-sm xl:text-base border-b border-pink-50 border-dashed pb-2">
                             <div className="font-bold">{i.product}</div>
@@ -1232,6 +1264,7 @@ export default function App() {
             )}
           </div>
 
+          {/* Sticky Mobile Footer ONLY when Store is Open */}
           {settings.storeOpen !== false && (
             <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t-2 border-[#FF1493] p-4 rounded-t-3xl shadow-[0_-10px_20px_rgba(0,0,0,0.1)] z-50 flex justify-between items-center gap-2">
               <div className="shrink-0">
@@ -1262,7 +1295,7 @@ export default function App() {
                      <h2 className="brand-title text-2xl text-pink-600">Checkout 💸</h2>
                      <button onClick={()=>setShowPayModal(false)} className="text-pink-600 font-black text-2xl hover:scale-110 transition-transform">&times;</button>
                   </div>
-                  <div className="p-6 overflow-y-auto space-y-6">
+                  <div className="p-6 overflow-y-auto space-y-6 hide-scroll">
                      
                      <div className="bg-[#E6F6EC] p-4 rounded-2xl border-2 border-[#bbf7d0]">
                         <p className="text-[10px] font-black text-emerald-600 uppercase mb-2">Send Payment To</p>
@@ -1304,7 +1337,6 @@ export default function App() {
                         })()}
                      </div>
 
-                     {/* ✨ REFINED: Shaking Error Validation for missing inputs */}
                      <div className="space-y-3">
                         <select value={addressForm.shipOpt} onChange={e=>setAddressForm({...addressForm, shipOpt:e.target.value})} className={`${originalInput} transition-all duration-300 ${addressErrors.shipOpt ? 'animate-shake border-red-500 bg-red-50' : ''}`}>
                           <option value="" disabled>Select Courier...</option>
@@ -1345,7 +1377,7 @@ export default function App() {
                      <h2 className="brand-title text-2xl text-pink-600">Cart Preview 👀</h2>
                      <button onClick={()=>setShowPreviewModal(false)} className="text-pink-600 font-black text-2xl hover:scale-110 transition-transform">&times;</button>
                   </div>
-                  <div className="p-6 overflow-y-auto space-y-4">
+                  <div className="p-6 overflow-y-auto space-y-4 hide-scroll">
                     {cartList.length === 0 ? (
                        <p className="text-center text-pink-400 font-bold italic py-8">Your cart is empty!</p>
                     ) : (
@@ -1437,7 +1469,7 @@ export default function App() {
                   <div className="bg-[#FFF0F5] p-4 border-b-2 border-[#FFC0CB]">
                      <div className="relative w-full max-w-md mx-auto">
                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-400" size={18} />
-                       <input type="text" value={wikiSearchQuery} onChange={e=>setWikiSearchQuery(e.target.value)} placeholder="Search by name, tag, or benefit..." className="w-full pl-11 pr-4 py-3 rounded-2xl text-sm font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-white text-[#4A042A] shadow-sm"/>
+                       <input type="text" value={wikiSearchQuery} onChange={e=>setWikiSearchQuery(e.target.value)} placeholder="Search by name, tag, or benefit..." className="w-full pl-11 pr-4 py-3 rounded-2xl text-base font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-white text-[#4A042A] shadow-sm"/>
                      </div>
                   </div>
 
@@ -1509,7 +1541,7 @@ export default function App() {
                </div>
             </aside>
 
-            <main className="flex-1 h-screen overflow-y-auto p-4 lg:p-10">
+            <main className="flex-1 h-screen overflow-y-auto p-4 lg:p-10 hide-scroll">
                <div className="lg:hidden flex items-center justify-between mb-4 bg-[#4A042A] p-3 sm:p-4 rounded-xl sm:rounded-2xl shadow-xl sticky top-2 z-50">
                   <div className="flex items-center gap-2 sm:gap-3">
                     <button onClick={() => setView('shop')} className="text-white bg-white/10 p-1.5 sm:p-2 rounded-lg hover:bg-white/20 transition-colors"><Home size={18}/></button>
@@ -1584,94 +1616,104 @@ export default function App() {
                           adminBreakdown[admin].count += 1;
                         });
 
+                        const displayCustomerList = filteredCustomerList.filter(c => {
+                           if (paymentFilterStatus === 'Paid' && !c.isPaid) return false;
+                           if (paymentFilterStatus === 'Unpaid' && c.isPaid) return false;
+                           if (paymentFilterAdmin !== 'All' && c.adminAssigned !== paymentFilterAdmin) return false;
+                           return true;
+                        });
+
                         return (
                           <>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                               <div className="bg-white p-6 rounded-2xl border-2 border-pink-50 shadow-sm">
+                               <div onClick={() => setPaymentFilterStatus('All')} className={`bg-white p-6 rounded-2xl border-2 shadow-sm cursor-pointer transition-all hover:scale-105 ${paymentFilterStatus === 'All' ? 'border-pink-400 ring-4 ring-pink-100' : 'border-pink-50'}`}>
                                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Total Expected</h4>
                                  <p className="text-3xl font-black text-[#D6006E]">₱{totalExpectedPHP.toLocaleString()}</p>
                                </div>
-                               <div className="bg-white p-6 rounded-2xl border-2 border-emerald-100 shadow-sm">
+                               <div onClick={() => setPaymentFilterStatus('Paid')} className={`bg-white p-6 rounded-2xl border-2 shadow-sm cursor-pointer transition-all hover:scale-105 ${paymentFilterStatus === 'Paid' ? 'border-emerald-400 ring-4 ring-emerald-100' : 'border-emerald-100'}`}>
                                  <h4 className="text-xs font-black text-emerald-600 uppercase tracking-widest mb-1">Total Paid ✅</h4>
                                  <p className="text-3xl font-black text-emerald-600">₱{totalPaidPHP.toLocaleString()}</p>
                                </div>
-                               <div className="bg-white p-6 rounded-2xl border-2 border-amber-100 shadow-sm">
+                               <div onClick={() => setPaymentFilterStatus('Unpaid')} className={`bg-white p-6 rounded-2xl border-2 shadow-sm cursor-pointer transition-all hover:scale-105 ${paymentFilterStatus === 'Unpaid' ? 'border-amber-400 ring-4 ring-amber-100' : 'border-amber-100'}`}>
                                  <h4 className="text-xs font-black text-amber-600 uppercase tracking-widest mb-1">Pending Balance ❌</h4>
                                  <p className="text-3xl font-black text-amber-600">₱{(totalExpectedPHP - totalPaidPHP).toLocaleString()}</p>
                                </div>
                             </div>
 
                             <div className="bg-white p-6 rounded-2xl border-2 border-pink-50 shadow-sm mb-6">
-                               <h4 className="text-sm font-black text-[#4A042A] uppercase tracking-widest mb-4 border-b border-pink-100 pb-2">Load Balancing & Admin Breakdown</h4>
-                               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                                 {Object.entries(adminBreakdown).map(([admin, data]) => (
-                                   <div key={admin} className="bg-[#FFF0F5] p-4 rounded-xl border border-[#FFC0CB]">
-                                     <p className="font-black text-[#D6006E] mb-3">{admin} <span className="text-[10px] text-pink-400 ml-1">({data.count} orders)</span></p>
-                                     <div className="flex justify-between text-xs font-bold text-[#4A042A] mb-1"><span>Expected:</span> <span>₱{data.expected.toLocaleString()}</span></div>
-                                     <div className="flex justify-between text-xs font-bold text-emerald-600 border-t border-pink-100 pt-1"><span>Collected:</span> <span>₱{data.paid.toLocaleString()}</span></div>
-                                   </div>
-                                 ))}
+                               <div className="flex justify-between items-center mb-4 border-b border-pink-100 pb-2">
+                                 <h4 className="text-sm font-black text-[#4A042A] uppercase tracking-widest">Load Balancing & Admin Breakdown</h4>
+                                 {paymentFilterAdmin !== 'All' && <button onClick={() => setPaymentFilterAdmin('All')} className="text-[10px] text-pink-500 font-bold hover:underline bg-pink-50 px-2 py-1 rounded">Clear Filter ✖</button>}
                                </div>
+                               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                                 {Object.entries(adminBreakdown).map(([admin, data]) => {
+                                   const isActive = paymentFilterAdmin === admin;
+                                   return (
+                                     <div key={admin} onClick={() => setPaymentFilterAdmin(isActive ? 'All' : admin)} className={`p-4 rounded-xl border cursor-pointer transition-all hover:scale-105 ${isActive ? 'bg-pink-50 border-pink-400 ring-2 ring-pink-200' : 'bg-[#FFF0F5] border-[#FFC0CB]'}`}>
+                                       <p className="font-black text-[#D6006E] mb-3">{admin} <span className="text-[10px] text-pink-400 ml-1">({data.count} orders)</span></p>
+                                       <div className="flex justify-between text-xs font-bold text-[#4A042A] mb-1"><span>Expected:</span> <span>₱{data.expected.toLocaleString()}</span></div>
+                                       <div className="flex justify-between text-xs font-bold text-emerald-600 border-t border-pink-100 pt-1"><span>Collected:</span> <span>₱{data.paid.toLocaleString()}</span></div>
+                                     </div>
+                                   );
+                                 })}
+                               </div>
+                            </div>
+
+                            <div className="bg-white rounded-[24px] shadow-sm border-2 border-pink-50 overflow-hidden relative">
+                              {hoveredProof && (
+                                <div className="fixed z-[1000] pointer-events-none bg-white p-2 rounded-xl shadow-2xl border-4 border-pink-200" 
+                                     style={{ bottom: '40px', right: '40px' }}>
+                                   <img src={hoveredProof} alt="Proof Preview" className="max-w-[350px] max-h-[450px] object-contain rounded-lg" />
+                                   <p className="text-center text-xs font-bold text-pink-500 mt-2">Click to View Full Screen</p>
+                                </div>
+                              )}
+
+                              <table className="w-full text-left custom-table">
+                                 <thead><tr><th>Customer</th><th>Assigned Admin</th><th className="text-right">Total PHP</th><th className="text-center">Proof</th><th className="text-center">Label</th><th className="text-center">Status</th></tr></thead>
+                                 <tbody className="divide-y divide-pink-50">
+                                    {displayCustomerList.map(c => (
+                                      <tr key={c.email}>
+                                        <td>
+                                          <button onClick={() => setSelectedProfileEmail(c.email)} className="font-bold text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">{c.name}</button>
+                                          <p className="text-[10px] text-slate-400">{c.email}</p>
+                                        </td>
+                                        <td><span className="bg-[#FFF0F5] px-2 py-1 rounded text-[10px] font-black text-pink-600 border border-pink-100">{c.adminAssigned}</span></td>
+                                        <td className="text-right font-black text-pink-600">₱{c.totalPHP.toLocaleString()}</td>
+                                        <td className="text-center">
+                                           {c.proofUrl ? (
+                                              <button onClick={() => setFullScreenProof(c.proofUrl)}
+                                                 onMouseEnter={() => setHoveredProof(c.proofUrl)}
+                                                 onMouseLeave={() => setHoveredProof(null)}
+                                                 className="text-[#D6006E] font-bold text-[10px] uppercase tracking-widest hover:underline cursor-pointer bg-transparent border-none m-0 p-0">
+                                                 Hover 👀
+                                              </button>
+                                           ) : (
+                                              <span className="text-slate-400 text-[10px] italic">No Proof</span>
+                                           )}
+                                        </td>
+                                        <td className="text-center">
+                                           {c.address?.street ? (
+                                              <button onClick={() => generateSingleLabel(c)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">
+                                                 🖨️ Print
+                                              </button>
+                                           ) : (
+                                              <span className="text-slate-400 text-[10px] italic">No Address</span>
+                                           )}
+                                        </td>
+                                        <td className="text-center">
+                                           <button onClick={() => safeAwait(setDoc(doc(db, colPath('users'), c.email), { isPaid: !c.isPaid }, { merge: true }))} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all hover:scale-105 ${c.isPaid ? 'bg-emerald-50 text-emerald-600 border-emerald-200 shadow-sm' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
+                                              {c.isPaid ? 'PAID ✅' : 'PENDING ❌'}
+                                           </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                    {displayCustomerList.length === 0 && <tr><td colSpan="6" className="text-center p-8 text-pink-300 font-bold italic">No customers found matching filters.</td></tr>}
+                                 </tbody>
+                              </table>
                             </div>
                           </>
                         );
                       })()}
-
-                      <div className="bg-white rounded-[24px] shadow-sm border-2 border-pink-50 overflow-hidden relative">
-                        {/* ✨ Hover Proof Popup (Enlarged) */}
-                        {hoveredProof && (
-                          <div className="fixed z-[1000] pointer-events-none bg-white p-2 rounded-xl shadow-2xl border-4 border-pink-200" 
-                               style={{ bottom: '40px', right: '40px' }}>
-                             <img src={hoveredProof} alt="Proof Preview" className="max-w-[350px] max-h-[450px] object-contain rounded-lg" />
-                             <p className="text-center text-xs font-bold text-pink-500 mt-2">Click to View Full Screen</p>
-                          </div>
-                        )}
-
-                        <table className="w-full text-left custom-table">
-                           {/* ✨ ADDED: Label Column */}
-                           <thead><tr><th>Customer</th><th>Assigned Admin</th><th className="text-right">Total PHP</th><th className="text-center">Proof</th><th className="text-center">Label</th><th className="text-center">Status</th></tr></thead>
-                           <tbody className="divide-y divide-pink-50">
-                              {filteredCustomerList.map(c => (
-                                <tr key={c.email}>
-                                  <td>
-                                    <button onClick={() => setSelectedProfileEmail(c.email)} className="font-bold text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">{c.name}</button>
-                                    <p className="text-[10px] text-slate-400">{c.email}</p>
-                                  </td>
-                                  <td><span className="bg-[#FFF0F5] px-2 py-1 rounded text-[10px] font-black text-pink-600 border border-pink-100">{c.adminAssigned}</span></td>
-                                  <td className="text-right font-black text-pink-600">₱{c.totalPHP.toLocaleString()}</td>
-                                  <td className="text-center">
-                                     {c.proofUrl ? (
-                                        <button onClick={() => setFullScreenProof(c.proofUrl)}
-                                           onMouseEnter={() => setHoveredProof(c.proofUrl)}
-                                           onMouseLeave={() => setHoveredProof(null)}
-                                           className="text-[#D6006E] font-bold text-[10px] uppercase tracking-widest hover:underline cursor-pointer bg-transparent border-none m-0 p-0">
-                                           Hover 👀
-                                        </button>
-                                     ) : (
-                                        <span className="text-slate-400 text-[10px] italic">No Proof</span>
-                                     )}
-                                  </td>
-                                  <td className="text-center">
-                                     {/* ✨ NEW: Individual Label Printing */}
-                                     {c.address?.street ? (
-                                        <button onClick={() => generateSingleLabel(c)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">
-                                           🖨️ Print
-                                        </button>
-                                     ) : (
-                                        <span className="text-slate-400 text-[10px] italic">No Address</span>
-                                     )}
-                                  </td>
-                                  <td className="text-center">
-                                     <button onClick={() => safeAwait(setDoc(doc(db, colPath('users'), c.email), { isPaid: !c.isPaid }, { merge: true }))} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all hover:scale-105 ${c.isPaid ? 'bg-emerald-50 text-emerald-600 border-emerald-200 shadow-sm' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
-                                        {c.isPaid ? 'PAID ✅' : 'PENDING ❌'}
-                                     </button>
-                                  </td>
-                                </tr>
-                              ))}
-                              {filteredCustomerList.length === 0 && <tr><td colSpan="6" className="text-center p-8 text-pink-300 font-bold italic">No customers found.</td></tr>}
-                           </tbody>
-                        </table>
-                      </div>
                    </div>
                  )}
 
@@ -1750,7 +1792,6 @@ export default function App() {
                      <div className="flex justify-between items-center flex-wrap gap-4">
                        <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Customer Database</h2>
                        
-                       {/* ✨ NEW: Google Sheets Export/Import Synchronization */}
                        <div className="flex gap-2">
                          <button onClick={exportCustomersCSV} className="bg-white border-2 border-emerald-200 text-emerald-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-emerald-500 transition-colors">
                            📥 Export CSV
@@ -1966,7 +2007,7 @@ export default function App() {
                 <h2 className="brand-title text-2xl text-[#D6006E]">📸 All Payment Proofs</h2>
                 <button onClick={()=>setShowAllProofsModal(false)} className="text-slate-400 hover:text-[#D6006E] font-black text-3xl transition-colors">&times;</button>
              </div>
-             <div className="p-6 overflow-y-auto flex-1">
+             <div className="p-6 overflow-y-auto flex-1 hide-scroll">
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                   {customerList.filter(c => c.proofUrl).length === 0 ? (
                     <div className="col-span-full text-center py-12 text-slate-400 font-bold italic">No proofs uploaded yet.</div>
@@ -2001,7 +2042,7 @@ export default function App() {
                   <h2 className="brand-title text-2xl text-[#D6006E]">👤 Profile & History</h2>
                   <button onClick={()=>setSelectedProfileEmail(null)} className="text-pink-600 font-black text-2xl hover:text-pink-800 transition-colors hover:scale-110">&times;</button>
                </div>
-               <div className="p-6 overflow-y-auto space-y-6 bg-slate-50">
+               <div className="p-6 overflow-y-auto space-y-6 bg-slate-50 hide-scroll">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                      <div className="bg-white p-4 rounded-2xl border border-pink-100 shadow-sm">
                        <p className="text-[10px] font-black text-pink-400 uppercase tracking-widest mb-1">Customer Details</p>
