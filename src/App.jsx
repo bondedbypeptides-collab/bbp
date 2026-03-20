@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, addDoc } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, writeBatch } from 'firebase/firestore';
 import { 
   ShieldCheck, Store, Settings, Info, LayoutDashboard, 
   BadgeDollarSign, Scissors, ClipboardList, Users, 
@@ -29,7 +29,9 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const basePath = isCanvas ? `artifacts/${appId}/public/data` : `data`;
+
+// ✨ FIXED DATABASE PATH LOGIC: Uses root collections when live on Netlify to prevent rule blocks
+const colPath = (name) => isCanvas ? `artifacts/${appId}/public/data/${name}` : name;
 
 const SLOTS_PER_BATCH = 10;
 const CUTE_PLEAS = [
@@ -40,6 +42,33 @@ const CUTE_PLEAS = [
   "Looking for box buddies! 👯‍♀️",
   "Help! I don't wanna be trimmed! 😭"
 ];
+
+// ✨ Safe Async Wrapper to prevent infinite hanging if Firebase blocks the request
+const safeAwait = (promise, ms = 15000) => {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Network timeout! Check your Firebase Firestore rules or internet connection.")), ms))
+  ]);
+};
+
+// ✨ Robust CSV Parser to prevent browser freezing on bad formatting
+const parseCSVLine = (text) => {
+  let ret = [], inQuote = false, value = '';
+  for (let i = 0; i < text.length; i++) {
+    let char = text[i];
+    if (inQuote) {
+      if (char === '"' && text[i+1] === '"') { value += '"'; i++; }
+      else if (char === '"') { inQuote = false; }
+      else { value += char; }
+    } else {
+      if (char === '"') { inQuote = true; }
+      else if (char === ',') { ret.push(value); value = ''; }
+      else { value += char; }
+    }
+  }
+  ret.push(value);
+  return ret;
+};
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -112,11 +141,11 @@ export default function App() {
   // --- DATA FETCHING ---
   useEffect(() => {
     if (!user) return;
-    const unsubSettings = onSnapshot(collection(db, `${basePath}/settings`), (snap) => { snap.forEach(d => { if (d.id === 'main') setSettings(d.data()); }); });
-    const unsubProducts = onSnapshot(collection(db, `${basePath}/products`), (snap) => { const arr = []; snap.forEach(d => arr.push({ id: d.id, ...d.data() })); setProducts(arr); });
-    const unsubOrders = onSnapshot(collection(db, `${basePath}/orders`), (snap) => { const arr = []; snap.forEach(d => arr.push({ id: d.id, ...d.data() })); setOrders(arr); });
-    const unsubUsers = onSnapshot(collection(db, `${basePath}/users`), (snap) => { const arr = []; snap.forEach(d => arr.push({ id: d.id, ...d.data() })); setUsers(arr); });
-    const unsubHistory = onSnapshot(collection(db, `${basePath}/history`), (snap) => { const arr = []; snap.forEach(d => arr.push({ id: d.id, ...d.data() })); setHistory(arr); });
+    const unsubSettings = onSnapshot(collection(db, colPath('settings')), (snap) => { snap.forEach(d => { if (d.id === 'main') setSettings(d.data()); }); });
+    const unsubProducts = onSnapshot(collection(db, colPath('products')), (snap) => { const arr = []; snap.forEach(d => arr.push({ id: d.id, ...d.data() })); setProducts(arr); });
+    const unsubOrders = onSnapshot(collection(db, colPath('orders')), (snap) => { const arr = []; snap.forEach(d => arr.push({ id: d.id, ...d.data() })); setOrders(arr); });
+    const unsubUsers = onSnapshot(collection(db, colPath('users')), (snap) => { const arr = []; snap.forEach(d => arr.push({ id: d.id, ...d.data() })); setUsers(arr); });
+    const unsubHistory = onSnapshot(collection(db, colPath('history')), (snap) => { const arr = []; snap.forEach(d => arr.push({ id: d.id, ...d.data() })); setHistory(arr); });
     return () => { unsubSettings(); unsubProducts(); unsubOrders(); unsubUsers(); unsubHistory(); };
   }, [user]);
 
@@ -232,7 +261,6 @@ export default function App() {
     return { items: itemsMap };
   }, [orders, customerEmail]);
 
-  // ✨ NEW: Determine if the currently logged-in user is on the Hit List
   const isCurrentUserAtRisk = useMemo(() => {
     if (!customerEmail || !settings.addOnly) return false;
     return trimmingHitList.some(v => v.email === customerEmail.toLowerCase().trim());
@@ -259,7 +287,6 @@ export default function App() {
       setCustomerHandle(customerProfile.handle || '');
       if (customerProfile.address) setAddressForm(customerProfile.address);
       
-      // ✨ Alert user if they are on the hitlist during Add-Only
       const atRisk = trimmingHitList.some(v => v.email === customerEmail.toLowerCase().trim());
       if (settings.addOnly && atRisk) {
         showToast(`🚨 URGENT ${customerProfile.name}: Your vials are on the Hit List!`);
@@ -298,12 +325,19 @@ export default function App() {
     const emailLower = customerEmail.toLowerCase().trim();
     setIsBtnLoading(true);
     try {
+      const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+
       if (action === 'cancel') {
          const toDelete = orders.filter(o => o.email === emailLower);
-         for (const o of toDelete) await deleteDoc(doc(db, `${basePath}/orders`, o.id));
+         for (const chunk of chunkArray(toDelete, 250)) {
+           const batch = writeBatch(db);
+           chunk.forEach(o => batch.delete(doc(db, colPath('orders'), o.id)));
+           await safeAwait(batch.commit());
+         }
          showToast("Order Cancelled.");
          setCartItems({}); setIsBtnLoading(false); return;
       }
+      
       const errors = []; const newOrderItems = []; const timestamp = Date.now();
       let totalRequestedVials = 0;
 
@@ -329,212 +363,267 @@ export default function App() {
       if (errors.length > 0) { showToast(errors.join(' | ')); setIsBtnLoading(false); return; }
       if (newOrderItems.length === 0 && action === 'add') { showToast("No items added!"); setIsBtnLoading(false); return; }
 
-      // Database Commit
+      // Database Commit with Batched Writes
       if (action === 'replace') {
         const toDelete = orders.filter(o => o.email === emailLower);
-        for (const o of toDelete) await deleteDoc(doc(db, `${basePath}/orders`, o.id));
+        for (const chunk of chunkArray(toDelete, 250)) {
+           const batch = writeBatch(db);
+           chunk.forEach(o => batch.delete(doc(db, colPath('orders'), o.id)));
+           await safeAwait(batch.commit());
+        }
       }
-      for (const item of newOrderItems) await addDoc(collection(db, `${basePath}/orders`), item);
+      
+      for (const chunk of chunkArray(newOrderItems, 250)) {
+        const batch = writeBatch(db);
+        chunk.forEach(item => {
+           const ref = doc(collection(db, colPath('orders')));
+           batch.set(ref, item);
+        });
+        await safeAwait(batch.commit());
+      }
 
       let assignedAdmin = users.find(u => u.id === emailLower)?.adminAssigned || settings.admins[Math.floor(Math.random() * settings.admins.length)]?.name || "Admin";
-      await setDoc(doc(db, `${basePath}/users`, emailLower), { name: customerName, handle: customerHandle, adminAssigned: assignedAdmin }, { merge: true });
+      await safeAwait(setDoc(doc(db, colPath('users'), emailLower), { name: customerName, handle: customerHandle, adminAssigned: assignedAdmin }, { merge: true }));
       showToast("Order Submitted! 🎉");
       setCartItems({}); if (action === 'replace') setAction('');
-    } catch (err) { console.error(err); showToast("Error saving order."); }
+    } catch (err) { console.error(err); showToast(`Error saving: ${err.message}`); }
     setIsBtnLoading(false);
   };
 
   const submitPayment = async () => {
     if (!addressForm.shipOpt || !addressForm.street || !addressForm.city || !addressForm.contact) { showToast("Missing fields! 🏠"); return; }
     const emailLower = customerEmail.toLowerCase().trim();
-    await setDoc(doc(db, `${basePath}/users`, emailLower), { address: addressForm, isPaid: true, proofUrl: 'mock_receipt.jpg' }, { merge: true });
-    showToast("Payment submitted! ✅");
-    setShowPayModal(false);
+    try {
+       await safeAwait(setDoc(doc(db, colPath('users'), emailLower), { address: addressForm, isPaid: true, proofUrl: 'mock_receipt.jpg' }, { merge: true }));
+       showToast("Payment submitted! ✅");
+       setShowPayModal(false);
+    } catch (err) { showToast("Error submitting payment."); }
   };
 
   const updateSetting = async (field, val) => {
     const newSettings = { ...settings, [field]: val };
     setSettings(newSettings);
-    await setDoc(doc(db, `${basePath}/settings`, 'main'), newSettings);
+    await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), newSettings));
   };
 
   const executeTrim = async (victim) => {
     if (victim.qty === victim.amountToRemove) {
-      await deleteDoc(doc(db, `${basePath}/orders`, victim.id));
+      await safeAwait(deleteDoc(doc(db, colPath('orders'), victim.id)));
     } else {
-      await setDoc(doc(db, `${basePath}/orders`, victim.id), { qty: victim.qty - victim.amountToRemove }, { merge: true });
+      await safeAwait(setDoc(doc(db, colPath('orders'), victim.id), { qty: victim.qty - victim.amountToRemove }, { merge: true }));
     }
-    showToast(`Trimmed ${victim.amountToRemove} vials.`);
   };
 
   const autoTrimAll = async () => {
     if(!window.confirm('⚠️ Auto-Trim will reduce/delete loose vials from the bottom up. Proceed?')) return;
-    for (const v of trimmingHitList) await executeTrim(v);
-    showToast('Auto-Trim Complete! ✂️');
+    const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+    try {
+      for (const chunk of chunkArray(trimmingHitList, 250)) {
+        const batch = writeBatch(db);
+        chunk.forEach(v => {
+          if (v.qty === v.amountToRemove) {
+            batch.delete(doc(db, colPath('orders'), v.id));
+          } else {
+            batch.set(doc(db, colPath('orders'), v.id), { qty: v.qty - v.amountToRemove }, { merge: true });
+          }
+        });
+        await safeAwait(batch.commit());
+      }
+      showToast('Auto-Trim Complete! ✂️');
+    } catch(err) { console.error(err); showToast('Error during auto-trim.'); }
   };
 
   const runCutoff = async () => {
     let lockedCount = 0;
-    for (const p of enrichedProducts) {
-      if (!p.locked && p.maxBoxes > 0 && p.totalVials > 0 && p.slotsLeft > 0 && p.boxes < p.maxBoxes) {
-        await setDoc(doc(db, `${basePath}/products`, p.id), { locked: true }, { merge: true });
-        lockedCount++;
+    const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+    try {
+      const toLock = enrichedProducts.filter(p => (!p.locked && p.maxBoxes > 0 && p.totalVials > 0 && p.slotsLeft > 0 && p.boxes < p.maxBoxes));
+      for (const chunk of chunkArray(toLock, 250)) {
+        const batch = writeBatch(db);
+        chunk.forEach(p => {
+          batch.set(doc(db, colPath('products'), p.id), { locked: true }, { merge: true });
+          lockedCount++;
+        });
+        await safeAwait(batch.commit());
       }
-    }
-    showToast(lockedCount > 0 ? `Cutoff Complete! Locked ${lockedCount} products.` : `Cutoff Complete! No open boxes needed locking.`);
+      showToast(lockedCount > 0 ? `Cutoff Complete! Locked ${lockedCount} products.` : `Cutoff Complete! No open boxes needed locking.`);
+    } catch(err) { console.error(err); showToast("Error running cutoff."); }
   };
 
   const resetSystem = async () => {
     if(!window.confirm('🚨 RESET SYSTEM: This will archive all current orders into History and clear the board. Proceed?')) return;
-    for (const o of orders) {
-      await addDoc(collection(db, `${basePath}/history`), { ...o, batchName: settings.batchName, archivedAt: Date.now() });
-      await deleteDoc(doc(db, `${basePath}/orders`, o.id));
-    }
-    for (const u of users) {
-      await setDoc(doc(db, `${basePath}/users`, u.id), { isPaid: false, proofUrl: null }, { merge: true });
-    }
-    for (const p of products) {
-      await setDoc(doc(db, `${basePath}/products`, p.id), { locked: false }, { merge: true });
-    }
-    await setDoc(doc(db, `${basePath}/settings`, 'main'), { ...settings, paymentsOpen: false, addOnly: false });
-    showToast('✅ System Reset & Archived!');
+    setIsBtnLoading(true);
+    showToast('Archiving and resetting... ⏳');
+    try {
+      const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+
+      for (const chunk of chunkArray(orders, 200)) {
+        const batch = writeBatch(db);
+        chunk.forEach(o => {
+          const histRef = doc(collection(db, colPath('history')));
+          batch.set(histRef, { ...o, batchName: settings.batchName, archivedAt: Date.now() });
+          batch.delete(doc(db, colPath('orders'), o.id));
+        });
+        await safeAwait(batch.commit());
+      }
+
+      for (const chunk of chunkArray(users, 400)) {
+        const batch = writeBatch(db);
+        chunk.forEach(u => batch.set(doc(db, colPath('users'), u.id), { isPaid: false, proofUrl: null }, { merge: true }));
+        await safeAwait(batch.commit());
+      }
+
+      for (const chunk of chunkArray(products, 400)) {
+        const batch = writeBatch(db);
+        chunk.forEach(p => batch.set(doc(db, colPath('products'), p.id), { locked: false }, { merge: true }));
+        await safeAwait(batch.commit());
+      }
+
+      await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), { ...settings, paymentsOpen: false, addOnly: false }));
+      showToast('✅ System Reset & Archived!');
+    } catch (err) { console.error(err); showToast(`❌ Error resetting system: ${err.message}`); }
+    setIsBtnLoading(false);
   };
 
-  // ✨ Massive Data Seeder (Products & Mock Orders)
+  // ✨ SAFELY BATCHED DATA SEEDER
   const seedDemoData = async () => {
     setIsBtnLoading(true);
-    await setDoc(doc(db, `${basePath}/settings`, 'main'), settings);
-    
-    const fullProductList = [
-      { name: "5-amino-1mq 5mg", kit: 60, vial: 6 },
-      { name: "5-amino-1mq 50mg", kit: 80, vial: 8 },
-      { name: "AA Water 10 ml", kit: 10, vial: 1 },
-      { name: "AA Water 3 ml", kit: 8, vial: 0.8 },
-      { name: "AHKCU 100mg", kit: 65, vial: 6.5 },
-      { name: "AICAR", kit: 60, vial: 6 },
-      { name: "AOD 9604", kit: 95, vial: 9.5 },
-      { name: "ARA290 10mg", kit: 70, vial: 7 },
-      { name: "Bacteriostatic Water 10ml", kit: 14, vial: 1.4 },
-      { name: "Bacteriostatic Water 3ml", kit: 5, vial: 0.5 },
-      { name: "Bacteriostatic Water 5ml", kit: 9, vial: 0.9 },
-      { name: "BPC157 5mg", kit: 40, vial: 4 },
-      { name: "BPC157 10mg", kit: 70, vial: 7 },
-      { name: "Cagri-Sema 10g", kit: 190, vial: 19 },
-      { name: "Cagri-Sema 5g", kit: 100, vial: 10 },
-      { name: "Cagrilintide 10mg", kit: 150, vial: 15 },
-      { name: "Cagrilintide 5mg", kit: 90, vial: 9 },
-      { name: "Cerebrolysin 60mg", kit: 50, vial: 8.4 },
-      { name: "CJC No DAC 5mg + IPA5mg blend", kit: 85, vial: 8.5 },
-      { name: "CJC-1295 with DAC 5 mg", kit: 130, vial: 13 },
-      { name: "CJC-1295 No DAC 5mg", kit: 68, vial: 6.8 },
-      { name: "CJC-1295 No DAC 10mg", kit: 130, vial: 13 },
-      { name: "DSIP 5mg", kit: 32, vial: 3.2 },
-      { name: "Epithalon 10mg", kit: 45, vial: 4.5 },
-      { name: "Epithalon 50mg", kit: 120, vial: 12 },
-      { name: "GHKCU Powder 1 gram", kit: 60, vial: 6 },
-      { name: "GHK-Cu 100mg", kit: 48, vial: 4.8 },
-      { name: "GHK-Cu 50mg", kit: 24, vial: 2.4 },
-      { name: "GHRP-2 Acetate 5mg", kit: 20, vial: 2 },
-      { name: "GHRP-2 Acetate 10mg", kit: 40, vial: 4 },
-      { name: "GKP70", kit: 140, vial: 14 },
-      { name: "GLOW 50mg", kit: 160, vial: 16 },
-      { name: "GLOW 70mg", kit: 180, vial: 18 },
-      { name: "Glutathione 1500mg", kit: 85, vial: 8.5 },
-      { name: "HHB", kit: 210, vial: 21 },
-      { name: "HCG 10000IU", kit: 120, vial: 12 },
-      { name: "HCG 5000IU", kit: 60, vial: 6 },
-      { name: "HGH 191AA (Somatropin) (Customized Order) 10 iu", kit: 50, vial: 5 },
-      { name: "HGH 191AA (Somatropin) (Customized Order) 15 iu", kit: 70, vial: 7 },
-      { name: "IGF-1LR3", kit: 190, vial: 19 },
-      { name: "Ipamorelin 5mg", kit: 30, vial: 3 },
-      { name: "Ipamorelin 10mg", kit: 50, vial: 5 },
-      { name: "KissPeptin-10 5mg", kit: 48, vial: 4.8 },
-      { name: "KissPeptin-10 10mg", kit: 90, vial: 9 },
-      { name: "KLOW BPC 10mg+Tb500 10mg+GHK-Cu50mg+KPV10mg", kit: 220, vial: 22 },
-      { name: "KPV 5mg", kit: 35, vial: 3.5 },
-      { name: "KPV 10mg", kit: 55, vial: 5.5 },
-      { name: "L-carnatine 500mg/vial", kit: 80, vial: 8 },
-      { name: "Lemon Bottle 10ml", kit: 70, vial: 7 },
-      { name: "Lipo-C 120mg", kit: 70, vial: 7 },
-      { name: "Lipo-C 216mg", kit: 90, vial: 9 },
-      { name: "Lipo-C Fat Blaster", kit: 110, vial: 11 },
-      { name: "MOTS-c 10mg", kit: 50, vial: 5 },
-      { name: "MOTS-c 40mg", kit: 190, vial: 19 },
-      { name: "NAD+ 100mg", kit: 50, vial: 5 },
-      { name: "NAD+ 500mg", kit: 70, vial: 7 },
-      { name: "Oxytocin Acetate*2mg", kit: 24, vial: 2.4 },
-      { name: "Pharma Bac", kit: 8.5, vial: 0.85 },
-      { name: "Pinealon 10 mg", kit: 64, vial: 6.4 },
-      { name: "Pinealon 20 mg", kit: 95, vial: 9.5 },
-      { name: "Pinealon 5 mg", kit: 40, vial: 4 },
-      { name: "PT-141 10 mg", kit: 62, vial: 6.2 },
-      { name: "Retatrutide 5mg", kit: 68, vial: 6.8 },
-      { name: "Retatrutide 10mg", kit: 100, vial: 10 },
-      { name: "Retatrutide 15mg", kit: 140, vial: 14 },
-      { name: "Retatrutide 20mg", kit: 170, vial: 17 },
-      { name: "Retatrutide 24mg", kit: 190, vial: 19 },
-      { name: "Retatrutide 30mg", kit: 245, vial: 24.5 },
-      { name: "Retatrutide 36mg", kit: 260, vial: 26 },
-      { name: "Retatrutide 40mg", kit: 330, vial: 33 },
-      { name: "Retatrutide 50mg", kit: 375, vial: 37.5 },
-      { name: "Retatrutide 60mg", kit: 390, vial: 39 },
-      { name: "Selank 5mg", kit: 40, vial: 4 },
-      { name: "Selank 11mg", kit: 75, vial: 7.5 },
-      { name: "Semaglutide 5mg", kit: 38, vial: 3.8 },
-      { name: "Semaglutide 10mg", kit: 52, vial: 5.2 },
-      { name: "Semaglutide 15mg", kit: 68, vial: 6.8 },
-      { name: "Semaglutide 20mg", kit: 90, vial: 9 },
-      { name: "Semaglutide 30mg", kit: 116, vial: 11.6 },
-      { name: "Semax 5mg", kit: 35, vial: 3.5 },
-      { name: "Semax 11mg", kit: 53, vial: 5.3 },
-      { name: "Sermorelin Acetate 5mg", kit: 50, vial: 5 },
-      { name: "SLU-PP-332", kit: 140, vial: 14 },
-      { name: "Snap-8 10mg", kit: 45, vial: 4.5 },
-      { name: "SS-31 10mg", kit: 70, vial: 7 },
-      { name: "SS-31 50mg", kit: 340, vial: 34 },
-      { name: "TB10mg+BPC10mg blend", kit: 160, vial: 16 },
-      { name: "TB500 10mg", kit: 130, vial: 13 },
-      { name: "TB500 5mg", kit: 65, vial: 6.5 },
-      { name: "TB5mg+BPC 5mg blend", kit: 80, vial: 8 },
-      { name: "Tesamorelin 5mg", kit: 90, vial: 9 },
-      { name: "Tesamorelin 10mg", kit: 170, vial: 17 },
-      { name: "Tesamorelin 15mg", kit: 230, vial: 23 },
-      { name: "Thymalin 10mg", kit: 48, vial: 4.8 },
-      { name: "Thymosin Alpha-1 5mg", kit: 78, vial: 7.8 },
-      { name: "Thymosin Alpha-1 10mg", kit: 155, vial: 15.5 },
-      { name: "Tirzepatide 5mg", kit: 40, vial: 4 },
-      { name: "Tirzepatide 10mg", kit: 62, vial: 6.2 },
-      { name: "Tirzepatide 15mg", kit: 75, vial: 7.5 },
-      { name: "Tirzepatide 20mg", kit: 90, vial: 9 },
-      { name: "Tirzepatide 30mg", kit: 115, vial: 11.5 },
-      { name: "Tirzepatide 40mg", kit: 145, vial: 14.5 },
-      { name: "Tirzepatide 45mg", kit: 160, vial: 16 },
-      { name: "Tirzepatide 50mg", kit: 170, vial: 17 },
-      { name: "Tirzepatide 60mg", kit: 200, vial: 20 },
-      { name: "VP5mg", kit: 80, vial: 8 },
-      { name: "VP10mg", kit: 150, vial: 15 }
-    ];
-
+    showToast("Starting Seed Process... Please Wait ⏳");
     try {
-      for (const p of products) {
-        await deleteDoc(doc(db, `${basePath}/products`, p.id));
+      await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), settings));
+      const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+
+      const fullProductList = [
+        { name: "5-amino-1mq 5mg", kit: 60, vial: 6 },
+        { name: "5-amino-1mq 50mg", kit: 80, vial: 8 },
+        { name: "AA Water 10 ml", kit: 10, vial: 1 },
+        { name: "AA Water 3 ml", kit: 8, vial: 0.8 },
+        { name: "AHKCU 100mg", kit: 65, vial: 6.5 },
+        { name: "AICAR", kit: 60, vial: 6 },
+        { name: "AOD 9604", kit: 95, vial: 9.5 },
+        { name: "ARA290 10mg", kit: 70, vial: 7 },
+        { name: "Bacteriostatic Water 10ml", kit: 14, vial: 1.4 },
+        { name: "Bacteriostatic Water 3ml", kit: 5, vial: 0.5 },
+        { name: "Bacteriostatic Water 5ml", kit: 9, vial: 0.9 },
+        { name: "BPC157 5mg", kit: 40, vial: 4 },
+        { name: "BPC157 10mg", kit: 70, vial: 7 },
+        { name: "Cagri-Sema 10g", kit: 190, vial: 19 },
+        { name: "Cagri-Sema 5g", kit: 100, vial: 10 },
+        { name: "Cagrilintide 10mg", kit: 150, vial: 15 },
+        { name: "Cagrilintide 5mg", kit: 90, vial: 9 },
+        { name: "Cerebrolysin 60mg", kit: 50, vial: 8.4 },
+        { name: "CJC No DAC 5mg + IPA5mg blend", kit: 85, vial: 8.5 },
+        { name: "CJC-1295 with DAC 5 mg", kit: 130, vial: 13 },
+        { name: "CJC-1295 No DAC 5mg", kit: 68, vial: 6.8 },
+        { name: "CJC-1295 No DAC 10mg", kit: 130, vial: 13 },
+        { name: "DSIP 5mg", kit: 32, vial: 3.2 },
+        { name: "Epithalon 10mg", kit: 45, vial: 4.5 },
+        { name: "Epithalon 50mg", kit: 120, vial: 12 },
+        { name: "GHKCU Powder 1 gram", kit: 60, vial: 6 },
+        { name: "GHK-Cu 100mg", kit: 48, vial: 4.8 },
+        { name: "GHK-Cu 50mg", kit: 24, vial: 2.4 },
+        { name: "GHRP-2 Acetate 5mg", kit: 20, vial: 2 },
+        { name: "GHRP-2 Acetate 10mg", kit: 40, vial: 4 },
+        { name: "GKP70", kit: 140, vial: 14 },
+        { name: "GLOW 50mg", kit: 160, vial: 16 },
+        { name: "GLOW 70mg", kit: 180, vial: 18 },
+        { name: "Glutathione 1500mg", kit: 85, vial: 8.5 },
+        { name: "HHB", kit: 210, vial: 21 },
+        { name: "HCG 10000IU", kit: 120, vial: 12 },
+        { name: "HCG 5000IU", kit: 60, vial: 6 },
+        { name: "HGH 191AA (Somatropin) (Customized Order) 10 iu", kit: 50, vial: 5 },
+        { name: "HGH 191AA (Somatropin) (Customized Order) 15 iu", kit: 70, vial: 7 },
+        { name: "IGF-1LR3", kit: 190, vial: 19 },
+        { name: "Ipamorelin 5mg", kit: 30, vial: 3 },
+        { name: "Ipamorelin 10mg", kit: 50, vial: 5 },
+        { name: "KissPeptin-10 5mg", kit: 48, vial: 4.8 },
+        { name: "KissPeptin-10 10mg", kit: 90, vial: 9 },
+        { name: "KLOW BPC 10mg+Tb500 10mg+GHK-Cu50mg+KPV10mg", kit: 220, vial: 22 },
+        { name: "KPV 5mg", kit: 35, vial: 3.5 },
+        { name: "KPV 10mg", kit: 55, vial: 5.5 },
+        { name: "L-carnatine 500mg/vial", kit: 80, vial: 8 },
+        { name: "Lemon Bottle 10ml", kit: 70, vial: 7 },
+        { name: "Lipo-C 120mg", kit: 70, vial: 7 },
+        { name: "Lipo-C 216mg", kit: 90, vial: 9 },
+        { name: "Lipo-C Fat Blaster", kit: 110, vial: 11 },
+        { name: "MOTS-c 10mg", kit: 50, vial: 5 },
+        { name: "MOTS-c 40mg", kit: 190, vial: 19 },
+        { name: "NAD+ 100mg", kit: 50, vial: 5 },
+        { name: "NAD+ 500mg", kit: 70, vial: 7 },
+        { name: "Oxytocin Acetate*2mg", kit: 24, vial: 2.4 },
+        { name: "Pharma Bac", kit: 8.5, vial: 0.85 },
+        { name: "Pinealon 10 mg", kit: 64, vial: 6.4 },
+        { name: "Pinealon 20 mg", kit: 95, vial: 9.5 },
+        { name: "Pinealon 5 mg", kit: 40, vial: 4 },
+        { name: "PT-141 10 mg", kit: 62, vial: 6.2 },
+        { name: "Retatrutide 5mg", kit: 68, vial: 6.8 },
+        { name: "Retatrutide 10mg", kit: 100, vial: 10 },
+        { name: "Retatrutide 15mg", kit: 140, vial: 14 },
+        { name: "Retatrutide 20mg", kit: 170, vial: 17 },
+        { name: "Retatrutide 24mg", kit: 190, vial: 19 },
+        { name: "Retatrutide 30mg", kit: 245, vial: 24.5 },
+        { name: "Retatrutide 36mg", kit: 260, vial: 26 },
+        { name: "Retatrutide 40mg", kit: 330, vial: 33 },
+        { name: "Retatrutide 50mg", kit: 375, vial: 37.5 },
+        { name: "Retatrutide 60mg", kit: 390, vial: 39 },
+        { name: "Selank 5mg", kit: 40, vial: 4 },
+        { name: "Selank 11mg", kit: 75, vial: 7.5 },
+        { name: "Semaglutide 5mg", kit: 38, vial: 3.8 },
+        { name: "Semaglutide 10mg", kit: 52, vial: 5.2 },
+        { name: "Semaglutide 15mg", kit: 68, vial: 6.8 },
+        { name: "Semaglutide 20mg", kit: 90, vial: 9 },
+        { name: "Semaglutide 30mg", kit: 116, vial: 11.6 },
+        { name: "Semax 5mg", kit: 35, vial: 3.5 },
+        { name: "Semax 11mg", kit: 53, vial: 5.3 },
+        { name: "Sermorelin Acetate 5mg", kit: 50, vial: 5 },
+        { name: "SLU-PP-332", kit: 140, vial: 14 },
+        { name: "Snap-8 10mg", kit: 45, vial: 4.5 },
+        { name: "SS-31 10mg", kit: 70, vial: 7 },
+        { name: "SS-31 50mg", kit: 340, vial: 34 },
+        { name: "TB10mg+BPC10mg blend", kit: 160, vial: 16 },
+        { name: "TB500 10mg", kit: 130, vial: 13 },
+        { name: "TB500 5mg", kit: 65, vial: 6.5 },
+        { name: "TB5mg+BPC 5mg blend", kit: 80, vial: 8 },
+        { name: "Tesamorelin 5mg", kit: 90, vial: 9 },
+        { name: "Tesamorelin 10mg", kit: 170, vial: 17 },
+        { name: "Tesamorelin 15mg", kit: 230, vial: 23 },
+        { name: "Thymalin 10mg", kit: 48, vial: 4.8 },
+        { name: "Thymosin Alpha-1 5mg", kit: 78, vial: 7.8 },
+        { name: "Thymosin Alpha-1 10mg", kit: 155, vial: 15.5 },
+        { name: "Tirzepatide 5mg", kit: 40, vial: 4 },
+        { name: "Tirzepatide 10mg", kit: 62, vial: 6.2 },
+        { name: "Tirzepatide 15mg", kit: 75, vial: 7.5 },
+        { name: "Tirzepatide 20mg", kit: 90, vial: 9 },
+        { name: "Tirzepatide 30mg", kit: 115, vial: 11.5 },
+        { name: "Tirzepatide 40mg", kit: 145, vial: 14.5 },
+        { name: "Tirzepatide 45mg", kit: 160, vial: 16 },
+        { name: "Tirzepatide 50mg", kit: 170, vial: 17 },
+        { name: "Tirzepatide 60mg", kit: 200, vial: 20 },
+        { name: "VP5mg", kit: 80, vial: 8 },
+        { name: "VP10mg", kit: 150, vial: 15 }
+      ];
+
+      for (const chunk of chunkArray(products, 250)) {
+        const batch = writeBatch(db);
+        chunk.forEach(p => batch.delete(doc(db, colPath('products'), p.id)));
+        await safeAwait(batch.commit());
       }
-      for (const item of fullProductList) {
-        await addDoc(collection(db, `${basePath}/products`), {
-          name: item.name,
-          pricePerKitUSD: item.kit,
-          pricePerVialUSD: item.vial,
-          locked: false,
-          maxBoxes: 0
+      
+      for (const chunk of chunkArray(fullProductList, 250)) {
+        const batch = writeBatch(db);
+        chunk.forEach(item => {
+          const ref = doc(collection(db, colPath('products')));
+          batch.set(ref, { name: item.name, pricePerKitUSD: item.kit, pricePerVialUSD: item.vial, locked: false, maxBoxes: 0 });
         });
+        await safeAwait(batch.commit());
       }
 
-      // Clear existing orders first
-      for (const o of orders) {
-        await deleteDoc(doc(db, `${basePath}/orders`, o.id));
+      for (const chunk of chunkArray(orders, 250)) {
+        const batch = writeBatch(db);
+        chunk.forEach(o => batch.delete(doc(db, colPath('orders'), o.id)));
+        await safeAwait(batch.commit());
       }
 
-      // Massive Mock Orders Array
       const MOCK_ORDERS = [
         { email: 'nglln.sdr25@gmail.com', name: 'Angelyn Dela Rosa', handle: 'looms', product: 'Retatrutide 20mg', qty: 5 },
         { email: 'vinamarie.t@gmail.com', name: 'Vina Marie Trinidad', handle: 'Inah.T', product: 'Bacteriostatic Water 3ml', qty: 90 },
@@ -628,22 +717,25 @@ export default function App() {
         { email: 'icah_sulat@yahoo.com', name: 'April Sulat', handle: 'lavander_bunny_', product: 'Pharma Bac', qty: 2 }
       ];
 
-      const timestamp = Date.now();
-      for (const o of MOCK_ORDERS) {
-         let assignedAdmin = settings.admins[Math.floor(Math.random() * settings.admins.length)]?.name || "Admin";
-         await setDoc(doc(db, `${basePath}/users`, o.email.toLowerCase()), { 
-            name: o.name, handle: o.handle, adminAssigned: assignedAdmin, 
-            address: { shipOpt: 'Lalamove', street: '123 Test St', city: 'Makati', contact: '09171234567' }
-         }, { merge: true });
-         await addDoc(collection(db, `${basePath}/orders`), { 
-            email: o.email.toLowerCase(), name: o.name, handle: o.handle, product: o.product, qty: o.qty, timestamp 
+      for (const chunk of chunkArray(MOCK_ORDERS, 150)) {
+         const batch = writeBatch(db);
+         chunk.forEach(o => {
+            let assignedAdmin = settings.admins[Math.floor(Math.random() * settings.admins.length)]?.name || "Admin";
+            batch.set(doc(db, colPath('users'), o.email.toLowerCase()), { 
+               name: o.name, handle: o.handle, adminAssigned: assignedAdmin, 
+               address: { shipOpt: 'Lalamove', street: '123 Test St', city: 'Makati', contact: '09171234567' }
+            }, { merge: true });
+            batch.set(doc(collection(db, colPath('orders'))), { 
+               email: o.email.toLowerCase(), name: o.name, handle: o.handle, product: o.product, qty: o.qty, timestamp: Date.now() 
+            });
          });
+         await safeAwait(batch.commit());
       }
 
       showToast("Massive Product & Mock Order List Seeded! 🎉");
     } catch(err) {
       console.error(err);
-      showToast("Error seeding products.");
+      showToast(`❌ Error seeding: ${err.message}`);
     }
     setIsBtnLoading(false);
   };
@@ -668,14 +760,14 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       const text = event.target.result;
-      const rows = text.split('\n');
+      const rows = text.split(/\r?\n/);
       const newProducts = [];
       
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i].trim();
         if (!row) continue;
         
-        const cols = row.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+        const cols = parseCSVLine(row);
         
         if (cols.length >= 4 && cols[0].trim() !== '') {
           const name = cols[0].replace(/^"|"$/g, '').trim();
@@ -694,17 +786,28 @@ export default function App() {
       
       if (newProducts.length > 0) {
         setIsBtnLoading(true);
+        showToast("Uploading CSV... ⏳");
         try {
-          for (const p of products) {
-            await deleteDoc(doc(db, `${basePath}/products`, p.id));
+          const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+          
+          for (const chunk of chunkArray(products, 250)) {
+             const batch = writeBatch(db);
+             chunk.forEach(p => batch.delete(doc(db, colPath('products'), p.id)));
+             await safeAwait(batch.commit());
           }
-          for (const p of newProducts) {
-            await addDoc(collection(db, `${basePath}/products`), p);
+          
+          for (const chunk of chunkArray(newProducts, 250)) {
+             const batch = writeBatch(db);
+             chunk.forEach(p => {
+               const ref = doc(collection(db, colPath('products')));
+               batch.set(ref, p);
+             });
+             await safeAwait(batch.commit());
           }
           showToast(`✅ Imported ${newProducts.length} products successfully!`);
         } catch(err) {
           console.error(err);
-          showToast(`❌ Error saving products to database.`);
+          showToast(`❌ Error saving products: ${err.message}`);
         }
         setIsBtnLoading(false);
       } else {
@@ -717,13 +820,13 @@ export default function App() {
 
   const handleAddProduct = async () => {
     if (!newProd.name || !newProd.vial) { showToast('Enter name and vial price!'); return; }
-    await addDoc(collection(db, `${basePath}/products`), {
+    await safeAwait(addDoc(collection(db, colPath('products')), {
       name: newProd.name,
       pricePerKitUSD: Number(newProd.kit) || (Number(newProd.vial) * 10),
       pricePerVialUSD: Number(newProd.vial),
       locked: false,
       maxBoxes: Number(newProd.max) || 0
-    });
+    }));
     setNewProd({ name: '', kit: '', vial: '', max: '' });
     showToast('Product added! ✅');
   };
@@ -921,7 +1024,7 @@ export default function App() {
                         <div className="font-bold">{i.product}</div>
                         <div className="text-right">
                           <span className="text-[#D6006E] font-black">x{i.qty}</span>
-                          <span className="text-gray-400 ml-2 font-bold">${i.total.toFixed(2)}</span>
+                          <span className="text-gray-400 ml-2 font-bold">${(i.price * i.qty).toFixed(2)}</span>
                         </div>
                       </div>
                     ))}
@@ -930,7 +1033,7 @@ export default function App() {
                     <div className="flex justify-between text-xs font-bold text-gray-500 uppercase"><span>Subtotal</span><span>${subtotalUSD.toFixed(2)}</span></div>
                     <div className="flex justify-between text-xs font-bold text-gray-500 uppercase"><span>Admin Fee</span><span>₱{settings.adminFeePhp}</span></div>
                     <div className="flex flex-col items-end pt-2">
-                      <span className="text-3xl xl:text-4xl font-black text-[#D6006E]">₱{totalPHP.toLocaleString()}</span>
+                      <span className="text-3xl xl:text-4xl font-black text-[#D6006E]">₱{totalPHP.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                     </div>
                   </div>
                   <button onClick={submitOrder} disabled={isBtnLoading || (cartList.length === 0 && action !== 'cancel')} className={originalBtn + " w-full mt-6 py-5"}>
@@ -947,7 +1050,7 @@ export default function App() {
           <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t-2 border-[#FF1493] p-4 rounded-t-3xl shadow-[0_-10px_20px_rgba(0,0,0,0.1)] z-50 flex justify-between items-center">
             <div>
               <div className="text-[10px] font-black text-[#D6006E] uppercase">Total Estimate</div>
-              <div className="text-2xl font-black text-[#D6006E]">₱{totalPHP.toLocaleString()}</div>
+              <div className="text-2xl font-black text-[#D6006E]">₱{totalPHP.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
             </div>
             {settings.paymentsOpen ? (
               <button onClick={() => setShowPayModal(true)} disabled={cartList.length===0} className="bg-[#008040] text-white px-6 py-3 rounded-full font-bold uppercase text-sm shadow-md disabled:opacity-50">Pay Now 💸</button>
@@ -1028,7 +1131,7 @@ export default function App() {
                   <div className="p-6 border-t-2 border-pink-50 bg-[#FFF0F5]">
                      <div className="flex justify-between items-center mb-4">
                         <span className="font-bold text-pink-400">TOTAL PHP</span>
-                        <span className="text-2xl font-black text-pink-600">₱{totalPHP.toLocaleString()}</span>
+                        <span className="text-2xl font-black text-pink-600">₱{totalPHP.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                      </div>
                      <button onClick={submitPayment} className={originalBtn + " w-full"}>Upload Proof & Complete ✅</button>
                   </div>
@@ -1229,7 +1332,7 @@ export default function App() {
                                   <td><span className="bg-[#FFF0F5] px-2 py-1 rounded text-[10px] font-black text-pink-600 border border-pink-100">{c.adminAssigned}</span></td>
                                   <td className="text-right font-black text-pink-600">₱{c.totalPHP.toLocaleString()}</td>
                                   <td className="text-center">
-                                     <button onClick={() => setDoc(doc(db, `${basePath}/users`, c.email), { isPaid: !c.isPaid }, { merge: true })} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${c.isPaid ? 'bg-emerald-50 text-emerald-600 border-emerald-200 shadow-sm' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
+                                     <button onClick={() => safeAwait(setDoc(doc(db, colPath('users'), c.email), { isPaid: !c.isPaid }, { merge: true }))} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${c.isPaid ? 'bg-emerald-50 text-emerald-600 border-emerald-200 shadow-sm' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
                                         {c.isPaid ? 'PAID ✅' : 'PENDING ❌'}
                                      </button>
                                   </td>
@@ -1305,7 +1408,7 @@ export default function App() {
                                   <td><strong>{u.name}</strong><br/><span className="text-[10px] text-slate-400">{u.id}</span></td>
                                   <td className="text-[10px] text-slate-500">{u.address?.street ? `${u.address.street}, ${u.address.city} (${u.address.shipOpt})` : <span className="italic opacity-40">No address on file</span>}</td>
                                   <td className="font-black text-pink-600">{userQty} Vials</td>
-                                  <td className="text-center"><button onClick={() => deleteDoc(doc(db, `${basePath}/users`, u.id))} className="text-slate-300 hover:text-rose-500"><Trash2 size={16} /></button></td>
+                                  <td className="text-center"><button onClick={() => safeAwait(deleteDoc(doc(db, colPath('users'), u.id)))} className="text-slate-300 hover:text-rose-500"><Trash2 size={16} /></button></td>
                                 </tr>
                               )
                             })}
@@ -1337,7 +1440,7 @@ export default function App() {
                            </button>
                            <div className="grid grid-cols-2 gap-4 mt-2">
                              <button onClick={runCutoff} className="py-4 rounded-2xl bg-pink-100 text-pink-600 font-black uppercase text-[10px] tracking-widest border border-pink-200 hover:bg-pink-200 transition-colors">🛑 Run Cutoff</button>
-                             <button onClick={resetSystem} className="py-4 rounded-2xl bg-rose-100 text-rose-600 font-black uppercase text-[10px] tracking-widest border border-rose-200 hover:bg-rose-200 transition-colors">🚨 Reset System</button>
+                             <button onClick={resetSystem} disabled={isBtnLoading} className="py-4 rounded-2xl bg-rose-100 text-rose-600 font-black uppercase text-[10px] tracking-widest border border-rose-200 hover:bg-rose-200 transition-colors disabled:opacity-50">🚨 Reset System</button>
                            </div>
                         </section>
 
@@ -1402,7 +1505,7 @@ export default function App() {
                                />
                              </div>
                              <div className="pt-4 border-t-2 border-pink-50">
-                               <button onClick={seedDemoData} className="w-full py-5 rounded-2xl bg-gradient-to-r from-purple-500 to-indigo-500 text-white font-black uppercase text-xs tracking-widest shadow-lg hover:scale-[0.98] transition-transform">
+                               <button onClick={seedDemoData} disabled={isBtnLoading} className="w-full py-5 rounded-2xl bg-gradient-to-r from-purple-500 to-indigo-500 text-white font-black uppercase text-xs tracking-widest shadow-lg hover:scale-[0.98] transition-transform disabled:opacity-50">
                                  {isBtnLoading ? "Seeding... ⏳" : "🚀 Seed Full Product List & Mock Orders"}
                                </button>
                                <p className="text-[10px] text-center text-slate-400 mt-2 font-bold">Injects 100+ products and ~100 mock orders to test math.</p>
@@ -1424,15 +1527,15 @@ export default function App() {
                                     <td className="font-bold text-[#4A042A]">{p.name}</td>
                                     <td className="text-[#D6006E] font-bold">${p.pricePerVialUSD.toFixed(2)}</td>
                                     <td>
-                                      <input type="number" className="w-16 border-2 border-[#FFC0CB] rounded-lg p-1 text-center text-xs font-bold text-[#D6006E] outline-none" value={p.maxBoxes} onChange={e => setDoc(doc(db, `${basePath}/products`, p.id), { maxBoxes: Number(e.target.value)||0 }, { merge: true })}/>
+                                      <input type="number" className="w-16 border-2 border-[#FFC0CB] rounded-lg p-1 text-center text-xs font-bold text-[#D6006E] outline-none" value={p.maxBoxes} onChange={e => safeAwait(setDoc(doc(db, colPath('products'), p.id), { maxBoxes: Number(e.target.value)||0 }, { merge: true }))}/>
                                     </td>
                                     <td>
-                                      <button onClick={()=>setDoc(doc(db, `${basePath}/products`, p.id), { locked: !p.locked }, { merge: true })} className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border-2 transition-all ${p.locked ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
+                                      <button onClick={()=>safeAwait(setDoc(doc(db, colPath('products'), p.id), { locked: !p.locked }, { merge: true }))} className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border-2 transition-all ${p.locked ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
                                         {p.locked ? 'LOCKED' : 'OPEN'}
                                       </button>
                                     </td>
                                     <td>
-                                      <button onClick={()=>deleteDoc(doc(db, `${basePath}/products`, p.id))} className="text-rose-500 font-bold hover:text-rose-700 text-xs uppercase tracking-widest">Remove</button>
+                                      <button onClick={()=>safeAwait(deleteDoc(doc(db, colPath('products'), p.id)))} className="text-rose-500 font-bold hover:text-rose-700 text-xs uppercase tracking-widest">Remove</button>
                                     </td>
                                   </tr>
                                 ))}
