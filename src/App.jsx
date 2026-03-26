@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
+﻿﻿﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, writeBatch } from 'firebase/firestore';
@@ -8,7 +8,7 @@ import {
   BadgeDollarSign, Scissors, ClipboardList, Users,
   Lock, Package, Search, ArrowRight, CreditCard,
   Home, LogOut, Trash2, ChevronRight, BookOpen, Printer, ImageIcon,
-  Droplet, Repeat, ThermometerSnowflake, Sparkles, AlertTriangle,
+  Droplet, Repeat, ThermometerSnowflake, Sparkles, AlertTriangle, Calculator,
   MessageCircle, Send, ScrollText, Edit3, Trash, ShoppingCart
 } from 'lucide-react';
 
@@ -51,6 +51,9 @@ const CUTE_PLEAS = [
   "Looking for box buddies.",
   "Help, I do not want to be trimmed."
 ];
+const CALCULATOR_DOSE_PRESETS = [0.1, 0.25, 0.5, 1, 2, 2.5, 5, 7.5, 10, 12.5, 15];
+const CALCULATOR_STRENGTH_PRESETS = [1, 5, 10, 15, 20, 50];
+const CALCULATOR_WATER_PRESETS = [0.5, 1, 1.5, 2, 2.5, 3];
 
 // âœ¨ SUPERCHARGED KNOWLEDGE BASE
 const WIKI_DATA = [
@@ -300,6 +303,7 @@ export default function App() {
   const [showHitListModal, setShowHitListModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showWikiModal, setShowWikiModal] = useState(false);
+  const [showCalculatorModal, setShowCalculatorModal] = useState(false);
   const [showAllProofsModal, setShowAllProofsModal] = useState(false);
   const [selectedProfileEmail, setSelectedProfileEmail] = useState(null);
   const [isBtnLoading, setIsBtnLoading] = useState(false);
@@ -327,6 +331,7 @@ export default function App() {
   const chatPanelRef = useRef(null);
   const chatLauncherRef = useRef(null);
   const chatCleanupRef = useRef(false);
+  const heroSectionRef = useRef(null);
   const heroBubbleFieldRef = useRef(null);
   const heroBubbleNodesRef = useRef({});
   const heroBubblePhysicsRef = useRef([]);
@@ -381,6 +386,9 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [wikiSearchQuery, setWikiSearchQuery] = useState('');
   const [wikiTagFilter, setWikiTagFilter] = useState('All');
+  const [calculatorDoseMg, setCalculatorDoseMg] = useState(0.25);
+  const [calculatorStrengthMg, setCalculatorStrengthMg] = useState(5);
+  const [calculatorWaterMl, setCalculatorWaterMl] = useState(2);
   const [adminGlobalSearch, setAdminGlobalSearch] = useState('');
   const [adminInventoryFilter, setAdminInventoryFilter] = useState('all');
   const [adminInventorySort, setAdminInventorySort] = useState('name');
@@ -408,6 +416,7 @@ export default function App() {
   const [newProd, setNewProd] = useState({ name: '', kit: '', vial: '', max: '' });
   const [newAdmin, setNewAdmin] = useState({ name: '', banks: [{ details: '', qrFile: null }] });
   const [isScrolled, setIsScrolled] = useState(false);
+  const [isHeroInView, setIsHeroInView] = useState(true);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -419,6 +428,42 @@ export default function App() {
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  useEffect(() => {
+    if (view !== 'shop') return undefined;
+    const heroEl = heroSectionRef.current;
+    if (!heroEl) return undefined;
+
+    const syncHeroVisibility = () => {
+      const rect = heroEl.getBoundingClientRect();
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+      const nextInView = rect.top < viewportHeight * 0.72 && rect.bottom > viewportHeight * 0.24;
+      setIsHeroInView(prev => (prev === nextInView ? prev : nextInView));
+    };
+
+    syncHeroVisibility();
+
+    if (typeof IntersectionObserver === 'undefined') {
+      window.addEventListener('scroll', syncHeroVisibility, { passive: true });
+      window.addEventListener('resize', syncHeroVisibility);
+      return () => {
+        window.removeEventListener('scroll', syncHeroVisibility);
+        window.removeEventListener('resize', syncHeroVisibility);
+      };
+    }
+
+    const observer = new IntersectionObserver(syncHeroVisibility, {
+      threshold: [0, 0.15, 0.35, 0.55, 0.75, 1],
+    });
+
+    observer.observe(heroEl);
+    window.addEventListener('resize', syncHeroVisibility);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', syncHeroVisibility);
+    };
+  }, [view, settings.storeOpen]);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -544,6 +589,77 @@ export default function App() {
     });
   }, [settings.admins]);
 
+  const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+
+  const getFrozenPaymentSnapshot = (profile) => {
+    const snap = profile?.paymentSnapshot;
+    if (!snap || typeof snap !== 'object') return null;
+    const totalPHP = Number(snap.totalPHP);
+    const subtotalUSD = Number(snap.subtotalUSD);
+    const totalUSD = Number(snap.totalUSD);
+    if (!Number.isFinite(totalPHP) || !Number.isFinite(subtotalUSD) || !Number.isFinite(totalUSD)) return null;
+    return {
+      ...snap,
+      totalPHP,
+      subtotalUSD,
+      totalUSD,
+      fxRate: Number(snap.fxRate || 0),
+      adminFeePhp: Number(snap.adminFeePhp || 0)
+    };
+  };
+
+  const getSelectedAdminBankRoute = (adminName, email) => {
+    const normalizedEmail = String(email || '').toLowerCase().trim();
+    const resolvedAdminName = adminName || 'Unassigned';
+    const adminObj = normalizedAdmins.find(a => a.name === resolvedAdminName) || null;
+    const availableBanks = (adminObj?.banks || []).filter(bank => bank?.details || bank?.qr);
+    if (!availableBanks.length) {
+      return {
+        adminAssigned: resolvedAdminName,
+        bankIndex: -1,
+        bankDetails: '',
+        bankQr: '',
+        hasRoute: false
+      };
+    }
+    const hash = normalizedEmail.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const bankIndex = hash % availableBanks.length;
+    const selectedBank = availableBanks[bankIndex];
+    return {
+      adminAssigned: resolvedAdminName,
+      bankIndex,
+      bankDetails: selectedBank?.details || '',
+      bankQr: selectedBank?.qr || '',
+      hasRoute: true
+    };
+  };
+
+  const buildPaymentSnapshot = (items, adminName, email, capturedAt = Date.now()) => {
+    let subtotalUSD = 0;
+    Object.entries(items || {}).forEach(([prod, qty]) => {
+      const product = products.find(p => p.name === prod);
+      if (product && qty > 0) subtotalUSD += qty * Number(product.pricePerVialUSD || 0);
+    });
+
+    const fxRate = Number(settings.fxRate || 0);
+    const adminFeePhp = Number(settings.adminFeePhp || 0);
+    const totalUSD = subtotalUSD > 0 && fxRate > 0 ? subtotalUSD + (adminFeePhp / fxRate) : 0;
+    const route = getSelectedAdminBankRoute(adminName, email);
+
+    return {
+      capturedAt,
+      subtotalUSD,
+      totalUSD,
+      totalPHP: totalUSD * fxRate,
+      fxRate,
+      adminFeePhp,
+      adminAssigned: route.adminAssigned,
+      bankIndex: route.bankIndex,
+      bankDetails: route.bankDetails,
+      bankQr: route.bankQr
+    };
+  };
+
   const enrichedProducts = useMemo(() => {
     const productStats = {};
     orders.forEach(o => {
@@ -614,6 +730,46 @@ export default function App() {
     return victims.sort((a, b) => b.missingSlots - a.missingSlots);
   }, [orders]);
 
+  const discordTrimListText = useMemo(() => {
+    if (!trimmingHitList.length) {
+      return [
+        'Loose Vial Hit List',
+        'No one is currently at risk of trimming.'
+      ].join('\n');
+    }
+
+    const groupedRows = trimmingHitList.reduce((acc, item) => {
+      const groupKey = `${item.prod}||${item.boxNum}||${item.missingSlots}`;
+      if (!acc[groupKey]) {
+        acc[groupKey] = {
+          prod: item.prod,
+          boxNum: item.boxNum,
+          missingSlots: item.missingSlots,
+          rows: []
+        };
+      }
+      acc[groupKey].rows.push(item);
+      return acc;
+    }, {});
+
+    const lines = [
+      'Loose Vial Hit List',
+      'If these boxes do not fill before cutoff, the loose vials below will be trimmed.',
+      ''
+    ];
+
+    Object.values(groupedRows).forEach(group => {
+      lines.push(`${group.prod} - Box ${group.boxNum} needs ${group.missingSlots} more`);
+      group.rows.forEach(row => {
+        const label = row.handle ? `@${String(row.handle).replace(/^@+/, '')}` : row.email;
+        lines.push(`- ${label}: at risk of losing ${row.amountToRemove} vial${row.amountToRemove === 1 ? '' : 's'}`);
+      });
+      lines.push('');
+    });
+
+    return lines.join('\n').trim();
+  }, [trimmingHitList]);
+
   const customerList = useMemo(() => {
     const map = {};
     orders.forEach(o => {
@@ -638,24 +794,35 @@ export default function App() {
         const pData = products.find(p => p.name === pName);
         if (pData) sub += qty * pData.pricePerVialUSD;
       });
-      const tUSD = sub > 0 ? sub + (settings.adminFeePhp / settings.fxRate) : 0;
       const profile = users.find(u => u.id === c.email) || {};
+      const frozenPaymentSnapshot = getFrozenPaymentSnapshot(profile);
+      const fxRate = Number(settings.fxRate || 0);
+      const liveTotalUSD = sub > 0 && fxRate > 0 ? sub + (settings.adminFeePhp / fxRate) : 0;
+      const liveTotalPHP = liveTotalUSD * fxRate;
       const address = profile.address || null;
-      const adminAssigned = profile.adminAssigned || "Unassigned";
+      const adminAssigned = frozenPaymentSnapshot?.adminAssigned || profile.adminAssigned || "Unassigned";
       const hasAddress = Boolean(address?.street && address?.city && address?.contact);
       const hasProof = Boolean(profile.proofUrl);
       const hasAssignedAdmin = Boolean(adminAssigned && adminAssigned !== 'Unassigned');
       const totalVials = itemEntries.reduce((acc, [, qty]) => acc + qty, 0);
       const itemCount = itemEntries.length;
+      const subtotalUSD = frozenPaymentSnapshot?.subtotalUSD ?? sub;
+      const totalUSD = frozenPaymentSnapshot?.totalUSD ?? liveTotalUSD;
+      const totalPHP = frozenPaymentSnapshot?.totalPHP ?? liveTotalPHP;
 
       return {
         ...c,
         products: Object.fromEntries(itemEntries),
-        totalPHP: tUSD * settings.fxRate,
+        subtotalUSD,
+        totalUSD,
+        totalPHP,
         isPaid: profile.isPaid || false,
         adminAssigned,
         proofUrl: profile.proofUrl || null,
         proofReview: profile.proofReview || '',
+        paymentSnapshot: frozenPaymentSnapshot,
+        paymentBankDetails: frozenPaymentSnapshot?.bankDetails || '',
+        paymentBankQr: frozenPaymentSnapshot?.bankQr || '',
         address,
         hasAddress,
         hasProof,
@@ -875,6 +1042,15 @@ export default function App() {
     recheckCount: customerList.filter(c => c.proofReview === 'needs-recheck').length
   }), [customerList]);
 
+  const paymentAuditSummary = useMemo(() => ({
+    proofSubmittedPHP: customerList.filter(c => c.hasProof).reduce((acc, c) => acc + c.totalPHP, 0),
+    pendingReviewPHP: customerList.filter(c => c.hasProof && !c.isPaid).reduce((acc, c) => acc + c.totalPHP, 0),
+    noProofPHP: customerList.filter(c => !c.hasProof).reduce((acc, c) => acc + c.totalPHP, 0),
+    proofSubmittedCount: customerList.filter(c => c.hasProof).length,
+    pendingReviewCount: customerList.filter(c => c.hasProof && !c.isPaid).length,
+    noProofCount: customerList.filter(c => !c.hasProof).length
+  }), [customerList]);
+
   const paymentAdminBreakdown = useMemo(() => {
     const map = {};
     customerList.forEach(c => {
@@ -893,6 +1069,62 @@ export default function App() {
     });
 
     return Object.values(map).sort((a, b) => b.expected - a.expected || a.admin.localeCompare(b.admin));
+  }, [customerList]);
+
+  const paymentAuditByAdmin = useMemo(() => {
+    const map = {};
+    customerList.forEach((customer) => {
+      const admin = customer.hasAssignedAdmin ? customer.adminAssigned : 'Unassigned';
+      if (!map[admin]) {
+        map[admin] = {
+          admin,
+          expectedPHP: 0,
+          paidPHP: 0,
+          proofSubmittedPHP: 0,
+          pendingReviewPHP: 0,
+          noProofPHP: 0,
+          buyers: [],
+          flaggedBuyers: []
+        };
+      }
+
+      const entry = map[admin];
+      entry.expectedPHP += customer.totalPHP;
+      if (customer.isPaid) entry.paidPHP += customer.totalPHP;
+      if (customer.hasProof) entry.proofSubmittedPHP += customer.totalPHP;
+      if (customer.hasProof && !customer.isPaid) entry.pendingReviewPHP += customer.totalPHP;
+      if (!customer.hasProof) entry.noProofPHP += customer.totalPHP;
+
+      const flags = [];
+      if (!customer.hasAssignedAdmin) flags.push('Needs admin');
+      if (!customer.hasAddress) flags.push('Missing address');
+      if (!customer.hasProof) flags.push('No proof');
+      if (customer.hasProof && !customer.isPaid) flags.push(customer.proofReview === 'needs-recheck' ? 'Needs recheck' : 'Pending review');
+      if ((customer.hasProof || customer.isPaid) && !customer.paymentBankDetails && !customer.paymentBankQr) flags.push('No saved route');
+
+      const buyer = {
+        email: customer.email,
+        name: customer.name,
+        totalPHP: customer.totalPHP,
+        flags,
+        hasProof: customer.hasProof,
+        isPaid: customer.isPaid,
+        needsRecheck: customer.proofReview === 'needs-recheck',
+        latestTimestamp: customer.latestTimestamp || 0
+      };
+
+      entry.buyers.push(buyer);
+      if (flags.length > 0) entry.flaggedBuyers.push(buyer);
+    });
+
+    return Object.values(map)
+      .map((entry) => ({
+        ...entry,
+        proofGapPHP: entry.expectedPHP - entry.proofSubmittedPHP,
+        approvalGapPHP: entry.proofSubmittedPHP - entry.paidPHP,
+        flaggedCount: entry.flaggedBuyers.length
+      }))
+      .sort((a, b) => b.expectedPHP - a.expectedPHP || a.admin.localeCompare(b.admin));
   }, [customerList]);
 
   useEffect(() => {
@@ -1044,6 +1276,43 @@ export default function App() {
     });
   }, [filteredHitList, trimmingTableSort]);
 
+  const groupedHitList = useMemo(() => {
+    const groups = filteredHitList.reduce((acc, item) => {
+      const key = `${item.prod}||${item.boxNum}||${item.missingSlots}`;
+      if (!acc[key]) {
+        acc[key] = {
+          key,
+          prod: item.prod,
+          boxNum: item.boxNum,
+          missingSlots: item.missingSlots,
+          riskyVials: 0,
+          rows: []
+        };
+      }
+      acc[key].rows.push(item);
+      acc[key].riskyVials += Number(item.amountToRemove || 0);
+      return acc;
+    }, {});
+
+    return Object.values(groups)
+      .map(group => ({
+        ...group,
+        customers: new Set(group.rows.map(row => row.email)).size,
+        rows: [...group.rows].sort((a, b) => {
+          const riskDiff = Number(b.amountToRemove || 0) - Number(a.amountToRemove || 0);
+          if (riskDiff !== 0) return riskDiff;
+          return (a.name || a.email).localeCompare(b.name || b.email);
+        })
+      }))
+      .sort((a, b) => {
+        const urgencyDiff = Number(a.missingSlots || 0) - Number(b.missingSlots || 0);
+        if (urgencyDiff !== 0) return urgencyDiff;
+        const productDiff = a.prod.localeCompare(b.prod);
+        if (productDiff !== 0) return productDiff;
+        return Number(a.boxNum || 0) - Number(b.boxNum || 0);
+      });
+  }, [filteredHitList]);
+
   const sortedRegisteredUsers = useMemo(() => {
     const list = [...filteredUsers];
     return list.sort((a, b) => {
@@ -1158,6 +1427,33 @@ export default function App() {
       })
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [wikiSearchQuery, wikiTagFilter]);
+
+  const peptideCalculator = useMemo(() => {
+    const doseMg = Number(calculatorDoseMg);
+    const strengthMg = Number(calculatorStrengthMg);
+    const waterMl = Number(calculatorWaterMl);
+
+    if (!doseMg || !strengthMg || !waterMl || doseMg <= 0 || strengthMg <= 0 || waterMl <= 0) return null;
+
+    const concentrationMgPerMl = strengthMg / waterMl;
+    const concentrationMcgPerUnit = concentrationMgPerMl * 10;
+    const drawMl = doseMg / concentrationMgPerMl;
+    const syringeUnits = drawMl * 100;
+    const doseMcg = doseMg * 1000;
+    const remainingDoses = Math.floor(strengthMg / doseMg);
+
+    return {
+      doseMg,
+      doseMcg,
+      strengthMg,
+      waterMl,
+      concentrationMgPerMl,
+      concentrationMcgPerUnit,
+      drawMl,
+      syringeUnits,
+      remainingDoses
+    };
+  }, [calculatorDoseMg, calculatorStrengthMg, calculatorWaterMl]);
 
   const customerProfile = useMemo(() => users.find(u => u.id === customerEmail.toLowerCase().trim()) || null, [users, customerEmail]);
 
@@ -1362,6 +1658,49 @@ export default function App() {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     setToast(String(msg));
     toastTimeoutRef.current = setTimeout(() => setToast(null), duration);
+  }
+
+  async function copyTrimListForDiscord() {
+    try {
+      if (!navigator?.clipboard?.writeText) {
+        showToast('Clipboard is not available right now.');
+        return;
+      }
+      await navigator.clipboard.writeText(discordTrimListText);
+      showToast(trimmingHitList.length ? 'Trim list copied for Discord.' : 'Copied the empty trim list message.');
+    } catch (err) {
+      console.error(err);
+      showToast('Could not copy the trim list.');
+    }
+  }
+
+  function buildTrimGroupDiscordText(group) {
+    const lines = [
+      `${group.prod} - Box ${group.boxNum} needs ${group.missingSlots} more`,
+      'If this box does not fill before cutoff, these loose vials will be trimmed:',
+      ''
+    ];
+
+    group.rows.forEach(row => {
+      const label = row.handle ? `@${String(row.handle).replace(/^@+/, '')}` : row.email;
+      lines.push(`- ${label}: ${row.amountToRemove} vial${row.amountToRemove === 1 ? '' : 's'} at risk`);
+    });
+
+    return lines.join('\n');
+  }
+
+  async function copyTrimGroupForDiscord(group) {
+    try {
+      if (!navigator?.clipboard?.writeText) {
+        showToast('Clipboard is not available right now.');
+        return;
+      }
+      await navigator.clipboard.writeText(buildTrimGroupDiscordText(group));
+      showToast(`Copied ${group.prod} box ${group.boxNum} alert.`);
+    } catch (err) {
+      console.error(err);
+      showToast('Could not copy this box alert.');
+    }
   }
 
   function focusProductCard(prodName) {
@@ -1722,7 +2061,6 @@ export default function App() {
     const emailLower = customerEmail.toLowerCase().trim();
     setIsBtnLoading(true);
     try {
-      const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
       const errors = [];
       const newOrderItems = [];
       const timestamp = Date.now();
@@ -1811,6 +2149,10 @@ export default function App() {
       if (!existingUser || !existingUser.adminAssigned) {
         userUpdatePayload.adminAssigned = normalizedAdmins[Math.floor(Math.random() * normalizedAdmins.length)]?.name || "Admin";
       }
+      if (!existingUser?.proofUrl && !existingUser?.isPaid) {
+        userUpdatePayload.paymentSnapshot = null;
+        userUpdatePayload.proofReview = '';
+      }
       await safeAwait(setDoc(doc(db, colPath('users'), emailLower), userUpdatePayload, { merge: true }));
 
       const logDetails = newOrderItems.map(i => `${i.qty}x ${i.product}`).join(', ');
@@ -1850,6 +2192,9 @@ export default function App() {
       const fileName = `${emailLower}_${Date.now()}.${fileExt}`;
       const sRefPath = isCanvas ? `artifacts/${appId}/public/proofs/${fileName}` : `proofs/${fileName}`;
       const sRef = storageRef(storage, sRefPath);
+      const currentProfile = users.find(u => u.id === emailLower) || {};
+      const existingSnapshot = getFrozenPaymentSnapshot(currentProfile);
+      const frozenSnapshot = existingSnapshot || buildPaymentSnapshot(existingOrderData.items, currentProfile.adminAssigned || currentCustomerRecord?.adminAssigned, emailLower);
 
       showToast("Uploading proof...");
       await uploadBytesResumable(sRef, proofFile);
@@ -1858,6 +2203,9 @@ export default function App() {
       await safeAwait(setDoc(doc(db, colPath('users'), emailLower), {
         address: addressForm,
         isPaid: true,
+        proofReview: '',
+        paymentSnapshot: frozenSnapshot,
+        paymentSubmittedAt: Date.now(),
         proofUrl: downloadUrl
       }, { merge: true }));
 
@@ -1969,21 +2317,16 @@ export default function App() {
 
     try {
       const formattedCustomers = customerList.map(c => {
-        const subtotalUSD = c.totalPHP / settings.fxRate - (settings.adminFeePhp / settings.fxRate);
-        const totalUSD = c.totalPHP / settings.fxRate;
-        const adminData = normalizedAdmins.find(a => a.name === c.adminAssigned);
-        const bankAcc = adminData?.banks?.[0]?.details || '';
-
         return {
           Email: c.email,
           Name: c.name,
           Handle: c.handle || '',
-          "Subtotal USD": subtotalUSD.toFixed(2),
-          "Total USD": totalUSD.toFixed(2),
+          "Subtotal USD": c.subtotalUSD.toFixed(2),
+          "Total USD": c.totalUSD.toFixed(2),
           "Total PHP": c.totalPHP,
           "Proof Link": c.proofUrl || '',
           "Assigned Admin": c.adminAssigned || '',
-          "Bank Account": bankAcc,
+          "Bank Account": c.paymentBankDetails || '',
           "Label Link": "N/A (Generated on Demand)",
           Street: c.address?.street || '',
           Barangay: c.address?.brgy || '',
@@ -2069,14 +2412,9 @@ export default function App() {
     let csvContent = headers.join(",") + "\n";
 
     customers.forEach(c => {
-      const subtotalUSD = c.totalPHP / settings.fxRate - (settings.adminFeePhp / settings.fxRate);
-      const totalUSD = c.totalPHP / settings.fxRate;
-      const adminData = normalizedAdmins.find(a => a.name === c.adminAssigned);
-      const bankAcc = adminData?.banks?.[0]?.details || '';
-
       const row = [
-        `"${c.email}"`, `"${c.name}"`, `"${c.handle || ''}"`, `"${subtotalUSD.toFixed(2)}"`, `"${totalUSD.toFixed(2)}"`, `"${c.totalPHP}"`,
-        `"${c.proofUrl || ''}"`, `"${c.adminAssigned || ''}"`, `"${bankAcc}"`, `"N/A (Generated on Demand)"`,
+        `"${c.email}"`, `"${c.name}"`, `"${c.handle || ''}"`, `"${c.subtotalUSD.toFixed(2)}"`, `"${c.totalUSD.toFixed(2)}"`, `"${c.totalPHP}"`,
+        `"${c.proofUrl || ''}"`, `"${c.adminAssigned || ''}"`, `"${c.paymentBankDetails || ''}"`, `"N/A (Generated on Demand)"`,
         `"${c.address?.street || ''}"`, `"${c.address?.brgy || ''}"`, `"${c.address?.city || ''}"`, `"${c.address?.prov || ''}"`,
         `"${c.address?.zip || ''}"`, `"${c.address?.contact || ''}"`, `"${c.address?.shipOpt || ''}"`, `"${c.isPaid ? 'TRUE' : 'FALSE'}"`
       ];
@@ -2097,17 +2435,32 @@ export default function App() {
     exportCustomersCSVRows(customerList);
   };
 
+  const updateCustomerAdminAssignment = async (customer, adminName) => {
+    if (!adminName) return;
+    if (settings.paymentsOpen || customer.hasProof || customer.isPaid) {
+      showToast("Admin routing is frozen once payment is in progress.");
+      return;
+    }
+
+    try {
+      await safeAwait(setDoc(doc(db, colPath('users'), customer.email), { adminAssigned: adminName, paymentSnapshot: null }, { merge: true }));
+    } catch (error) {
+      console.error(error);
+      showToast("Could not update the assigned admin right now.");
+    }
+  };
+
   const assignAdminToCustomers = async (emails, adminName) => {
     if (!adminName) { showToast("Pick an admin first."); return; }
     if (emails.length === 0) { showToast("Select at least one order first."); return; }
+    if (settings.paymentsOpen) { showToast("Admin routing is frozen while payments are live."); return; }
 
     setIsBtnLoading(true);
     try {
-      const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
       for (const chunk of chunkArray(emails, 250)) {
         const batch = writeBatch(db);
         chunk.forEach(email => {
-          batch.set(doc(db, colPath('users'), email), { adminAssigned: adminName }, { merge: true });
+          batch.set(doc(db, colPath('users'), email), { adminAssigned: adminName, paymentSnapshot: null }, { merge: true });
         });
         await safeAwait(batch.commit());
       }
@@ -2206,6 +2559,61 @@ export default function App() {
     const newSettings = { ...settings, [field]: val };
     setSettings(newSettings);
     await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), newSettings));
+  }
+
+  async function togglePaymentsWindow() {
+    if (settings.paymentsOpen) {
+      try {
+        const nextSettings = { ...settings, paymentsOpen: false };
+        await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), nextSettings));
+        setSettings(nextSettings);
+        showToast('Payment window closed. Frozen payment routes stay saved for already-routed buyers.');
+      } catch (err) {
+        console.error(err);
+        showToast('Could not close the payment window right now.');
+      }
+      return;
+    }
+
+    const activeCustomers = customerList.filter(c => c.itemCount > 0);
+    if (activeCustomers.length === 0) {
+      showToast('No active orders to freeze for payment yet.');
+      return;
+    }
+
+    const invalidCustomer = activeCustomers.find((customer) => {
+      if (!customer.hasAssignedAdmin) return true;
+      return !getSelectedAdminBankRoute(customer.adminAssigned, customer.email).hasRoute;
+    });
+    if (invalidCustomer) {
+      showToast(`Cannot open payments yet. ${invalidCustomer.name || invalidCustomer.email} needs a stable admin with at least one bank or QR option.`);
+      return;
+    }
+
+    setIsBtnLoading(true);
+    try {
+      for (const chunk of chunkArray(activeCustomers, 250)) {
+        const batch = writeBatch(db);
+        chunk.forEach((customer) => {
+          const userProfile = users.find(u => u.id === customer.email) || {};
+          const shouldPreserveExistingSnapshot = Boolean(userProfile.proofUrl || userProfile.isPaid);
+          const paymentSnapshot = shouldPreserveExistingSnapshot && getFrozenPaymentSnapshot(userProfile)
+            ? getFrozenPaymentSnapshot(userProfile)
+            : buildPaymentSnapshot(customer.products, customer.adminAssigned, customer.email);
+          batch.set(doc(db, colPath('users'), customer.email), { paymentSnapshot }, { merge: true });
+        });
+        await safeAwait(batch.commit());
+      }
+
+      const nextSettings = { ...settings, paymentsOpen: true };
+      await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), nextSettings));
+      setSettings(nextSettings);
+      showToast('Payment window opened. Totals, assigned admins, and payment routes are now frozen for this batch.');
+    } catch (err) {
+      console.error(err);
+      showToast('Could not freeze payment routes. Payment window stayed closed.');
+    }
+    setIsBtnLoading(false);
   }
 
   async function executeTrim(victim) {
@@ -2349,13 +2757,13 @@ export default function App() {
 
       for (const chunk of chunkArray(users, 400)) {
         const batch = writeBatch(db);
-        chunk.forEach(u => batch.set(doc(db, colPath('users'), u.id), { isPaid: false, proofUrl: null }, { merge: true }));
+        chunk.forEach(u => batch.set(doc(db, colPath('users'), u.id), { isPaid: false, proofUrl: null, proofReview: '', paymentSnapshot: null, paymentSubmittedAt: null }, { merge: true }));
         await safeAwait(batch.commit());
       }
 
       for (const chunk of chunkArray(products, 400)) {
         const batch = writeBatch(db);
-        chunk.forEach(p => batch.set(doc(db, colPath('products'), p.id), { locked: false }, { merge: true }));
+        chunk.forEach(p => batch.set(doc(db, colPath('products'), p.id), { locked: false, maxBoxes: 0, syncCapped: false }, { merge: true }));
         await safeAwait(batch.commit());
       }
 
@@ -2576,6 +2984,11 @@ export default function App() {
 
   // âœ¨ NEW: Inline Admin Edit Logic
   const openAdminEditModal = (email) => {
+    const targetProfile = users.find(u => u.id === email) || {};
+    if (settings.paymentsOpen || targetProfile.proofUrl || targetProfile.isPaid) {
+      showToast('Order editing is locked once payment routing is live or proof has been submitted.');
+      return;
+    }
     const userOrders = orders.filter(o => o.email === email);
     const initialCart = {};
     userOrders.forEach(o => {
@@ -2594,9 +3007,13 @@ export default function App() {
     setIsBtnLoading(true);
     try {
       const targetEmail = adminOrderEditTarget;
-      const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+      const targetProfile = users.find(u => u.id === targetEmail) || {};
+      if (settings.paymentsOpen || targetProfile.proofUrl || targetProfile.isPaid) {
+        showToast("Order editing is locked once payment routing is live or proof has been submitted.");
+        setIsBtnLoading(false);
+        return;
+      }
 
-      // 1. Delete old orders for this user
       const oldOrders = orders.filter(o => o.email === targetEmail);
       for (const chunk of chunkArray(oldOrders, 250)) {
         const batch = writeBatch(db);
@@ -2604,10 +3021,8 @@ export default function App() {
         await safeAwait(batch.commit());
       }
 
-      // 2. Insert new orders
       const newOrders = [];
       const timestamp = Date.now();
-      const targetProfile = users.find(u => u.id === targetEmail) || {};
 
       Object.entries(adminCart).forEach(([prod, qty]) => {
         if (qty > 0) {
@@ -2624,6 +3039,8 @@ export default function App() {
         await safeAwait(batch.commit());
       }
 
+      await safeAwait(setDoc(doc(db, colPath('users'), targetEmail), { paymentSnapshot: null, proofReview: '' }, { merge: true }));
+
       await safeAwait(addDoc(collection(db, colPath('logs')), { timestamp: Date.now(), email: targetEmail, name: targetProfile.name || 'Unknown', action: "Admin Edited Order", details: `Cart updated via Admin Panel` }));
 
       showToast("Admin order update saved.");
@@ -2637,9 +3054,11 @@ export default function App() {
 
 
   // --- STYLES ---
-  const originalInput = "w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-2xl px-4 py-3 outline-none focus:border-[#D6006E] font-bold text-[#4A042A] text-sm";
-  const adminInputSm = "w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-lg px-3 py-1.5 text-sm sm:text-xs outline-none focus:border-[#D6006E] font-bold text-[#4A042A]";
-  const originalBtn = "bg-gradient-to-r from-[#FF1493] to-[#FF69B4] text-white font-bold px-6 py-2.5 rounded-full shadow-[0_4px_10px_rgba(255,20,147,0.3)] uppercase tracking-wider hover:scale-[0.98] transition-all text-sm";
+  const originalInput = "w-full bg-[#FFF0F5] border-2 border-[#FFC0CB] rounded-2xl px-4 py-3 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 font-bold text-[#4A042A] text-sm shadow-inner placeholder:text-pink-300";
+  const lockedAdminInput = `${originalInput} disabled:cursor-not-allowed disabled:opacity-60`;
+  const customerFormInput = "w-full bg-white border-2 border-[#FFC0CB] rounded-2xl px-4 py-3 text-sm font-bold text-[#4A042A] outline-none shadow-[0_10px_24px_rgba(214,0,110,0.08)] transition-all duration-300 placeholder:text-pink-300 focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 disabled:border-pink-100 disabled:bg-[#FFF7FA] disabled:text-[#9E2A5E] disabled:shadow-none disabled:cursor-not-allowed";
+  const adminInputSm = "w-full bg-[#FFF0F5] border-2 border-[#FFC0CB] rounded-xl px-3 py-1.5 text-sm sm:text-xs outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 font-bold text-[#4A042A]";
+  const originalBtn = "bg-gradient-to-r from-[#FF1493] to-[#FF69B4] text-white font-black px-6 py-2.5 rounded-full shadow-[0_16px_34px_rgba(255,20,147,0.22)] uppercase tracking-[0.16em] hover:translate-y-[-1px] hover:shadow-[0_20px_38px_rgba(255,20,147,0.26)] transition-all text-sm";
 
   // --- PREPARE DATA ---
   const userOrders = orders.filter(o => o.email === customerEmail.toLowerCase().trim());
@@ -2667,11 +3086,28 @@ export default function App() {
     }
   });
 
-  const totalPHP = (subtotalUSD > 0 ? subtotalUSD + (settings.adminFeePhp / settings.fxRate) : 0) * settings.fxRate;
+  const currentCustomerRecord = customerList.find(c => c.email === customerEmail.toLowerCase().trim()) || null;
+  const currentProfile = users.find(u => u.id === customerEmail.toLowerCase().trim()) || null;
+  const lockedPaymentSnapshot = currentCustomerRecord?.paymentSnapshot || getFrozenPaymentSnapshot(currentProfile);
+  const currentPaymentRoute = lockedPaymentSnapshot
+    ? {
+      adminAssigned: lockedPaymentSnapshot.adminAssigned || currentCustomerRecord?.adminAssigned || currentProfile?.adminAssigned || 'Admin',
+      bankDetails: lockedPaymentSnapshot.bankDetails || '',
+      bankQr: lockedPaymentSnapshot.bankQr || '',
+      hasRoute: Boolean(lockedPaymentSnapshot.bankDetails || lockedPaymentSnapshot.bankQr)
+    }
+    : getSelectedAdminBankRoute(currentCustomerRecord?.adminAssigned || currentProfile?.adminAssigned, customerEmail);
+  const totalPHP = lockedPaymentSnapshot?.totalPHP ?? ((subtotalUSD > 0 && settings.fxRate > 0 ? subtotalUSD + (settings.adminFeePhp / settings.fxRate) : 0) * settings.fxRate);
   const selectedVialCount = cartList.reduce((sum, item) => sum + item.qty, 0);
   const availableCatalogCount = filteredShopProducts.filter(p => !p.isClosed).length;
   const nearlyFullCount = filteredShopProducts.filter(p => !p.isClosed && p.slotsLeft > 0 && p.slotsLeft <= 3).length;
   const syncedCapCount = enrichedProducts.filter(p => p.syncCapped).length;
+  const currentBatchOpenLines = enrichedProducts.filter(p => !p.isClosed).length;
+  const currentBatchFillingLines = enrichedProducts.filter(p => !p.isClosed && Number(p.totalVials || 0) > 0).length;
+  const currentBatchProtectedKits = enrichedProducts.reduce((sum, product) => sum + Number(product.boxes || 0), 0);
+  const currentBatchOpenSpots = enrichedProducts
+    .filter(p => !p.isClosed && p.totalVials > 0 && p.slotsLeft > 0)
+    .reduce((sum, product) => sum + Number(product.slotsLeft || 0), 0);
   const inventoryFilterOptions = [
     { id: 'all', label: 'All' },
     { id: 'open', label: 'Open' },
@@ -2709,6 +3145,49 @@ export default function App() {
   const isStoreClosed = settings.storeOpen === false;
   const hasExistingOrder = Object.keys(existingMap).length > 0;
   const isCartEditable = !settings.paymentsOpen && settings.storeOpen !== false;
+  const isHitListSaveReady = Boolean(
+    customerName.trim() &&
+    customerEmail.trim() &&
+    customerEmailConfirm.trim() &&
+    customerEmail.toLowerCase().trim() === customerEmailConfirm.toLowerCase().trim()
+  );
+  const isHeroCartCompact = !isStoreClosed && isHeroInView;
+  const shopDesktopLayoutClass = 'flex flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_252px] xl:grid-cols-[minmax(0,1fr)_284px] gap-4 xl:gap-5 items-start';
+  const desktopCartAsideClass = 'hidden lg:block sticky top-6 w-full self-start overflow-visible';
+  const desktopCartShellClass = `shop-surface rounded-[30px] shadow-xl transition-all duration-300 ease-out ${isHeroCartCompact ? 'w-full p-5' : 'w-full lg:w-[328px] xl:w-[372px] p-6'}`;
+  const desktopCartTitleClass = isHeroCartCompact
+    ? 'brand-title mt-2 text-[1.45rem] leading-[0.98] text-[#D6006E] transition-all duration-300'
+    : 'brand-title mt-2 text-[1.65rem] leading-[0.95] text-[#D6006E] transition-all duration-300';
+  const orderCardEyebrow = settings.addOnly ? 'Add-only protection' : hasExistingOrder ? 'Current order loaded' : 'Order details';
+  const orderCardTitle = hasExistingOrder ? 'Update your order' : 'Start your order';
+  const orderCardDescription = settings.addOnly
+    ? 'Your old numbers stay protected. You can add more, but you cannot reduce them.'
+    : hasExistingOrder
+      ? 'Your saved order is loaded below. Adjust what you need, then save.'
+      : 'Enter your details, then choose your vial totals below.';
+  const orderCardFlowLabel = settings.paymentsOpen ? 'Payments are open' : 'Ready to order';
+  const orderCardFlowCopy = settings.paymentsOpen
+    ? 'Your saved items are locked in. Use your email below to continue.'
+    : hasExistingOrder
+      ? 'Your order is loaded. Update counts, then save.'
+      : 'Choose vial totals, review the cart, and save.';
+  const orderCardProfileCopy = customerProfile?.address?.street
+    ? `Shipping set to ${customerProfile.address.city}.`
+    : 'Address saves securely after payment.';
+  const orderCardProtectionCopy = settings.addOnly
+    ? 'Only increases are allowed right now so loose kits do not get worse.'
+    : 'Every 10 vials makes 1 protected kit.';
+  const orderCardStatus = settings.paymentsOpen
+    ? 'Payments open'
+    : settings.addOnly
+      ? 'Add-only mode'
+      : hasExistingOrder
+        ? 'Saved order'
+        : 'New order';
+  const getCustomerFormInputClass = (field) => [
+    customerFormInput,
+    shakingField === field ? 'animate-shake border-red-500 bg-red-50 text-red-700 placeholder:text-red-300' : ''
+  ].filter(Boolean).join(' ');
   const selectedActiveOrderEmails = Object.keys(selectedActiveOrders).filter(email => selectedActiveOrders[email]);
   const areAllVisibleActiveOrdersSelected = activeOrdersList.length > 0 && activeOrdersList.every(c => selectedActiveOrders[c.email]);
   const renderAdminToggle = ({ label, description, active, activeText, inactiveText, onToggle, activeTone, inactiveTone }) => {
@@ -2843,6 +3322,131 @@ export default function App() {
     );
   };
 
+  const renderAuditDashboard = () => (
+    <>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="rounded-2xl border border-violet-100 bg-white px-4 py-3 text-left shadow-sm">
+          <p className="text-[10px] font-black uppercase tracking-widest text-violet-600">Proof Submitted</p>
+          <p className="mt-1 text-2xl font-black text-violet-700">₱{paymentAuditSummary.proofSubmittedPHP.toLocaleString()}</p>
+          <p className="mt-1 text-[10px] font-bold text-slate-500">{paymentAuditSummary.proofSubmittedCount} with proof</p>
+        </div>
+        <div className="rounded-2xl border border-rose-100 bg-white px-4 py-3 text-left shadow-sm">
+          <p className="text-[10px] font-black uppercase tracking-widest text-rose-600">Pending Review</p>
+          <p className="mt-1 text-2xl font-black text-rose-700">₱{paymentAuditSummary.pendingReviewPHP.toLocaleString()}</p>
+          <p className="mt-1 text-[10px] font-bold text-slate-500">{paymentAuditSummary.pendingReviewCount} awaiting admin action</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Still No Proof</p>
+          <p className="mt-1 text-2xl font-black text-slate-700">₱{paymentAuditSummary.noProofPHP.toLocaleString()}</p>
+          <p className="mt-1 text-[10px] font-bold text-slate-500">{paymentAuditSummary.noProofCount} still unpaid</p>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-[24px] border-2 border-pink-50 p-4 shadow-sm space-y-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-pink-500">Audit Queue</p>
+            <p className="mt-1 text-xs font-bold text-slate-500">Use this when a bank total does not match. It groups the exact buyers still affecting each admin balance.</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {paymentAuditByAdmin.map((admin) => {
+            const visibleFlags = admin.flaggedBuyers
+              .sort((left, right) => {
+                const rank = (buyer) => {
+                  if (buyer.flags.includes('Needs recheck')) return 0;
+                  if (buyer.flags.includes('Pending review')) return 1;
+                  if (buyer.flags.includes('No proof')) return 2;
+                  if (buyer.flags.includes('Missing address')) return 3;
+                  if (buyer.flags.includes('Needs admin')) return 4;
+                  return 5;
+                };
+                return rank(left) - rank(right) || right.totalPHP - left.totalPHP || right.latestTimestamp - left.latestTimestamp;
+              })
+              .slice(0, 6);
+
+            return (
+              <div key={`audit-${admin.admin}`} className="rounded-[24px] border border-pink-100 bg-white p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black text-[#4A042A]">{admin.admin}</p>
+                    <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">{admin.buyers.length} buyer{admin.buyers.length === 1 ? '' : 's'} in this route</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setPaymentFilterAdmin(admin.admin); setAdminTab('payments'); }}
+                    className="rounded-full border border-pink-200 bg-pink-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-pink-600 transition-colors hover:border-pink-300"
+                  >
+                    Open in Payments
+                  </button>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  {renderCompactAdminStat('Expected', `₱${admin.expectedPHP.toLocaleString()}`, 'pink', 'Target for this admin')}
+                  {renderCompactAdminStat('Proofs In', `₱${admin.proofSubmittedPHP.toLocaleString()}`, 'violet', `${admin.buyers.filter(b => b.hasProof).length} submitted`)}
+                  {renderCompactAdminStat('Approved', `₱${admin.paidPHP.toLocaleString()}`, 'emerald', `${admin.buyers.filter(b => b.isPaid).length} marked paid`)}
+                  {renderCompactAdminStat('Gap', `₱${admin.proofGapPHP.toLocaleString()}`, admin.proofGapPHP > 0 ? 'amber' : 'emerald', admin.proofGapPHP > 0 ? 'Still missing proof' : 'All expected proof submitted')}
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-1.5">
+                  <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-violet-700">
+                    ₱{admin.approvalGapPHP.toLocaleString()} awaiting approval
+                  </span>
+                  <span className={`rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-widest ${admin.flaggedCount > 0 ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                    {admin.flaggedCount} flagged buyer{admin.flaggedCount === 1 ? '' : 's'}
+                  </span>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {visibleFlags.length === 0 ? (
+                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 px-4 py-3 text-xs font-black text-emerald-700">
+                      No open audit flags here. This admin route is fully reconciled inside the app.
+                    </div>
+                  ) : (
+                    visibleFlags.map((buyer) => (
+                      <div key={`${admin.admin}-${buyer.email}`} className="rounded-2xl border border-slate-100 bg-slate-50/70 px-4 py-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-black text-slate-800">{buyer.name}</p>
+                            <p className="mt-0.5 text-[10px] font-bold text-slate-400">{buyer.email}</p>
+                          </div>
+                          <p className="text-sm font-black text-pink-600">₱{buyer.totalPHP.toLocaleString()}</p>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {buyer.flags.map((flag) => (
+                            <span key={`${buyer.email}-${flag}`} className={`rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-widest ${
+                              flag === 'Needs recheck'
+                                ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                : flag === 'Pending review'
+                                  ? 'border-violet-200 bg-violet-50 text-violet-700'
+                                  : flag === 'No proof'
+                                    ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                    : flag === 'Missing address'
+                                      ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                      : 'border-sky-200 bg-sky-50 text-sky-700'
+                            }`}>
+                              {flag}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                  {admin.flaggedBuyers.length > visibleFlags.length && (
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                      +{admin.flaggedBuyers.length - visibleFlags.length} more flagged buyer{admin.flaggedBuyers.length - visibleFlags.length === 1 ? '' : 's'}
+                    </p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+
   const renderPaymentsDashboard = () => (
     <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -2953,7 +3557,7 @@ export default function App() {
                   </td>
                   <td>
                     <div className="flex flex-col gap-2">
-                      <select value={c.hasAssignedAdmin ? c.adminAssigned : ''} onChange={(e) => safeAwait(setDoc(doc(db, colPath('users'), c.email), { adminAssigned: e.target.value }, { merge: true }))} className="bg-[#FFF0F5] border border-[#FFC0CB] text-[#D6006E] text-[10px] font-black rounded-xl px-3 py-2 outline-none w-full max-w-[150px]">
+                      <select value={c.hasAssignedAdmin ? c.adminAssigned : ''} onChange={(e) => updateCustomerAdminAssignment(c, e.target.value)} disabled={settings.paymentsOpen || c.hasProof || c.isPaid} className="bg-[#FFF0F5] border border-[#FFC0CB] text-[#D6006E] text-[10px] font-black rounded-xl px-3 py-2 outline-none w-full max-w-[150px] disabled:cursor-not-allowed disabled:opacity-60">
                         <option value="" disabled>Select Admin...</option>
                         {normalizedAdmins.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
                       </select>
@@ -3033,15 +3637,17 @@ export default function App() {
         html { scroll-behavior: smooth; }
         body { 
           -webkit-overflow-scrolling: touch; 
+          color: #4A042A;
         }
         body::before {
           content: '';
           position: fixed;
           top: 0; left: 0; width: 100%; height: 100%;
           background:
-            radial-gradient(circle at top left, rgba(255,255,255,0.55), transparent 30%),
-            radial-gradient(circle at 85% 15%, rgba(255, 236, 246, 0.75), transparent 22%),
-            linear-gradient(140deg, #ffd8ee 0%, #ff9ec6 52%, #ff7ab2 100%);
+            radial-gradient(circle at 12% 12%, rgba(255,255,255,0.94), transparent 22%),
+            radial-gradient(circle at 86% 10%, rgba(255,235,245,0.96), transparent 18%),
+            radial-gradient(circle at 50% 100%, rgba(255,205,227,0.72), transparent 30%),
+            linear-gradient(180deg, #FFF8FC 0%, #FFF0F5 42%, #FFE1EE 100%);
           z-index: -1;
           transform: translateZ(0); 
         }
@@ -3050,10 +3656,10 @@ export default function App() {
           position: fixed;
           inset: 0;
           background-image:
-            linear-gradient(rgba(255,255,255,0.18) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255,255,255,0.18) 1px, transparent 1px);
-          background-size: 24px 24px;
-          mask-image: linear-gradient(to bottom, rgba(0,0,0,0.75), transparent 80%);
+            linear-gradient(rgba(255,255,255,0.2) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.2) 1px, transparent 1px);
+          background-size: 30px 30px;
+          mask-image: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent 82%);
           z-index: -1;
           pointer-events: none;
         }
@@ -3120,31 +3726,87 @@ export default function App() {
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fadeIn { animation: fadeIn 0.2s ease-out forwards; }
         .brand-title, .brand-title * { font-family: 'Pacifico', cursive !important; }
-        .brand-title { transform: rotate(-2deg); text-shadow: 0 12px 24px rgba(74, 4, 42, 0.12); }
+        .brand-title { transform: rotate(-2deg); text-shadow: 0 10px 22px rgba(74, 4, 42, 0.12); }
+        .section-title {
+          font-family: 'Quicksand', sans-serif !important;
+          font-weight: 800;
+          letter-spacing: -0.03em;
+        }
         .hero-brand-title {
           color: #fff;
-          text-shadow: 0 10px 30px rgba(214, 0, 110, 0.42), 0 3px 0 rgba(255,255,255,0.28);
-          -webkit-text-stroke: 1px rgba(255,255,255,0.32);
+          text-shadow: 0 8px 24px rgba(214, 0, 110, 0.26), 0 2px 0 rgba(255,255,255,0.16);
         }
         .hero-support-text {
-          color: #7A104C;
-          text-shadow: 0 1px 0 rgba(255,255,255,0.4);
+          color: #8F2C5D;
+          text-shadow: 0 1px 0 rgba(255,255,255,0.28);
         }
         .glass-card {
-          background: linear-gradient(145deg, rgba(255,255,255,0.72), rgba(255,255,255,0.36));
-          border: 1px solid rgba(255,255,255,0.68);
-          border-radius: 1.5rem;
-          box-shadow: 0 24px 56px rgba(122, 16, 76, 0.14);
-          backdrop-filter: blur(24px);
+          background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,240,245,0.9));
+          border: 2px solid rgba(255,192,203,0.82);
+          border-radius: 1.75rem;
+          box-shadow: 0 22px 48px rgba(214, 0, 110, 0.12);
+          backdrop-filter: blur(18px);
           transition: all 0.3s ease;
+        }
+        .order-form-shell {
+          position: relative;
+          overflow: hidden;
+          background: linear-gradient(180deg, rgba(255,255,255,0.97), rgba(255,240,245,0.9));
+          border: 2px solid rgba(255,192,203,0.72);
+          box-shadow: 0 26px 58px rgba(214, 0, 110, 0.12);
+        }
+        .order-form-shell::before {
+          content: '';
+          position: absolute;
+          inset: -18% auto auto -10%;
+          width: 18rem;
+          height: 18rem;
+          border-radius: 999px;
+          background: radial-gradient(circle, rgba(255,255,255,0.88), rgba(255,255,255,0));
+          opacity: 0.82;
+          pointer-events: none;
+        }
+        .order-form-shell::after {
+          content: '';
+          position: absolute;
+          inset: auto -5% -28% auto;
+          width: 20rem;
+          height: 20rem;
+          border-radius: 999px;
+          background: radial-gradient(circle, rgba(255,182,222,0.58), rgba(255,255,255,0));
+          pointer-events: none;
+        }
+        .order-form-chip {
+          background: rgba(255,255,255,0.84);
+          border: 1px solid rgba(255,192,203,0.68);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.92), 0 10px 22px rgba(214, 0, 110, 0.08);
+          backdrop-filter: blur(12px);
+        }
+        .order-input-panel {
+          background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(255,244,248,0.84));
+          border: 1px solid rgba(255,192,203,0.56);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.92), 0 12px 26px rgba(214, 0, 110, 0.08);
+          backdrop-filter: blur(12px);
+        }
+        .order-summary-card {
+          background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,244,248,0.84));
+          border: 1px solid rgba(255,192,203,0.52);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.92), 0 10px 22px rgba(214, 0, 110, 0.07);
+          backdrop-filter: blur(12px);
+        }
+        .order-step-card {
+          background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(255,245,249,0.82));
+          border: 1px solid rgba(255,192,203,0.48);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 18px rgba(214, 0, 110, 0.06);
+          backdrop-filter: blur(12px);
         }
         .hero-panel {
           position: relative;
           overflow: hidden;
-          background: linear-gradient(140deg, rgba(255,255,255,0.16), rgba(255,255,255,0.04));
-          border: 1px solid rgba(255,255,255,0.5);
-          box-shadow: 0 26px 70px rgba(122, 16, 76, 0.18);
-          backdrop-filter: blur(26px);
+          background: linear-gradient(145deg, rgba(255,255,255,0.44), rgba(255,240,245,0.22));
+          border: 2px solid rgba(255,255,255,0.56);
+          box-shadow: 0 24px 56px rgba(214, 0, 110, 0.14);
+          backdrop-filter: blur(20px);
         }
         .hero-panel::before {
           content: '';
@@ -3163,42 +3825,42 @@ export default function App() {
           width: 16rem;
           height: 16rem;
           border-radius: 999px;
-          background: radial-gradient(circle, rgba(255,185,230,0.48), rgba(255,255,255,0));
+          background: radial-gradient(circle, rgba(255,171,221,0.56), rgba(255,255,255,0));
           pointer-events: none;
         }
         .hero-stat {
-          background: linear-gradient(145deg, rgba(255,255,255,0.58), rgba(255,255,255,0.24));
-          border: 1px solid rgba(255,255,255,0.52);
-          box-shadow: inset 0 1px 0 rgba(255,255,255,0.85), 0 12px 28px rgba(214, 0, 110, 0.08);
-          backdrop-filter: blur(18px);
+          background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(255,244,248,0.84));
+          border: 1px solid rgba(255,192,203,0.56);
+          box-shadow: 0 10px 22px rgba(214, 0, 110, 0.08);
+          backdrop-filter: blur(12px);
         }
         .soft-panel {
-          background: linear-gradient(150deg, rgba(255,255,255,0.68), rgba(255,255,255,0.3));
-          border: 1px solid rgba(255,255,255,0.74);
-          box-shadow: inset 0 1px 0 rgba(255,255,255,0.88), 0 16px 40px rgba(74, 4, 42, 0.08);
-          backdrop-filter: blur(18px);
+          background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(255,242,247,0.84));
+          border: 2px solid rgba(255,192,203,0.62);
+          box-shadow: 0 18px 40px rgba(214, 0, 110, 0.1);
+          backdrop-filter: blur(14px);
         }
         .shop-surface {
-          background: linear-gradient(145deg, rgba(255,255,255,0.72), rgba(255,255,255,0.38));
-          border: 1px solid rgba(255,255,255,0.72);
-          box-shadow: 0 24px 56px rgba(122, 16, 76, 0.12);
-          backdrop-filter: blur(22px);
-        }
-        .glass-note {
-          background: linear-gradient(145deg, rgba(255,255,255,0.56), rgba(255,240,245,0.26));
-          border: 1px solid rgba(255,192,203,0.55);
-          box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+          background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,243,248,0.9));
+          border: 2px solid rgba(255,192,203,0.68);
+          box-shadow: 0 20px 44px rgba(214, 0, 110, 0.1);
           backdrop-filter: blur(16px);
         }
+        .glass-note {
+          background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(255,241,246,0.82));
+          border: 1px solid rgba(255,192,203,0.58);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.86), 0 8px 18px rgba(214, 0, 110, 0.06);
+          backdrop-filter: blur(12px);
+        }
         .hero-chip {
-          background: rgba(255,255,255,0.34);
-          border: 1px solid rgba(255,255,255,0.55);
-          box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 10px 24px rgba(214, 0, 110, 0.08);
-          backdrop-filter: blur(18px);
+          background: rgba(255,255,255,0.84);
+          border: 1px solid rgba(255,192,203,0.62);
+          box-shadow: 0 10px 22px rgba(214, 0, 110, 0.08);
+          backdrop-filter: blur(12px);
         }
         .hero-divider {
           height: 1px;
-          background: linear-gradient(90deg, rgba(255,255,255,0.45), rgba(255,255,255,0));
+          background: linear-gradient(90deg, rgba(255,192,203,0.72), rgba(255,192,203,0));
         }
         @keyframes bubbleIconTumble {
           0%, 100% { transform: rotate(0deg) scale(1); }
@@ -3218,22 +3880,30 @@ export default function App() {
             opacity: 0.97;
           }
           .hero-panel {
-            background: linear-gradient(140deg, rgba(255,255,255,0.18), rgba(255,255,255,0.05));
+            background: linear-gradient(145deg, rgba(255,255,255,0.52), rgba(255,240,245,0.3));
           }
           .glass-card {
-            background: linear-gradient(145deg, rgba(255,255,255,0.68), rgba(255,255,255,0.34));
+            background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,240,245,0.88));
+          }
+          .order-form-shell {
+            background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,240,245,0.9));
           }
           .shop-surface {
-            background: linear-gradient(145deg, rgba(255,255,255,0.7), rgba(255,255,255,0.36));
+            background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,243,248,0.9));
           }
           .soft-panel {
-            background: linear-gradient(150deg, rgba(255,255,255,0.68), rgba(255,255,255,0.34));
+            background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,242,247,0.88));
           }
           .glass-note {
-            background: linear-gradient(145deg, rgba(255,255,255,0.6), rgba(255,240,245,0.3));
+            background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(255,241,246,0.84));
+          }
+          .order-input-panel,
+          .order-summary-card,
+          .order-step-card {
+            background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(255,244,248,0.84));
           }
           .hero-stat {
-            background: linear-gradient(145deg, rgba(255,255,255,0.58), rgba(255,255,255,0.28));
+            background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(255,244,248,0.84));
           }
         }
         .bubble-floater-shell {
@@ -3290,7 +3960,7 @@ export default function App() {
               }}
               className="background-bubble"
             >
-              <div className={`bubble-floater-shell rounded-full border border-white/50 bg-gradient-to-br ${item.tone} shadow-[0_12px_28px_rgba(214,0,110,0.08)] backdrop-blur-md px-4 py-3.5 sm:px-5 sm:py-4.5`}>
+              <div className={`bubble-floater-shell flex h-[82px] w-[82px] items-center justify-center rounded-full border border-white/50 bg-gradient-to-br ${item.tone} p-0 shadow-[0_12px_28px_rgba(214,0,110,0.08)] backdrop-blur-md sm:h-[98px] sm:w-[98px]`}>
                 <span className="bubble-floater-icon block text-[32px] sm:text-[42px] leading-none opacity-80">{item.icon}</span>
               </div>
             </div>
@@ -3298,12 +3968,16 @@ export default function App() {
         </div>
       )}
 
-      {/* REFINED: Wiki on Top-Left, fixed and scroll-reactive (HIDDEN ON STORE CLOSED) */}
+      {/* REFINED: Wiki + Calculator on Top-Left, fixed and scroll-reactive (HIDDEN ON STORE CLOSED) */}
       {view === 'shop' && settings.storeOpen !== false && (
-        <div className="fixed top-2 left-2 sm:top-4 sm:left-4 z-[60]">
+        <div className="fixed top-2 left-2 sm:top-4 sm:left-4 z-[60] flex items-center gap-2">
           <button onClick={() => setShowWikiModal(true)} className={`bg-white/90 backdrop-blur-md text-[#D6006E] border-2 border-pink-200 shadow-md flex items-center justify-center hover:bg-white transition-all duration-300 ease-in-out ${isScrolled ? 'w-10 h-10 rounded-full px-0 opacity-60 hover:opacity-100' : 'px-4 py-2 rounded-full gap-2 hover:scale-105'}`}>
             <BookOpen size={16} className="shrink-0" />
             <span className={`font-black uppercase tracking-widest text-[10px] sm:text-xs whitespace-nowrap overflow-hidden transition-all duration-300 ${isScrolled ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Wiki</span>
+          </button>
+          <button onClick={() => setShowCalculatorModal(true)} className={`bg-white/90 backdrop-blur-md text-[#D6006E] border-2 border-pink-200 shadow-md flex items-center justify-center hover:bg-white transition-all duration-300 ease-in-out ${isScrolled ? 'w-10 h-10 rounded-full px-0 opacity-60 hover:opacity-100' : 'px-4 py-2 rounded-full gap-2 hover:scale-105'}`}>
+            <Calculator size={16} className="shrink-0" />
+            <span className={`font-black uppercase tracking-widest text-[10px] sm:text-xs whitespace-nowrap overflow-hidden transition-all duration-300 ${isScrolled ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Calc</span>
           </button>
         </div>
       )}
@@ -3402,106 +4076,223 @@ export default function App() {
             <Lock size={16} />
           </button>
 
-          {/* âœ¨ FIXED: Reduced container max width to max-w-[1280px] to tighten Desktop layouts */}
-          <div className="relative z-10 w-full max-w-[1280px] mx-auto p-4 pt-16 sm:pt-10">
+          <div className={`relative z-10 w-full mx-auto p-4 pt-16 sm:pt-10 ${isStoreClosed ? 'max-w-[1380px] xl:max-w-[1440px]' : 'max-w-[1280px]'}`}>
             <div className="pointer-events-none absolute inset-0 overflow-hidden">
               <div className="absolute -top-16 left-[-8%] h-52 w-52 rounded-full bg-white/30 blur-3xl" />
               <div className="absolute top-28 right-[-4%] h-64 w-64 rounded-full bg-[#FFD0E9]/50 blur-3xl" />
               <div className="absolute bottom-20 left-1/3 h-56 w-56 rounded-full bg-[#FFC4DD]/35 blur-3xl" />
             </div>
 
-            <section className="hero-panel rounded-[34px] p-4 sm:p-5 lg:px-6 lg:py-5 mb-5">
-              <div className={`relative z-10 grid gap-4 ${isStoreClosed ? 'lg:grid-cols-[1fr_320px] xl:grid-cols-[1fr_360px] lg:items-stretch' : 'grid-cols-1'}`}>
-                <div className={`relative flex flex-col items-center text-center min-h-[300px] lg:min-h-[320px] ${isStoreClosed ? 'lg:items-start lg:text-left' : 'lg:items-center lg:text-center'}`}>
-                  <div className={`hidden sm:flex flex-wrap items-center justify-center gap-2 w-full ${isStoreClosed ? 'lg:justify-start' : 'lg:justify-center'}`}>
-                    <span className="hero-chip inline-flex items-center gap-2 text-[#8A1555] px-3 py-1.5 rounded-full font-black text-[10px] uppercase tracking-[0.24em]">
+            <section ref={heroSectionRef} className="hero-panel rounded-[34px] p-4 sm:p-5 lg:px-6 lg:py-5 mb-5">
+              <div className={`relative z-10 grid gap-4 ${isStoreClosed ? 'lg:grid-cols-[minmax(0,1.18fr)_360px] xl:grid-cols-[minmax(0,1.12fr)_400px] lg:items-stretch' : 'lg:grid-cols-[minmax(0,1.12fr)_360px] xl:grid-cols-[minmax(0,1.08fr)_400px] lg:items-stretch'}`}>
+                <div className={`relative min-w-0 flex flex-col min-h-[300px] lg:min-h-[320px] ${isStoreClosed ? 'items-center text-center lg:items-start lg:text-left' : 'items-start text-left justify-between'}`}>
+                  <div className={`hidden sm:flex flex-wrap items-center gap-3 w-full ${isStoreClosed ? 'justify-center lg:justify-start' : 'justify-start'}`}>
+                    <span className="hero-chip inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[#8A1555] font-black text-[10px] uppercase tracking-[0.24em]">
                       {isStoreClosed ? 'Store Paused' : 'Live Group Buy'}
                     </span>
-                    <span className="hero-chip inline-flex items-center gap-2 text-[#8A1555] px-3 py-1.5 rounded-full font-black text-[10px] uppercase tracking-[0.2em]">
+                    <span className="hero-chip inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[#8A1555] font-black text-[10px] uppercase tracking-[0.2em]">
                       {isStoreClosed ? 'History Still Open' : (settings.batchName || 'Current Batch')}
                     </span>
                   </div>
 
-                  <div className={`w-full flex-1 flex flex-col justify-center max-w-3xl mx-auto lg:max-w-[900px] py-1 ${isStoreClosed ? 'lg:mx-0' : 'lg:mx-auto lg:items-center'}`}>
-                    <h1 className="brand-title hero-brand-title text-[2.95rem] sm:text-[4.35rem] lg:text-[4.45rem] xl:text-[4.95rem] leading-[1.14] m-0 lg:whitespace-nowrap">
-                      Bonded by Peptides
-                    </h1>
-                    <p className={`hero-support-text mt-7 text-[15px] sm:text-[1rem] font-black leading-relaxed max-w-[620px] mx-auto ${isStoreClosed ? 'lg:mx-0' : 'lg:mx-auto'}`}>
-                      Skip the markup. Join the collective. Get the best.
-                    </p>
-                  </div>
-
-                  <div className="hero-divider w-full mb-3" />
-
                   {isStoreClosed ? (
-                    <div className="grid gap-2 sm:grid-cols-3 w-full">
-                      <div className="hero-stat rounded-[22px] px-4 py-3">
-                        <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">Lookup</p>
-                        <p className="mt-1 text-sm font-black text-[#4A042A]">Check saved profile</p>
+                    <>
+                      <div className="w-full min-w-0 flex-1 flex flex-col justify-center items-center text-center max-w-3xl mx-auto lg:max-w-[1100px] xl:max-w-[1180px] py-1 lg:mx-0 lg:items-start lg:text-left">
+                        <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#D6006E]">BBP Group Buy</p>
+                        <h1 className="brand-title mt-3 text-[2.95rem] sm:text-[4.1rem] lg:text-[5.75rem] xl:text-[6.2rem] lg:whitespace-nowrap lg:tracking-[-0.035em] leading-[0.98] text-[#D6006E]">
+                          Bonded by Peptides
+                        </h1>
+                        <p className="mt-5 max-w-[38rem] text-[15px] sm:text-[18px] font-bold leading-relaxed text-[#8F2C5D]">
+                          Ordering is paused right now, but your profile, order history, wiki, and calculator are still here while BBP gets the next batch ready.
+                        </p>
                       </div>
-                      <div className="hero-stat rounded-[22px] px-4 py-3">
-                        <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">History</p>
-                        <p className="mt-1 text-sm font-black text-[#4A042A]">See old orders by email</p>
+
+                      <div className="hero-divider w-full mb-3" />
+
+                      <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 w-full">
+                        <div className="hero-stat rounded-[24px] px-4 py-3">
+                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">Lookup</p>
+                          <p className="mt-1 text-sm font-black text-[#4A042A]">Check saved profile</p>
+                        </div>
+                        <div className="hero-stat rounded-[24px] px-4 py-3">
+                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">History</p>
+                          <p className="mt-1 text-sm font-black text-[#4A042A]">See old orders by email</p>
+                        </div>
+                        <div className="hero-stat rounded-[24px] px-4 py-3">
+                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">Wiki</p>
+                          <p className="mt-1 text-sm font-black text-[#4A042A]">Peptide guide stays live</p>
+                        </div>
+                        <div className="hero-stat rounded-[24px] px-4 py-3">
+                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">Calculator</p>
+                          <p className="mt-1 text-sm font-black text-[#4A042A]">Dose and draw helper</p>
+                        </div>
                       </div>
-                      <div className="hero-stat rounded-[22px] px-4 py-3">
-                        <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">Reference</p>
-                        <p className="mt-1 text-sm font-black text-[#4A042A]">Wiki stays available</p>
-                      </div>
-                    </div>
+                    </>
                   ) : (
-                    <div className="grid grid-cols-2 gap-2 w-full lg:grid-cols-4 lg:gap-2.5">
-                      <div className="hero-stat rounded-[22px] px-4 py-2.5">
-                        <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Order Minimum</p>
-                        <p className="mt-1 text-sm font-black text-[#4A042A]">{settings.minOrder} vials to save</p>
+                    <>
+                      <div className="w-full min-w-0 flex-1 flex flex-col justify-center items-center text-center max-w-[760px] lg:max-w-[980px] xl:max-w-[1080px] py-2 lg:items-start lg:text-left">
+                        <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#D6006E]">BBP Group Buy</p>
+                        <h1 className="brand-title mt-3 text-[2.95rem] sm:text-[4.1rem] lg:text-[4.7rem] xl:text-[5.05rem] lg:whitespace-nowrap leading-[1.02] text-[#D6006E]">
+                          Bonded by Peptides
+                        </h1>
+                        <p className="mt-5 max-w-[38rem] text-[15px] sm:text-[18px] font-bold leading-relaxed text-[#8F2C5D]">
+                          Save your order, protect full kits, and come back with the same email when the payment window opens.
+                        </p>
+                        <div className="mt-7 flex flex-wrap justify-center gap-3 lg:justify-start">
+                          <button
+                            onClick={() => document.getElementById('top-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                            className="bg-gradient-to-r from-[#FF1493] to-[#FF69B4] text-white px-6 py-3 rounded-full text-[11px] font-black uppercase tracking-[0.2em] shadow-[0_16px_32px_rgba(255,20,147,0.2)] transition-transform hover:translate-y-[-1px]"
+                          >
+                            Start Order
+                          </button>
+                          <button
+                            onClick={() => document.getElementById('catalog-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                            className="bg-white/90 text-[#D6006E] border-2 border-[#FFC0CB] px-6 py-3 rounded-full text-[11px] font-black uppercase tracking-[0.2em] shadow-[0_10px_24px_rgba(255,20,147,0.08)] transition-transform hover:translate-y-[-1px]"
+                          >
+                            Browse Catalog
+                          </button>
+                        </div>
                       </div>
-                      <div className="hero-stat rounded-[22px] px-4 py-2.5">
-                        <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Payment Window</p>
-                        <p className="mt-1 text-sm font-black text-[#4A042A]">{settings.paymentsOpen ? 'Ready for payment' : 'Not open yet'}</p>
+
+                      <div className="hero-divider w-full my-4" />
+
+                      <div className="grid grid-cols-2 gap-3 w-full lg:grid-cols-4">
+                        <div className="hero-stat rounded-[24px] px-4 py-3">
+                          <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Order Minimum</p>
+                          <p className="mt-1 text-sm font-black text-[#4A042A]">{settings.minOrder} vials to save</p>
+                        </div>
+                        <div className="hero-stat rounded-[24px] px-4 py-3">
+                          <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Boxes Filling</p>
+                          <p className="mt-1 text-sm font-black text-[#4A042A]">{currentBatchFillingLines} active right now</p>
+                        </div>
+                        <div className="hero-stat rounded-[24px] px-4 py-3">
+                          <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Cart So Far</p>
+                          <p className="mt-1 text-sm font-black text-[#4A042A]">{selectedVialCount} vial{selectedVialCount === 1 ? '' : 's'} selected</p>
+                        </div>
+                        <div className="hero-stat rounded-[24px] px-4 py-3">
+                          <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Kit Protection</p>
+                          <p className="mt-1 text-sm font-black text-[#4A042A]">Every 10 vials makes 1 kit</p>
+                        </div>
                       </div>
-                      <div className="hero-stat rounded-[22px] px-4 py-2.5">
-                        <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Cart So Far</p>
-                        <p className="mt-1 text-sm font-black text-[#4A042A]">{selectedVialCount} vial{selectedVialCount === 1 ? '' : 's'} selected</p>
-                      </div>
-                      <div className="hero-stat rounded-[22px] px-4 py-2.5">
-                        <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Kit Protection</p>
-                        <p className="mt-1 text-sm font-black text-[#4A042A]">Every 10 vials makes 1 kit</p>
-                      </div>
-                    </div>
+                    </>
                   )}
                 </div>
 
                 {isStoreClosed && (
-                <div className="soft-panel rounded-[28px] p-4 flex flex-col gap-3 text-center lg:text-left w-full lg:self-center">
-                  <div>
+                <div className="soft-panel rounded-[28px] p-4 flex flex-col gap-3 text-center lg:text-left w-full min-w-0 overflow-hidden lg:self-center">
+                  <div className="min-w-0">
                     <p className="text-[10px] font-black text-[#D6006E] uppercase tracking-[0.28em]">
-                      Profile & History
+                      Profile, History, Wiki & Calculator
                     </p>
                     <h2 className="mt-2 text-[1.8rem] sm:text-[2rem] font-black text-[#4A042A] leading-[1.02]">
                       Closed for ordering
                     </h2>
                     <p className="mt-2 text-sm font-bold text-[#9E2A5E] leading-relaxed">
-                      Use your email to unlock saved profile details or jump into the wiki while the next batch is being prepared.
+                      Ordering is paused, but your saved profile, order history, peptide wiki, and dose calculator are still available while the next batch is being prepared.
                     </p>
                   </div>
 
-                    <div className="flex flex-col gap-2.5">
+                    <div className="flex flex-col gap-2.5 min-w-0">
+                      <div className="rounded-[22px] border border-[#FFB3D7] bg-gradient-to-r from-[#FFF1F8] via-[#FFE5F3] to-[#FFF7EF] px-4 py-3 text-left shadow-sm">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#FF7A59] to-[#FF1493] text-white shadow-[0_8px_18px_rgba(255,20,147,0.22)]">
+                            <BookOpen size={18} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#D6006E]">Wiki Still Open</p>
+                            <p className="mt-1 text-xs font-bold text-[#7B1B53] leading-relaxed">Browse product notes, benefits, and handling guidance even while checkout is paused.</p>
+                          </div>
+                        </div>
+                      </div>
                       <input type="email" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)} onBlur={handleLookup} className={`${originalInput} py-2.5`} placeholder="Enter your email" />
                       <button onClick={() => customerProfile && setSelectedProfileEmail(customerEmail)} disabled={!customerProfile} className="w-full bg-gradient-to-r from-[#FF1493] to-[#FF69B4] text-white font-black py-3 text-xs rounded-2xl uppercase tracking-widest shadow-md transition-transform hover:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed">
                         View Profile & History
                       </button>
-                      <button onClick={() => setShowWikiModal(true)} className="w-full bg-white/85 text-[#D6006E] border border-pink-200 font-black py-3 rounded-2xl uppercase tracking-widest text-xs hover:bg-pink-50 transition-colors">
-                        Open Peptide Wiki
+                      <button onClick={() => setShowWikiModal(true)} className="group w-full rounded-[24px] border border-white/35 bg-gradient-to-r from-[#FF7A59] via-[#FF4FA1] to-[#FF1493] px-4 py-4 text-white shadow-[0_16px_36px_rgba(255,20,147,0.24)] transition-transform hover:scale-[0.99]">
+                        <span className="flex items-center justify-center gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/18 ring-1 ring-white/25">
+                            <BookOpen size={17} />
+                          </span>
+                          <span className="min-w-0 text-left">
+                            <span className="block text-[9px] font-black uppercase tracking-[0.24em] text-white/80">Browse Now</span>
+                            <span className="mt-0.5 flex items-center gap-1 text-sm font-black uppercase tracking-[0.2em] text-white">
+                              <span>Open Peptide Wiki</span>
+                              <ChevronRight size={16} className="transition-transform group-hover:translate-x-0.5" />
+                            </span>
+                          </span>
+                        </span>
+                      </button>
+                      <button onClick={() => setShowCalculatorModal(true)} className="w-full rounded-[22px] border border-[#F5B9D6] bg-white/92 px-4 py-3.5 text-[#D6006E] shadow-sm transition-transform hover:scale-[0.99]">
+                        <span className="flex items-center justify-center gap-3">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pink-50 ring-1 ring-pink-100">
+                            <Calculator size={16} />
+                          </span>
+                          <span className="min-w-0 text-left">
+                            <span className="block text-[9px] font-black uppercase tracking-[0.24em] text-pink-400">Dose Helper</span>
+                            <span className="mt-0.5 block text-sm font-black uppercase tracking-[0.18em]">Open Peptide Calculator</span>
+                          </span>
+                        </span>
                       </button>
                       <div className="glass-note rounded-[20px] px-4 py-3 text-xs font-bold text-[#9E2A5E]">
-                        {customerProfile ? 'Saved profile found. You can open your history now.' : 'No saved profile yet. Try the same email you used for your previous order.'}
+                        {customerProfile ? 'Saved profile found. You can open your history now, or head straight into the wiki.' : 'No saved profile yet. You can still use the wiki now, or try the same email you used for your previous order.'}
                       </div>
                     </div>
                 </div>
                 )}
+                {!isStoreClosed && (
+                  <div className="soft-panel rounded-[30px] p-5 flex flex-col gap-4 w-full min-w-0 overflow-hidden lg:self-stretch bg-[linear-gradient(180deg,rgba(255,249,252,0.94),rgba(255,241,246,0.88))] border-[#F3C9D7] shadow-[0_18px_38px_rgba(214,0,110,0.09)]">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black text-[#B30065] uppercase tracking-[0.28em]">Current Batch</p>
+                        <h2 className="mt-2 text-[1.8rem] sm:text-[2.15rem] font-black text-[#352C30] leading-[0.94] tracking-[-0.04em]">
+                          {settings.batchName || 'Bonded Ledger'}
+                        </h2>
+                        <p className="mt-2 text-sm font-semibold text-[#63595D] leading-relaxed">
+                          One place to save your order, watch the box fill, and come back for payment when the window opens.
+                        </p>
+                      </div>
+                      <div className="rounded-[22px] bg-gradient-to-br from-[#C41A76] to-[#E85A9D] px-4 py-3 text-right text-white shadow-[0_14px_26px_rgba(196,26,118,0.18)]">
+                        <p className="text-[9px] font-black uppercase tracking-[0.24em] text-white/72">Cart Total</p>
+                        <p className="mt-1 text-2xl font-black leading-none">₱{totalPHP.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-[22px] border border-[#F1D8E2] bg-white/74 px-4 py-3 backdrop-blur-sm">
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-pink-500">Payment Status</p>
+                        <p className="mt-1 text-sm font-black text-[#352C30]">{settings.paymentsOpen ? 'Payment window is open' : 'Payment window still closed'}</p>
+                      </div>
+                      <div className="rounded-[22px] border border-[#F1D8E2] bg-white/74 px-4 py-3 backdrop-blur-sm">
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-pink-500">Near Capacity</p>
+                        <p className="mt-1 text-sm font-black text-[#352C30]">{nearlyFullCount} product{nearlyFullCount === 1 ? '' : 's'} almost full</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div className="rounded-[24px] border border-[#ECD8E0] bg-white/72 px-4 py-4 backdrop-blur-sm">
+                        <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#9E8A93]">Available Lines</p>
+                        <p className="mt-3 text-[1.9rem] font-black leading-none text-[#352C30]">{currentBatchOpenLines}</p>
+                        <p className="mt-2 text-[11px] font-semibold leading-snug text-[#63595D]">currently open in the live catalog</p>
+                      </div>
+                      <div className="rounded-[24px] border border-[#ECD8E0] bg-white/72 px-4 py-4 backdrop-blur-sm">
+                        <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#9E8A93]">Protected Kits</p>
+                        <p className="mt-3 text-[1.9rem] font-black leading-none text-[#352C30]">{currentBatchProtectedKits}</p>
+                        <p className="mt-2 text-[11px] font-semibold leading-snug text-[#63595D]">full 10-vial kits already locked in</p>
+                      </div>
+                      <div className="rounded-[24px] border border-[#ECD8E0] bg-white/72 px-4 py-4 backdrop-blur-sm">
+                        <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#9E8A93]">Open Spots</p>
+                        <p className="mt-3 text-[1.9rem] font-black leading-none text-[#352C30]">{currentBatchOpenSpots}</p>
+                        <p className="mt-2 text-[11px] font-semibold leading-snug text-[#63595D]">slots still needed to close active boxes</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
             <h1 className="hidden brand-title text-2xl sm:text-4xl text-center text-white mb-2 flex items-center justify-center gap-3 mt-4 sm:mt-0">
-              Bonded <span className="text-sm font-black uppercase tracking-widest text-white/80 transform translate-y-2" style={{ fontFamily: "'Quicksand', sans-serif !important" }}>by</span> Peptides
+              <span className="text-white/80">✨</span>
+              <span>Bonded by Peptides</span>
+              <span className="text-white/80">✨</span>
             </h1>
             <div className="hidden text-center mb-8">
               <span className="bg-white text-[#D6006E] px-4 py-1.5 rounded-full font-black text-xs uppercase tracking-wider border-2 border-[#FF69B4] shadow-sm inline-block">
@@ -3527,7 +4318,7 @@ export default function App() {
                 )}
 
                 {/* âœ¨ FIXED: Tighter Desktop Sidebars */}
-                <div className="flex flex-col lg:grid lg:grid-cols-[1fr_320px] xl:grid-cols-[1fr_360px] gap-6 items-start">
+                <div className={shopDesktopLayoutClass}>
                   <div className="space-y-4 w-full">
 
                     {isCurrentUserAtRisk && (
@@ -3543,46 +4334,52 @@ export default function App() {
                     )}
 
                     {/* âœ¨ IMPROVED: Order card with Ambulance Flash ID */}
-                    <div id="top-form-card" className={`glass-card p-4 sm:p-5 shadow-xl ${showAmbulance ? 'animate-ambulance z-[100]' : ''}`}>
-                      <div className="flex flex-col gap-4">
-                        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
-                          <div className="max-w-2xl">
-                            <p className="text-[10px] font-black text-[#D6006E] uppercase tracking-[0.24em]">
-                              {settings.addOnly ? 'Add-only protection' : hasExistingOrder ? 'Current order loaded' : 'Order details'}
-                            </p>
-                            <h2 className="mt-2 text-xl sm:text-2xl font-black text-[#4A042A]">
-                              {hasExistingOrder ? 'Update your order' : 'Start your order'}
-                            </h2>
-                            <p className="mt-1 text-xs sm:text-sm font-bold text-[#9E2A5E]">
-                              {settings.addOnly
-                                ? 'Your old numbers stay protected. You can add more, but you cannot reduce them.'
-                                : hasExistingOrder
-                                  ? 'Your saved order is already loaded below. Change the numbers you want, then tap Save.'
-                                  : 'Enter your details first, then choose your vial totals below.'}
-                            </p>
+                    <div id="top-form-card" className={`glass-card order-form-shell p-4 sm:p-5 shadow-xl ${showAmbulance ? 'animate-ambulance z-[100]' : ''}`}>
+                      <div className="relative z-[1] flex flex-col gap-4">
+                        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+                          <div className="space-y-3">
+                            <div className="flex flex-wrap gap-2">
+                              <span className="order-form-chip inline-flex items-center rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">
+                                {orderCardEyebrow}
+                              </span>
+                              <span className="order-form-chip inline-flex items-center rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-[#7A104C]">
+                                {orderCardStatus}
+                              </span>
+                            </div>
+
+                            <div className="max-w-2xl">
+                              <h2 className="section-title text-[1.65rem] leading-[1.05] sm:text-[2.1rem] text-[#4A042A]">
+                                {orderCardTitle}
+                              </h2>
+                              <p className="mt-2 max-w-[40rem] text-xs sm:text-sm font-bold leading-relaxed text-[#8F2C5D]">
+                                {orderCardDescription}
+                              </p>
+                            </div>
                           </div>
 
-                          <div className="flex flex-wrap gap-2">
-                            <button onClick={() => setShowHowTo(!showHowTo)} className="rounded-full border border-pink-200 bg-pink-50/80 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-[#D6006E] hover:bg-pink-100">
+                          <div className="flex flex-wrap gap-2 xl:max-w-[320px] xl:justify-end">
+                            <button onClick={() => setShowHowTo(!showHowTo)} className="order-form-chip inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E] transition-colors hover:bg-white/90">
+                              <BookOpen size={13} />
                               {showHowTo ? 'Hide Steps' : 'How It Works'}
                             </button>
                             {customerProfile && (
-                              <button onClick={() => setSelectedProfileEmail(customerEmail)} className="rounded-full border border-pink-200 bg-white/85 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-[#D6006E] hover:bg-pink-50 flex items-center gap-1">
-                                <Users size={12} /> View Profile & History
+                              <button onClick={() => setSelectedProfileEmail(customerEmail)} className="order-form-chip inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E] transition-colors hover:bg-white/90">
+                                <Users size={13} />
+                                View Profile & History
                               </button>
                             )}
                             {hasExistingOrder && !settings.paymentsOpen && !settings.addOnly && (
                               confirmAction.type === 'cancelOrder' && confirmAction.id === customerEmail.toLowerCase().trim() ? (
                                 <>
-                                  <button onClick={cancelEntireOrder} className="rounded-full bg-rose-500 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white hover:bg-rose-600">
+                                  <button onClick={cancelEntireOrder} className="inline-flex items-center rounded-full bg-rose-500 px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-white shadow-sm transition-colors hover:bg-rose-600">
                                     Confirm Cancel
                                   </button>
-                                  <button onClick={() => setConfirmAction({ type: null, id: null })} className="rounded-full border border-slate-200 bg-white/85 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:border-slate-300">
+                                  <button onClick={() => setConfirmAction({ type: null, id: null })} className="order-form-chip inline-flex items-center rounded-full px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-slate-600 transition-colors hover:bg-white/90">
                                     Keep Order
                                   </button>
                                 </>
                               ) : (
-                                <button onClick={() => setConfirmAction({ type: 'cancelOrder', id: customerEmail.toLowerCase().trim() })} className="rounded-full border border-rose-200 bg-rose-50/85 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-rose-600 hover:bg-rose-100">
+                                <button onClick={() => setConfirmAction({ type: 'cancelOrder', id: customerEmail.toLowerCase().trim() })} className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50/90 px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-rose-600 transition-colors hover:bg-rose-100">
                                   Cancel Entire Order
                                 </button>
                               )
@@ -3590,65 +4387,117 @@ export default function App() {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="sm:col-span-1">
-                            <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">Email address</label>
-                            <input type="email" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)} onBlur={handleLookup} className={`${originalInput} transition-all duration-300 ${shakingField === 'email' ? 'animate-shake border-red-500 bg-red-50 text-red-700 placeholder:text-red-300' : ''}`} placeholder="Enter email to lookup profile..." />
-                          </div>
-                          <div className="sm:col-span-1">
-                            <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">Confirm email</label>
-                            <input type="email" value={customerEmailConfirm} onChange={e => setCustomerEmailConfirm(e.target.value)} className={`${originalInput} transition-all duration-300 ${shakingField === 'emailConfirm' ? 'animate-shake border-red-500 bg-red-50 text-red-700 placeholder:text-red-300' : ''}`} placeholder="Type your email again..." />
-                          </div>
-
-                          <div className="sm:col-span-1">
-                            <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">Name</label>
-                            <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} className={`${originalInput} transition-all duration-300 ${shakingField === 'name' ? 'animate-shake border-red-500 bg-red-50 text-red-700 placeholder:text-red-300' : ''}`} placeholder="Full name" disabled={settings.paymentsOpen} />
-                          </div>
-                          <div className="sm:col-span-1">
-                            <label className="block text-[10px] font-black text-[#D6006E] uppercase ml-2 mb-1">Handle</label>
-                            <input type="text" value={customerHandle} onChange={e => setCustomerHandle(e.target.value)} className={originalInput} placeholder="@username" disabled={settings.paymentsOpen} />
-                          </div>
-                        </div>
-
-                        <div className="glass-note rounded-[22px] px-4 py-3">
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                              <p className="text-[10px] font-black text-[#D6006E] uppercase tracking-[0.22em]">
-                                {settings.addOnly ? 'Add-only protection' : hasExistingOrder ? 'Current order loaded' : 'Ready to order'}
-                              </p>
-                              <p className="mt-1 text-xs font-bold text-[#4A042A]">
-                                {settings.addOnly
-                                  ? 'You can only add more right now so loose kits do not get worse.'
-                                  : hasExistingOrder
-                                    ? 'Your order is loaded below. Change the numbers, then tap Save.'
-                                    : 'Choose your vial totals below and save when you are ready.'}
-                              </p>
+                        <div className="grid gap-3">
+                          <div className="order-input-panel rounded-[26px] p-4">
+                            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="max-w-xl">
+                                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#D6006E]">Your details</p>
+                                <p className="mt-1.5 text-xs font-bold leading-relaxed text-[#8F2C5D]">
+                                  Use the same email as past orders so your profile can load.
+                                </p>
+                              </div>
+                              <div className="inline-flex items-center gap-2 self-start rounded-full bg-[#4A042A] px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-white shadow-sm">
+                                <Lock size={12} />
+                                Secure lookup
+                              </div>
                             </div>
-                            <div className="text-xs font-bold text-[#9E2A5E] sm:text-right">
-                              {customerProfile?.address?.street
-                                ? `Profile active: shipping to ${customerProfile.address.city}`
-                                : 'New customer? Your address will be saved securely upon payment.'}
+
+                            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                              <div className="sm:col-span-1">
+                                <label className="mb-1 block pl-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">Email address</label>
+                                <input type="email" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)} onBlur={handleLookup} className={getCustomerFormInputClass('email')} placeholder="Enter email to lookup profile..." />
+                              </div>
+                              <div className="sm:col-span-1">
+                                <label className="mb-1 block pl-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">Confirm email</label>
+                                <input type="email" value={customerEmailConfirm} onChange={e => setCustomerEmailConfirm(e.target.value)} className={getCustomerFormInputClass('emailConfirm')} placeholder="Type your email again..." />
+                              </div>
+
+                              <div className="sm:col-span-1">
+                                <label className="mb-1 block pl-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">Name</label>
+                                <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} className={getCustomerFormInputClass('name')} placeholder="Full name" disabled={settings.paymentsOpen} />
+                              </div>
+                              <div className="sm:col-span-1">
+                                <label className="mb-1 block pl-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">Handle</label>
+                                <input type="text" value={customerHandle} onChange={e => setCustomerHandle(e.target.value)} className={customerFormInput} placeholder="@username" disabled={settings.paymentsOpen} />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                            <div className="order-summary-card rounded-[22px] p-3.5">
+                              <div className="flex items-start gap-3">
+                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FFE7F3] text-[#D6006E] shadow-inner">
+                                  <ClipboardList size={16} />
+                                </div>
+                                <div>
+                                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">{orderCardFlowLabel}</p>
+                                  <p className="mt-1.5 text-xs font-black leading-snug text-[#4A042A]">{orderCardFlowCopy}</p>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="order-summary-card rounded-[22px] p-3.5">
+                              <div className="flex items-start gap-3">
+                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FDE8F4] text-[#B21764] shadow-inner">
+                                  <Users size={16} />
+                                </div>
+                                <div>
+                                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Profile status</p>
+                                  <p className="mt-1.5 text-xs font-black leading-snug text-[#4A042A]">{orderCardProfileCopy}</p>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="order-summary-card rounded-[22px] p-3.5 sm:col-span-2 lg:col-span-1">
+                              <div className="flex items-start gap-3">
+                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FFF2DE] text-amber-600 shadow-inner">
+                                  <ShieldCheck size={16} />
+                                </div>
+                                <div>
+                                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Protection rule</p>
+                                  <p className="mt-1.5 text-xs font-black leading-snug text-[#4A042A]">{orderCardProtectionCopy}</p>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
                       </div>
 
-                      {/* âœ¨ NEW: How It Works Inline Box */}
                       {showHowTo && (
-                        <div className="mt-3 p-4 glass-note rounded-[22px] text-sm text-[#4A042A] animate-fadeIn shadow-sm">
-                          <h4 className="font-black text-[#D6006E] mb-2 uppercase tracking-widest text-[10px]">Ordering steps</h4>
-                          <ol className="list-decimal pl-5 space-y-1.5 font-bold text-xs">
-                            <li>Enter your Email & Name.</li>
-                            <li>Pick your items in vials only. Every 10 vials counts as 1 protected kit.</li>
-                            <li>Click "Submit Order" to save your spot.</li>
-                            <li>Wait for the "Payments Open" announcement.</li>
-                            <li>Come back, enter your email, and click "Pay Now" to upload proof.</li>
-                          </ol>
+                        <div className="relative z-[1] mt-3 order-input-panel rounded-[24px] p-4 animate-fadeIn">
+                          <div className="mb-3 flex flex-col gap-1.5 sm:flex-row sm:items-end sm:justify-between">
+                            <div>
+                              <h4 className="text-[10px] font-black uppercase tracking-[0.24em] text-[#D6006E]">Ordering steps</h4>
+                              <p className="mt-1.5 text-xs font-bold leading-relaxed text-[#8F2C5D]">
+                                Quick path from details to checkout.
+                              </p>
+                            </div>
+                            <div className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-[#B21764]">
+                              <ArrowRight size={12} />
+                              Details to checkout
+                            </div>
+                          </div>
+
+                          <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-5">
+                            {[
+                              ['01', 'Enter details', 'Use your regular email so your profile can load.'],
+                              ['02', 'Choose vials', 'Every 10 vials makes 1 protected kit.'],
+                              ['03', 'Save order', 'Submit your cart to lock in your spot.'],
+                              ['04', 'Watch for payments', 'Wait for the payment announcement.'],
+                              ['05', 'Return to pay', 'Use the same email and upload proof.'],
+                            ].map(([step, title, copy]) => (
+                              <div key={step} className="order-step-card rounded-[20px] p-3">
+                                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#D6006E]">{step}</p>
+                                <h5 className="mt-1.5 text-xs sm:text-sm font-black text-[#4A042A]">{title}</h5>
+                                <p className="mt-1 text-[11px] font-bold leading-relaxed text-[#8F2C5D]">{copy}</p>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </div>
 
-                    <div className={`shop-surface rounded-[30px] shadow-sm relative z-10 transition-all duration-300 ${shakingField === 'products' ? 'animate-shake border-red-500 ring-4 ring-red-100' : ''}`}>
+                    <div id="catalog-panel" className={`shop-surface rounded-[30px] shadow-sm relative z-10 transition-all duration-300 ${shakingField === 'products' ? 'animate-shake border-red-500 ring-4 ring-red-100' : ''}`}>
                       <div className="sticky top-0 z-30 px-3 py-1.5 sm:p-5 border-b border-white/60 flex flex-col sm:flex-row justify-between items-center gap-1.5 sm:gap-4 bg-white/45 backdrop-blur-2xl rounded-t-[30px] shadow-sm">
                         <div className={`w-full sm:w-auto transition-all duration-300 ${isScrolled ? 'hidden sm:block' : 'block'}`}>
                           <h2 className="font-black text-[#D6006E] uppercase tracking-widest text-sm sm:text-base flex items-center gap-2 whitespace-nowrap">
@@ -3792,9 +4641,11 @@ export default function App() {
                     </div>
                   </div>
 
-                  <aside className="hidden lg:block sticky top-6 w-full self-start">
-                    <div className="shop-surface rounded-[30px] p-6 shadow-xl">
-                      <h3 className="brand-title text-2xl text-[#D6006E] border-b-2 border-pink-100 pb-2 mb-4 text-center">Your Cart</h3>
+                  <aside className={desktopCartAsideClass}>
+                    <div className={desktopCartShellClass}>
+                      <div className="border-b border-[#ECD8E0] pb-3 mb-4 text-center">
+                        <h3 className={desktopCartTitleClass}>Your Cart</h3>
+                      </div>
                       {settings.addOnly && hasExistingOrder && cartList.length > 0 && (
                         <div className="mb-3 rounded-xl bg-pink-50 border border-pink-100 px-3 py-2 text-[10px] font-bold text-[#9E2A5E] text-center">
                           Add-only mode is on. You can only add more.
@@ -3909,35 +4760,26 @@ export default function App() {
                   <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                     <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
                       <p className="text-[10px] font-black text-slate-500 uppercase">Send Payment To</p>
-                      {(() => {
-                        const assignedAdminName = customerList.find(c => c.email === customerEmail.toLowerCase().trim())?.adminAssigned || "Admin";
-                        return <p className="font-black text-[#D6006E] text-xs">{assignedAdminName}</p>;
-                      })()}
+                      <p className="font-black text-[#D6006E] text-xs">{currentPaymentRoute.adminAssigned || 'Admin'}</p>
                     </div>
 
-                    {(() => {
-                      const assignedAdminName = customerList.find(c => c.email === customerEmail.toLowerCase().trim())?.adminAssigned || "Admin";
-                      const adminObj = normalizedAdmins.find(a => a.name === assignedAdminName) || normalizedAdmins[0] || { name: "Admin", banks: [] };
-
-                      const hash = customerEmail.toLowerCase().trim().split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-                      const availableBanks = adminObj.banks || [];
-                      const selectedBank = availableBanks.length > 0 ? availableBanks[hash % availableBanks.length] : null;
-
-                      return selectedBank ? (
-                        <div className="flex flex-col gap-2">
-                          {selectedBank.qr ? (
-                            <img src={selectedBank.qr} alt="QR Code" className="w-full max-w-[160px] mx-auto rounded-lg border border-slate-100" />
-                          ) : null}
-                          {selectedBank.details ? (
-                            <div className="bg-slate-50 p-2 rounded border border-slate-100 text-center">
-                              <pre className="font-mono text-xs text-slate-700 whitespace-pre-wrap font-bold m-0">{selectedBank.details}</pre>
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <p className="text-xs font-bold text-rose-500 text-center py-2">No payment options configured.</p>
-                      );
-                    })()}
+                    {currentPaymentRoute.hasRoute ? (
+                      <div className="flex flex-col gap-2">
+                        {currentPaymentRoute.bankQr ? (
+                          <img src={currentPaymentRoute.bankQr} alt="QR Code" className="w-full max-w-[160px] mx-auto rounded-lg border border-slate-100" />
+                        ) : null}
+                        {currentPaymentRoute.bankDetails ? (
+                          <div className="bg-slate-50 p-2 rounded border border-slate-100 text-center">
+                            <pre className="font-mono text-xs text-slate-700 whitespace-pre-wrap font-bold m-0">{currentPaymentRoute.bankDetails}</pre>
+                          </div>
+                        ) : null}
+                        {lockedPaymentSnapshot ? (
+                          <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 text-center">Frozen for this payment window</p>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <p className="text-xs font-bold text-rose-500 text-center py-2">No payment options configured.</p>
+                    )}
                   </div>
 
                   <div className="space-y-2.5">
@@ -4067,124 +4909,408 @@ export default function App() {
           {/* âœ¨ IMPROVED: Compact Hit List Modal */}
           {showHitListModal && (() => {
             const userEmailTrimmed = customerEmail.toLowerCase().trim();
-            const sortedHitList = [...trimmingHitList].sort((a, b) => {
-              const aIsMe = a.email === userEmailTrimmed;
-              const bIsMe = b.email === userEmailTrimmed;
-              if (aIsMe && !bIsMe) return -1;
-              if (!aIsMe && bIsMe) return 1;
-              return 0;
+            const modalHitGroups = Object.values(trimmingHitList.reduce((acc, item) => {
+              const key = `${item.prod}||${item.boxNum}||${item.missingSlots}`;
+              if (!acc[key]) {
+                acc[key] = {
+                  key,
+                  prod: item.prod,
+                  boxNum: item.boxNum,
+                  missingSlots: item.missingSlots,
+                  riskyVials: 0,
+                  myRisk: false,
+                  rows: []
+                };
+              }
+              acc[key].rows.push(item);
+              acc[key].riskyVials += Number(item.amountToRemove || 0);
+              if (item.email === userEmailTrimmed) acc[key].myRisk = true;
+              return acc;
+            }, {})).map(group => ({
+              ...group,
+              customers: new Set(group.rows.map(row => row.email)).size,
+              rows: [...group.rows].sort((a, b) => {
+                const aIsMe = a.email === userEmailTrimmed;
+                const bIsMe = b.email === userEmailTrimmed;
+                if (aIsMe && !bIsMe) return -1;
+                if (!aIsMe && bIsMe) return 1;
+                const riskDiff = Number(b.amountToRemove || 0) - Number(a.amountToRemove || 0);
+                if (riskDiff !== 0) return riskDiff;
+                return (a.name || a.email).localeCompare(b.name || b.email);
+              })
+            })).sort((a, b) => {
+              if (a.myRisk && !b.myRisk) return -1;
+              if (!a.myRisk && b.myRisk) return 1;
+              const urgencyDiff = Number(a.missingSlots || 0) - Number(b.missingSlots || 0);
+              if (urgencyDiff !== 0) return urgencyDiff;
+              const customerDiff = Number(b.customers || 0) - Number(a.customers || 0);
+              if (customerDiff !== 0) return customerDiff;
+              const productDiff = a.prod.localeCompare(b.prod);
+              if (productDiff !== 0) return productDiff;
+              return Number(a.boxNum || 0) - Number(b.boxNum || 0);
             });
 
             return (
               <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-                <div className="bg-white rounded-[24px] w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh] border-2 border-pink-200">
+                <div className="bg-white rounded-[24px] w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[85vh] border-2 border-pink-200">
                   <div className="bg-[#FFF0F5] p-4 flex justify-between items-center border-b border-[#FFC0CB]">
-                    <h2 className="brand-title text-xl text-rose-600 flex items-center gap-2"><AlertTriangle size={20} /> Elimination List</h2>
+                    <h2 className="brand-title text-xl text-rose-600 flex items-center gap-2"><AlertTriangle size={20} /> Boxes To Save</h2>
                     <button onClick={() => setShowHitListModal(false)} className="text-pink-600 font-black text-2xl hover:scale-110 transition-transform">&times;</button>
                   </div>
                   <div className="p-4 sm:p-5 overflow-y-auto bg-slate-50 hide-scroll">
-                    <p className="text-xs font-bold text-slate-600 mb-4 text-center">
-                      These boxes are incomplete! If they aren't filled before cutoff, the loose vials at the bottom will be trimmed.
+                    <p className="mb-2 text-center text-[10px] font-bold text-slate-500">
+                      Small view: use `+` or `-` here.
                     </p>
-                    {sortedHitList.length === 0 ? (
+                    {modalHitGroups.length === 0 ? (
                       <div className="bg-emerald-50 p-6 rounded-xl text-center font-bold text-emerald-600 border border-emerald-200 uppercase tracking-widest text-[10px]">
-                        All boxes are perfectly full. No one is getting cut.
+                        All boxes are full. Nothing needs help right now.
                       </div>
                     ) : (
-                      <div className="space-y-2">
-                        {sortedHitList.map((v, i) => {
-                          const isMyItem = v.email === userEmailTrimmed;
+                      <div className="space-y-1.5">
+                        {modalHitGroups.map((group) => {
+                          const myCurrentQty = cartItems[group.prod]?.v || existingOrderData.items[group.prod] || 0;
+                          const myExistingQty = existingOrderData.items[group.prod] || 0;
+                          const canDecrease = isCartEditable && (!settings.addOnly ? myCurrentQty > 0 : myCurrentQty > myExistingQty);
+                          const canIncrease = isCartEditable;
                           return (
-                            <div key={i} className={`p-3 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 ${isMyItem ? 'bg-rose-100 border-rose-400 shadow-md' : 'bg-white border-rose-100 shadow-sm'}`}>
-                              <div className="flex-1 w-full">
-                                <div className="flex items-center gap-2">
-                                  <h4 className="font-bold text-[#4A042A] text-sm">{v.prod}</h4>
-                                  {isMyItem && <span className="bg-rose-500 text-white text-[8px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest animate-pulse shadow-sm">Yours</span>}
+                            <details key={group.key} className={`rounded-lg border px-2.5 py-1.5 shadow-sm ${group.myRisk ? 'bg-rose-100 border-rose-400' : 'bg-white border-rose-100'}`}>
+                              <summary className="list-none cursor-pointer">
+                                <div className="flex items-center gap-1.5 text-[11px] sm:text-[12px] font-black text-[#4A042A]">
+                                  <span className="truncate flex-1 min-w-0">{group.prod}</span>
+                                  <span className="text-slate-300">|</span>
+                                  <span className="shrink-0 text-rose-500">B{group.boxNum}</span>
+                                  <span className="text-slate-300">|</span>
+                                  <span className="shrink-0">need {group.missingSlots}</span>
+                                  {group.myRisk && (
+                                    <>
+                                      <span className="text-slate-300">|</span>
+                                      <span className="shrink-0 text-rose-500">yours</span>
+                                    </>
+                                  )}
+                                  <span className="text-slate-300">|</span>
+                                  <span className="shrink-0">qty {myCurrentQty}</span>
+                                  <span className="text-slate-300">|</span>
+                                  <button
+                                    onClick={(e) => { e.preventDefault(); adjustCartItem(group.prod, -1); }}
+                                    disabled={!canDecrease}
+                                    className="h-7 min-w-7 rounded-md border border-pink-200 bg-white px-1.5 text-[12px] font-black text-[#D6006E] transition-colors hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    -
+                                  </button>
+                                  <button
+                                    onClick={(e) => { e.preventDefault(); adjustCartItem(group.prod, 1); }}
+                                    disabled={!canIncrease}
+                                    className="h-7 min-w-7 rounded-md bg-[#FF1493] px-1.5 text-[12px] font-black text-white transition-colors hover:bg-[#D6006E] disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    +
+                                  </button>
+                                  <span className="text-slate-300">|</span>
+                                  <span className="shrink-0 text-slate-500">buyers {group.rows.length}</span>
                                 </div>
-                                <p className="text-[9px] font-bold text-rose-500 uppercase mt-0.5 mb-2">Needs {v.missingSlots} more for Box {v.boxNum}</p>
-
-                                {/* âœ¨ Ask for help button integrated into hit list */}
-                                <button onClick={() => handleSendHelpRequest(v.prod, v.missingSlots)} className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-indigo-100 flex items-center gap-1.5 transition-colors shadow-sm w-max">
-                                  <MessageCircle size={12} /> Ask for Help in Chat
-                                </button>
+                              </summary>
+                                <div className="mt-1.5 border-t border-rose-100 pt-1.5 space-y-1">
+                                  {group.rows.map((row) => {
+                                    const isMyItem = row.email === userEmailTrimmed;
+                                    return (
+                                    <div key={row.id} className={`flex items-center justify-between gap-2 rounded-md px-2 py-1 text-[11px] ${isMyItem ? 'bg-rose-50 border border-rose-200' : 'bg-white border border-slate-200'}`}>
+                                      <div className="min-w-0 truncate font-bold text-[#4A042A]">
+                                        {row.handle || row.name || row.email}
+                                        {isMyItem ? ' | yours' : ''}
+                                      </div>
+                                      <div className="shrink-0 font-black text-slate-500">
+                                        lose {row.amountToRemove}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
-                              <div className="text-left sm:text-right mt-2 sm:mt-0 bg-rose-50 sm:bg-transparent p-2 sm:p-0 rounded border sm:border-0 border-rose-100 w-full sm:w-auto">
-                                <p className="font-bold text-slate-700 text-xs">{v.handle || 'Guest'}</p>
-
-                                {/* âœ¨ FIXED: Inline Confirmation for Trimming */}
-                                {confirmAction.type === 'trim' && confirmAction.id === v.id ? (
-                                  <div className="flex gap-1 justify-end items-center mt-1 animate-fadeIn">
-                                    <span className="text-[9px] font-bold text-rose-700 uppercase mr-1">Sure?</span>
-                                    <button onClick={() => { executeTrim(v); setConfirmAction({ type: null, id: null }); }} className="bg-rose-600 text-white px-2 py-1 rounded text-[9px] font-black uppercase hover:bg-rose-700">Yes</button>
-                                    <button onClick={() => setConfirmAction({ type: null, id: null })} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[9px] font-black uppercase hover:bg-slate-300">No</button>
-                                  </div>
-                                ) : (
-                                  <button onClick={() => setConfirmAction({ type: 'trim', id: v.id })} className="text-rose-600 font-black text-[10px] bg-rose-50 sm:bg-white px-2 py-0.5 rounded mt-0.5 border border-rose-100 shadow-inner inline-block hover:bg-rose-100 transition-colors">Cut {v.amountToRemove} vials</button>
-                                )}
-                              </div>
-                            </div>
+                            </details>
                           );
                         })}
                       </div>
                     )}
                   </div>
-                  <div className="p-3 border-t border-pink-100 bg-white">
-                    <button onClick={() => setShowHitListModal(false)} className={`${originalBtn} w-full py-3 text-sm`}>Close and Go Shop</button>
+                  <div className="p-3 border-t border-pink-100 bg-white space-y-2">
+                    <p className="text-center text-[10px] font-bold text-slate-500">
+                      Name + matching email are required before save will work.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={submitOrder}
+                        disabled={isBtnLoading || !isHitListSaveReady}
+                        className={`${originalBtn} w-full py-3 text-sm disabled:opacity-50 disabled:cursor-not-allowed`}
+                      >
+                        {isBtnLoading ? 'Saving...' : 'Save Changes'}
+                      </button>
+                      <button onClick={() => setShowHitListModal(false)} className="w-full py-3 text-sm rounded-full border-2 border-pink-200 bg-white text-[#D6006E] font-bold uppercase tracking-widest shadow-sm hover:bg-pink-50 transition-colors">
+                        Close
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
             );
           })()}
 
-          {showWikiModal && (
-            <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[400] flex items-center justify-center p-4">
-              <div className="bg-white rounded-[32px] w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
-
-                <div className="bg-gradient-to-r from-[#FF1493] to-[#FF69B4] p-6 sm:p-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 relative">
-                  <button onClick={() => setShowWikiModal(false)} className="absolute top-4 right-4 text-white/80 hover:text-white font-black text-3xl hover:scale-110 transition-transform">&times;</button>
-                  <div className="text-white">
-                    <h2 className="brand-title text-3xl sm:text-4xl m-0 text-white shadow-none">Peptide Wiki</h2>
-                    <p className="text-white/90 font-bold text-sm mt-2 max-w-lg">Quick product context, simple benefits, and handling notes in one place.</p>
+          {showCalculatorModal && (
+            <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[390] flex items-center justify-center p-4">
+              <div className="bg-white rounded-[32px] w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
+                <div className="bg-gradient-to-r from-[#FF7A59] via-[#FF4FA1] to-[#FF1493] px-4 py-3 sm:px-5 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 relative">
+                  <button onClick={() => setShowCalculatorModal(false)} className="absolute top-3 right-4 text-white/80 hover:text-white font-black text-[28px] leading-none hover:scale-110 transition-transform">&times;</button>
+                  <div className="text-white pr-10 sm:pr-0">
+                    <h2 className="brand-title text-[1.8rem] sm:text-[2.25rem] leading-[0.92] m-0 text-white shadow-none">Peptide Calculator</h2>
+                    <p className="text-white/90 font-bold text-[12px] sm:text-[13px] mt-0.5 max-w-lg leading-snug">Calculate concentration, draw amount, and syringe units for peptide reconstitution.</p>
+                    <p className="mt-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-white/72">Built for BBP using standard U-100 insulin syringe math.</p>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <div className="rounded-full border border-white/30 bg-white/15 px-4 py-2 text-white backdrop-blur-sm">
-                      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-white/75">Entries</p>
-                      <p className="mt-1 text-lg font-black">{filteredWikiData.length}</p>
+                  <div className="flex flex-wrap gap-2 sm:justify-end">
+                    <div className="rounded-[20px] border border-white/30 bg-white/15 px-3 py-1.5 text-white backdrop-blur-sm min-w-[100px]">
+                      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-white/75">Draw To</p>
+                      <p className="mt-1 text-lg font-black leading-none">{peptideCalculator ? `${peptideCalculator.syringeUnits.toFixed(0)} units` : '--'}</p>
                     </div>
-                    <div className="rounded-full border border-white/30 bg-white/15 px-4 py-2 text-white backdrop-blur-sm">
-                      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-white/75">Focus</p>
-                      <p className="mt-1 text-sm font-black">{wikiTagFilter === 'All' ? 'All Categories' : wikiTagFilter}</p>
+                    <div className="rounded-[20px] border border-white/30 bg-white/15 px-3 py-1.5 text-white backdrop-blur-sm min-w-[100px]">
+                      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-white/75">Dose</p>
+                      <p className="mt-1 text-lg font-black leading-none">{peptideCalculator ? `${peptideCalculator.doseMg}mg` : '--'}</p>
                     </div>
                   </div>
                 </div>
 
-                <div className="bg-[#FFF0F5] p-4 border-b-2 border-[#FFC0CB] space-y-3">
-                  <div className="relative w-full max-w-xl mx-auto">
+                <div className="p-4 sm:p-6 overflow-y-auto bg-slate-50 hide-scroll space-y-5">
+                  <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-5">
+                    <div className="bg-white rounded-[28px] border border-pink-100 shadow-sm p-5">
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">Calculator Inputs</p>
+                          <p className="mt-1 text-sm font-bold text-slate-500">Set your target dose, vial strength, and bacteriostatic water volume.</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 space-y-5">
+                        <div>
+                          <div className="flex items-center justify-between gap-3">
+                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-[#D6006E]">Dose of Peptide</label>
+                            <input type="number" min="0.01" step="0.01" value={calculatorDoseMg} onChange={e => setCalculatorDoseMg(Number(e.target.value) || 0)} className="w-24 rounded-xl border border-pink-200 bg-pink-50 px-3 py-2 text-right text-sm font-black text-[#4A042A] outline-none focus:border-[#D6006E]" />
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {CALCULATOR_DOSE_PRESETS.map((dose) => (
+                              <button
+                                key={`dose-${dose}`}
+                                type="button"
+                                onClick={() => setCalculatorDoseMg(dose)}
+                                className={`rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors ${calculatorDoseMg === dose ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
+                              >
+                                {dose}mg
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="flex items-center justify-between gap-3">
+                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-[#D6006E]">Strength of Peptide</label>
+                            <input type="number" min="0.1" step="0.1" value={calculatorStrengthMg} onChange={e => setCalculatorStrengthMg(Number(e.target.value) || 0)} className="w-24 rounded-xl border border-pink-200 bg-pink-50 px-3 py-2 text-right text-sm font-black text-[#4A042A] outline-none focus:border-[#D6006E]" />
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {CALCULATOR_STRENGTH_PRESETS.map((strength) => (
+                              <button
+                                key={`strength-${strength}`}
+                                type="button"
+                                onClick={() => setCalculatorStrengthMg(strength)}
+                                className={`rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors ${calculatorStrengthMg === strength ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
+                              >
+                                {strength}mg
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="flex items-center justify-between gap-3">
+                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-[#D6006E]">Water of Peptide</label>
+                            <input type="number" min="0.1" step="0.1" value={calculatorWaterMl} onChange={e => setCalculatorWaterMl(Number(e.target.value) || 0)} className="w-24 rounded-xl border border-pink-200 bg-pink-50 px-3 py-2 text-right text-sm font-black text-[#4A042A] outline-none focus:border-[#D6006E]" />
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {CALCULATOR_WATER_PRESETS.map((water) => (
+                              <button
+                                key={`water-${water}`}
+                                type="button"
+                                onClick={() => setCalculatorWaterMl(water)}
+                                className={`rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors ${calculatorWaterMl === water ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
+                              >
+                                {water}mL
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-[28px] border border-pink-100 shadow-sm p-5 space-y-4">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">Results</p>
+                        <p className="mt-1 text-sm font-bold text-slate-500">Use this as a quick reference for how much to draw into a 100-unit insulin syringe.</p>
+                      </div>
+
+                      {peptideCalculator ? (
+                        <>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="rounded-[22px] border border-pink-100 bg-pink-50/70 p-4 min-h-[124px] flex flex-col justify-between">
+                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-pink-500">Peptide Dose</p>
+                              <div className="mt-3">
+                                <p className="text-2xl font-black leading-none text-[#D6006E]">{peptideCalculator.doseMg}mg</p>
+                                <p className="mt-2 text-[11px] font-bold text-slate-500 leading-snug">{peptideCalculator.doseMcg.toLocaleString()}mcg per shot</p>
+                              </div>
+                            </div>
+                            <div className="rounded-[22px] border border-emerald-100 bg-emerald-50/70 p-4 min-h-[124px] flex flex-col justify-between">
+                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600">Draw Syringe To</p>
+                              <div className="mt-3">
+                                <p className="text-2xl font-black leading-none text-emerald-700">{peptideCalculator.syringeUnits.toFixed(0)} units</p>
+                                <p className="mt-2 text-[11px] font-bold text-slate-500 leading-snug">{peptideCalculator.drawMl.toFixed(2)}mL</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="rounded-[24px] border border-pink-100 bg-white p-4">
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-pink-500">Syringe Guide</p>
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">100 units scale</p>
+                            </div>
+                            <div className="mt-4 relative">
+                              <div className="flex items-center">
+                                <div className="mr-3 flex w-14 shrink-0 items-center justify-end">
+                                  <div className="h-[4px] w-6 rounded-full bg-pink-300" />
+                                  <div className="relative h-7 w-7 rounded-full border-[3px] border-pink-300 bg-white shadow-sm">
+                                    <span className="absolute inset-[6px] rounded-full border-2 border-pink-200" />
+                                  </div>
+                                </div>
+                                <div className="relative h-[66px] flex-1 min-w-0">
+                                  <div className="absolute inset-y-[8px] left-0 right-0 rounded-[10px] border-[3px] border-pink-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(255,244,248,0.94))] shadow-inner" />
+                                  <div
+                                    className="absolute inset-y-[16px] left-[8px] rounded-[6px] bg-gradient-to-r from-[#FF7A59] via-[#FF4FA1] to-[#FF1493] shadow-[0_8px_18px_rgba(255,20,147,0.18)]"
+                                    style={{ width: `calc(${Math.max(2, Math.min(peptideCalculator.syringeUnits, 100))}% - 16px)` }}
+                                  />
+                                  <div
+                                    className="absolute top-[11px] w-[8px] rounded-[4px] bg-[#4A042A] shadow-[0_4px_12px_rgba(74,4,42,0.18)]"
+                                    style={{
+                                      left: `calc(${Math.max(2, Math.min(peptideCalculator.syringeUnits, 100))}% - 4px)`,
+                                      height: '32px'
+                                    }}
+                                  />
+                                  <div className="absolute inset-x-[10px] top-[9px] bottom-[9px] flex items-stretch justify-between pointer-events-none">
+                                    {Array.from({ length: 21 }).map((_, tickIndex) => (
+                                      <div key={tickIndex} className="relative h-full">
+                                        <span className={`absolute left-1/2 -translate-x-1/2 rounded-full bg-pink-300/90 ${tickIndex % 5 === 0 ? 'top-[4px] h-[28px] w-[2px]' : 'top-[11px] h-[14px] w-[1.5px]'}`} />
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div className="absolute -top-3 transition-all" style={{ left: `calc(${Math.max(4, Math.min(peptideCalculator.syringeUnits, 96))}% - 24px)` }}>
+                                    <div className="rounded-full bg-[#4A042A] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-white shadow-lg">
+                                      {peptideCalculator.syringeUnits.toFixed(0)}u
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="ml-3 flex w-16 shrink-0 items-center">
+                                  <div className="h-4 w-4 rounded-r-[6px] rounded-l-[3px] bg-pink-300 shadow-sm" />
+                                  <div className="h-[3px] w-10 rounded-full bg-slate-400" />
+                                  <div className="h-0 w-0 border-y-[3px] border-y-transparent border-l-[12px] border-l-slate-400" />
+                                </div>
+                              </div>
+                            </div>
+                            <div className="mt-2 flex items-center justify-between pl-[58px] pr-[64px] text-[10px] font-black uppercase tracking-widest text-slate-400">
+                              <span>0</span>
+                              <span>50</span>
+                              <span>100</span>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div className="rounded-[22px] border border-slate-200 bg-slate-50/70 p-4 min-h-[138px] flex flex-col justify-between min-w-0">
+                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Vial Contains</p>
+                              <div className="mt-3">
+                                <p className="text-[1.4rem] sm:text-[1.55rem] font-black leading-none text-slate-700 break-words">{peptideCalculator.strengthMg}mg</p>
+                                <p className="mt-2 text-[11px] font-bold text-slate-500 leading-snug">mixed with {peptideCalculator.waterMl}mL</p>
+                              </div>
+                            </div>
+                            <div className="rounded-[22px] border border-blue-100 bg-blue-50/80 p-4 min-h-[138px] flex flex-col justify-between min-w-0">
+                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-500">Concentration</p>
+                              <div className="mt-3">
+                                <p className="text-[1.25rem] sm:text-[1.45rem] font-black leading-tight text-blue-700 break-words">{peptideCalculator.concentrationMgPerMl.toFixed(2)}<span className="ml-1 text-[0.7em] uppercase tracking-[0.14em]">mg/mL</span></p>
+                                <p className="mt-2 text-[11px] font-bold text-slate-500 leading-snug">{peptideCalculator.concentrationMcgPerUnit.toFixed(1)}mcg per unit</p>
+                              </div>
+                            </div>
+                            <div className="rounded-[22px] border border-amber-100 bg-amber-50/80 p-4 min-h-[138px] flex flex-col justify-between min-w-0">
+                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-600">Approx Doses</p>
+                              <div className="mt-3">
+                                <p className="text-[1.4rem] sm:text-[1.55rem] font-black leading-none text-amber-700 break-words">{peptideCalculator.remainingDoses}</p>
+                                <p className="mt-2 text-[11px] font-bold text-slate-500 leading-snug">full doses from one vial</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="rounded-[22px] border border-pink-100 bg-pink-50/60 px-4 py-3 text-xs font-bold text-[#8F2C5D] leading-relaxed">
+                            Formula: strength ÷ water = concentration, then dose ÷ concentration = draw amount. On a standard U-100 syringe, 1mL = 100 units.
+                          </div>
+                        </>
+                      ) : (
+                        <div className="rounded-[22px] border border-amber-100 bg-amber-50/80 px-4 py-6 text-center text-sm font-black text-amber-700">
+                          Enter a dose, vial strength, and water volume to calculate your draw amount.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showWikiModal && (
+            <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[400] flex items-center justify-center p-4">
+              <div className="bg-white rounded-[32px] w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
+
+                <div className="bg-gradient-to-r from-[#FF1493] to-[#FF69B4] px-4 py-3 sm:px-5 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 relative">
+                  <button onClick={() => setShowWikiModal(false)} className="absolute top-3 right-4 text-white/80 hover:text-white font-black text-[28px] leading-none hover:scale-110 transition-transform">&times;</button>
+                  <div className="text-white pr-10 sm:pr-0">
+                    <h2 className="brand-title text-[1.75rem] sm:text-[2.15rem] leading-[0.92] m-0 text-white shadow-none">Peptide Wiki</h2>
+                    <p className="text-white/90 font-bold text-[12px] sm:text-[13px] mt-0.5 max-w-lg leading-snug">Quick product context, simple benefits, and handling notes in one place.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 sm:justify-end">
+                    <div className="rounded-[20px] border border-white/30 bg-white/15 px-3 py-1.5 text-white backdrop-blur-sm min-w-[98px]">
+                      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-white/75">Entries</p>
+                      <p className="mt-1 text-lg font-black leading-none">{filteredWikiData.length}</p>
+                    </div>
+                    <div className="rounded-[20px] border border-white/30 bg-white/15 px-3 py-1.5 text-white backdrop-blur-sm min-w-[118px]">
+                      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-white/75">Focus</p>
+                      <p className="mt-1 text-[12px] font-black leading-snug">{wikiTagFilter === 'All' ? 'All Categories' : wikiTagFilter}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-[#FFF0F5] px-4 py-2.5 border-b-2 border-[#FFC0CB] space-y-2.5">
+                  <div className="relative w-full max-w-[720px] mx-auto">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-400" size={18} />
-                    <input type="text" value={wikiSearchQuery} onChange={e => setWikiSearchQuery(e.target.value)} placeholder="Search by product, tag, or benefit..." className="w-full pl-11 pr-24 py-3 rounded-2xl text-base font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-white text-[#4A042A] shadow-sm" />
+                    <input type="text" value={wikiSearchQuery} onChange={e => setWikiSearchQuery(e.target.value)} placeholder="Search by product, tag, or benefit..." className="w-full pl-11 pr-24 py-2 rounded-2xl text-[14px] font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-white text-[#4A042A] shadow-sm" />
                     {(wikiSearchQuery || wikiTagFilter !== 'All') && (
                       <button
                         type="button"
                         onClick={() => { setWikiSearchQuery(''); setWikiTagFilter('All'); }}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-pink-200 bg-pink-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-[#D6006E] transition-colors hover:bg-pink-100"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-pink-200 bg-pink-50 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-[#D6006E] transition-colors hover:bg-pink-100"
                       >
                         Clear
                       </button>
                     )}
                   </div>
-                  <div className="flex gap-2 overflow-x-auto hide-scroll pb-1">
+                  <div className="flex gap-1.5 overflow-x-auto hide-scroll pb-0.5">
                     {wikiFilterOptions.map((tag) => (
                       <button
                         key={tag}
                         type="button"
                         onClick={() => setWikiTagFilter(tag)}
-                        className={`shrink-0 rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em] transition-colors ${wikiTagFilter === tag ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
+                        className={`shrink-0 rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.16em] transition-colors ${wikiTagFilter === tag ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
                       >
                         {tag}
                       </button>
                     ))}
                   </div>
-                  <p className="text-center text-[11px] font-bold text-[#9E2A5E]">
+                  <p className="text-center text-[10px] font-bold text-[#9E2A5E]">
                     {wikiTagFilter === 'All'
                       ? `Showing all ${filteredWikiData.length} wiki entries.`
                       : `Showing ${filteredWikiData.length} entries in ${wikiTagFilter}.`}
@@ -4301,6 +5427,7 @@ export default function App() {
                   { id: 'overview', icon: <LayoutDashboard size={18} />, label: 'Inventory' },
                   { id: 'active-orders', icon: <ShoppingCart size={18} />, label: 'Active Orders' }, // âœ¨ NEW
                   { id: 'payments', icon: <BadgeDollarSign size={18} />, label: 'Payments' },
+                  { id: 'audit', icon: <AlertTriangle size={18} />, label: 'Audit' },
                   { id: 'packing', icon: <ClipboardList size={18} />, label: 'Packing Guide' },
                   { id: 'trimming', icon: <Scissors size={18} />, label: 'Hit List' }
                 ].map(t => (
@@ -4351,6 +5478,7 @@ export default function App() {
                   <option value="overview">Inventory</option>
                   <option value="active-orders">Active Orders</option>
                   <option value="payments">Payments</option>
+                  <option value="audit">Audit</option>
                   <option value="packing">Packing</option>
                   <option value="trimming">Hit List</option>
                   <option value="customers">Customers DB</option>
@@ -4611,7 +5739,7 @@ export default function App() {
                             <button
                               type="button"
                               onClick={() => assignAdminToCustomers(selectedActiveOrderEmails, bulkAssignAdmin)}
-                              disabled={isBtnLoading || selectedActiveOrderEmails.length === 0 || !bulkAssignAdmin}
+                              disabled={isBtnLoading || settings.paymentsOpen || selectedActiveOrderEmails.length === 0 || !bulkAssignAdmin}
                               className="rounded-2xl bg-[#D6006E] px-4 py-1.5 text-[10px] font-black uppercase tracking-widest text-white shadow-sm transition-opacity disabled:opacity-40"
                             >
                               Assign
@@ -4709,7 +5837,7 @@ export default function App() {
                                     </div>
                                   </td>
                                   <td className="py-3">
-                                    <select value={c.hasAssignedAdmin ? c.adminAssigned : ''} onChange={(e) => safeAwait(setDoc(doc(db, colPath('users'), c.email), { adminAssigned: e.target.value }, { merge: true }))} className="bg-[#FFF0F5] border border-[#FFC0CB] text-[#D6006E] text-[10px] font-black rounded-xl px-3 py-1.5 outline-none w-full max-w-[160px]">
+                                    <select value={c.hasAssignedAdmin ? c.adminAssigned : ''} onChange={(e) => updateCustomerAdminAssignment(c, e.target.value)} disabled={settings.paymentsOpen || c.hasProof || c.isPaid} className="bg-[#FFF0F5] border border-[#FFC0CB] text-[#D6006E] text-[10px] font-black rounded-xl px-3 py-1.5 outline-none w-full max-w-[160px] disabled:cursor-not-allowed disabled:opacity-60">
                                       <option value="" disabled>Select Admin...</option>
                                       {normalizedAdmins.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
                                     </select>
@@ -4815,6 +5943,26 @@ export default function App() {
                   </div>
                 )}
 
+                {adminTab === 'audit' && (
+                  <div className="space-y-6">
+                    <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
+                      <div>
+                        <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Payment Audit</h2>
+                        <p className="text-sm font-bold text-slate-500 mt-1">Reconcile expected totals, proofs received, and approval gaps by admin route.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { setAdminTab('payments'); setPaymentFilterAdmin('All'); }}
+                        className="bg-white border-2 border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-[#D6006E] hover:text-[#D6006E] transition-colors"
+                      >
+                        Back to Payments
+                      </button>
+                    </div>
+
+                    {renderAuditDashboard()}
+                  </div>
+                )}
+
                 {adminTab === 'packing' && (
                   <div className="space-y-6">
                     <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
@@ -4861,7 +6009,12 @@ export default function App() {
                 {adminTab === 'trimming' && (
                   <div className="space-y-6">
                     <div className="space-y-3">
-                      <div className="flex justify-between items-center"><h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Loose Vial Hit List</h2></div>
+                      <div className="flex justify-between items-center gap-3 flex-wrap">
+                        <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Loose Vial Hit List</h2>
+                        <button onClick={copyTrimListForDiscord} className="rounded-xl border border-pink-200 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-[#D6006E] shadow-sm transition-colors hover:bg-pink-50">
+                          Copy for Discord
+                        </button>
+                      </div>
                       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
                         {renderCompactAdminStat('At-Risk Rows', hitListSummary.rows, 'rose', 'Visible after search')}
                         {renderCompactAdminStat('Products', hitListSummary.products, 'amber', 'Need fill help')}
@@ -4919,7 +6072,13 @@ export default function App() {
 
                     <div className="bg-white rounded-[24px] shadow-sm border-2 border-pink-50 overflow-hidden">
                       <table className="w-full text-left custom-table compact-table">
-                        <thead><tr>{renderSortableHeader('Customer Info', 'name', customersTableSort, setCustomersTableSort)}{renderSortableHeader('Saved Address', 'address', customersTableSort, setCustomersTableSort)}<th className="text-center">Actions</th></tr></thead>
+                        <thead>
+                          <tr>
+                            {renderSortableHeader('Customer Info', 'name', customersTableSort, setCustomersTableSort)}
+                            {renderSortableHeader('Saved Address', 'address', customersTableSort, setCustomersTableSort)}
+                            <th className="text-center">Actions</th>
+                          </tr>
+                        </thead>
                         <tbody className="divide-y divide-pink-50">
                           {sortedRegisteredUsers.map(u => {
                             return (
@@ -4963,25 +6122,31 @@ export default function App() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <section className="bg-white p-6 rounded-2xl shadow-sm border-2 border-pink-50 space-y-6 h-full">
                         <h3 className="font-black text-xs text-pink-600 uppercase tracking-[0.2em] border-b-2 border-pink-50 pb-3">Global Constants</h3>
+                        {settings.paymentsOpen && (
+                          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-black text-amber-700">
+                            Payment mode is live. Pricing and routing controls are locked until the payment window is closed.
+                          </div>
+                        )}
 
-                        <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Batch Name</label><input type="text" className={originalInput} value={settings.batchName} onChange={e => updateSetting('batchName', e.target.value)} /></div>
+                        <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Batch Name</label><input type="text" className={lockedAdminInput} value={settings.batchName} onChange={e => updateSetting('batchName', e.target.value)} disabled={settings.paymentsOpen} /></div>
 
                         <div className="grid grid-cols-2 gap-4">
-                          <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Exchange Rate (1$ = ?)</label><input type="number" className={originalInput} value={settings.fxRate} onChange={e => updateSetting('fxRate', Number(e.target.value))} /></div>
-                          <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Admin Fee (PHP)</label><input type="number" className={originalInput} value={settings.adminFeePhp} onChange={e => updateSetting('adminFeePhp', Number(e.target.value))} /></div>
+                          <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Exchange Rate (1$ = ?)</label><input type="number" className={lockedAdminInput} value={settings.fxRate} onChange={e => updateSetting('fxRate', Number(e.target.value))} disabled={settings.paymentsOpen} /></div>
+                          <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Admin Fee (PHP)</label><input type="number" className={lockedAdminInput} value={settings.adminFeePhp} onChange={e => updateSetting('adminFeePhp', Number(e.target.value))} disabled={settings.paymentsOpen} /></div>
                         </div>
-                        <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Minimum Vials Per Order</label><input type="number" className={originalInput} value={settings.minOrder} onChange={e => updateSetting('minOrder', Number(e.target.value))} /></div>
+                        <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Minimum Vials Per Order</label><input type="number" className={lockedAdminInput} value={settings.minOrder} onChange={e => updateSetting('minOrder', Number(e.target.value))} disabled={settings.paymentsOpen} /></div>
                         <div>
                           <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Shipping Options (Comma-Separated)</label>
                           <input
                             type="text"
-                            className={originalInput}
+                            className={lockedAdminInput}
                             value={(settings.shippingOptions || []).join(', ')}
                             onChange={e => updateSetting('shippingOptions', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
                             placeholder="e.g. Lalamove, LBC, J&T, Pickup"
+                            disabled={settings.paymentsOpen}
                           />
                         </div>
-                        <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Dashboard Password</label><input type="text" className={originalInput} value={settings.adminPass} onChange={e => updateSetting('adminPass', e.target.value)} /></div>
+                        <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Dashboard Password</label><input type="text" className={lockedAdminInput} value={settings.adminPass} onChange={e => updateSetting('adminPass', e.target.value)} disabled={settings.paymentsOpen} /></div>
                       </section>
 
                       <section className="bg-white p-6 rounded-2xl shadow-sm border-2 border-pink-50 space-y-4 h-full flex flex-col">
@@ -5016,7 +6181,7 @@ export default function App() {
                             active: settings.paymentsOpen,
                             activeText: 'Enabled',
                             inactiveText: 'Disabled',
-                            onToggle: () => updateSetting('paymentsOpen', !settings.paymentsOpen),
+                            onToggle: togglePaymentsWindow,
                             activeTone: {
                               panel: 'bg-emerald-50 border-emerald-200',
                               badge: 'bg-emerald-100 text-emerald-700',
@@ -5092,6 +6257,11 @@ export default function App() {
                   <div className="space-y-6 max-w-3xl mx-auto pb-20">
                     <div className="space-y-3">
                       <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Admin Profiles & Banks</h2>
+                      {settings.paymentsOpen && (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-black text-amber-700">
+                          Admin bank profiles are locked while payments are open so the payment destination cannot drift mid-window.
+                        </div>
+                      )}
                       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
                         {renderCompactAdminStat('Admins', adminProfilesSummary.total, 'pink', 'Saved profiles')}
                         {renderCompactAdminStat('Bank Options', adminProfilesSummary.bankOptions, 'blue', 'Across all admins')}
@@ -5129,11 +6299,11 @@ export default function App() {
                                 <button onClick={() => {
                                   const newArr = [...normalizedAdmins]; newArr.splice(idx, 1); updateSetting('admins', newArr);
                                   setConfirmAction({ type: null, id: null });
-                                }} className="bg-rose-500 text-white px-2 py-1 rounded text-[9px] font-black hover:bg-rose-600">YES</button>
+                                }} disabled={settings.paymentsOpen} className="bg-rose-500 text-white px-2 py-1 rounded text-[9px] font-black hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed">YES</button>
                                 <button onClick={() => setConfirmAction({ type: null, id: null })} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[9px] font-black hover:bg-slate-300">NO</button>
                               </div>
                             ) : (
-                              <button onClick={() => setConfirmAction({ type: 'deleteAdmin', id: idx })} className="text-rose-500 font-bold hover:text-rose-700 bg-white border border-rose-100 rounded-lg p-2.5 hover:scale-110 transition-transform">Remove</button>
+                              <button onClick={() => setConfirmAction({ type: 'deleteAdmin', id: idx })} disabled={settings.paymentsOpen} className="text-rose-500 font-bold hover:text-rose-700 bg-white border border-rose-100 rounded-lg p-2.5 hover:scale-110 transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">Remove</button>
                             )}
                           </div>
                         ))}
@@ -5141,7 +6311,7 @@ export default function App() {
 
                       <div className="flex flex-col gap-4 bg-slate-50 p-6 rounded-xl border border-slate-200">
                         <h4 className="text-xs font-black text-slate-700 uppercase tracking-widest">Add New Admin</h4>
-                        <input type="text" className={adminInputSm} placeholder="Admin Name" value={newAdmin.name} onChange={e => setNewAdmin({ ...newAdmin, name: e.target.value })} />
+                        <input type="text" className={`${adminInputSm} disabled:opacity-60 disabled:cursor-not-allowed`} placeholder="Admin Name" value={newAdmin.name} onChange={e => setNewAdmin({ ...newAdmin, name: e.target.value })} disabled={settings.paymentsOpen} />
 
                         <div className="space-y-4 border-t border-slate-200 pt-4">
                           {newAdmin.banks.map((bank, index) => (
@@ -5153,21 +6323,21 @@ export default function App() {
                                     const newBanks = [...newAdmin.banks];
                                     newBanks.splice(index, 1);
                                     setNewAdmin({ ...newAdmin, banks: newBanks });
-                                  }} className="text-red-500 text-xs font-bold hover:underline">Remove Option</button>
+                                  }} disabled={settings.paymentsOpen} className="text-red-500 text-xs font-bold hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline">Remove Option</button>
                                 )}
                               </div>
-                              <textarea className={`${adminInputSm} mb-3`} placeholder="Bank Details (e.g. BDO: 123...)" value={bank.details} onChange={e => {
+                              <textarea className={`${adminInputSm} mb-3 disabled:opacity-60 disabled:cursor-not-allowed`} placeholder="Bank Details (e.g. BDO: 123...)" value={bank.details} onChange={e => {
                                 const newBanks = [...newAdmin.banks];
                                 newBanks[index].details = e.target.value;
                                 setNewAdmin({ ...newAdmin, banks: newBanks });
-                              }} rows={2} />
+                              }} rows={2} disabled={settings.paymentsOpen} />
                               <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                                 <label className="text-[10px] font-bold text-slate-600 uppercase block mb-2">Upload QR Code Image</label>
                                 <input type="file" accept="image/*" onChange={e => {
                                   const newBanks = [...newAdmin.banks];
                                   newBanks[index].qrFile = e.target.files[0];
                                   setNewAdmin({ ...newAdmin, banks: newBanks });
-                                }} className="w-full text-xs file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-bold file:bg-pink-100 file:text-pink-700 hover:file:bg-pink-200 cursor-pointer" />
+                                }} disabled={settings.paymentsOpen} className="w-full text-xs file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-bold file:bg-pink-100 file:text-pink-700 hover:file:bg-pink-200 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed" />
                               </div>
                             </div>
                           ))}
@@ -5177,10 +6347,10 @@ export default function App() {
                               return;
                             }
                             setNewAdmin({ ...newAdmin, banks: [...newAdmin.banks, { details: '', qrFile: null }] });
-                          }} className="text-xs font-bold text-[#D6006E] bg-pink-50 px-4 py-3 rounded-xl w-full hover:bg-pink-100 border border-pink-200 border-dashed transition-colors shadow-sm">+ Add Another Bank Option</button>
+                          }} disabled={settings.paymentsOpen} className="text-xs font-bold text-[#D6006E] bg-pink-50 px-4 py-3 rounded-xl w-full hover:bg-pink-100 border border-pink-200 border-dashed transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">+ Add Another Bank Option</button>
                         </div>
 
-                        <button onClick={handleAddAdmin} disabled={isBtnLoading} className="bg-[#FF1493] text-white font-black uppercase tracking-widest py-3 rounded-xl text-sm hover:bg-[#D6006E] transition-colors shadow-md mt-4 hover:scale-[0.98] disabled:opacity-50">
+                        <button onClick={handleAddAdmin} disabled={isBtnLoading || settings.paymentsOpen} className="bg-[#FF1493] text-white font-black uppercase tracking-widest py-3 rounded-xl text-sm hover:bg-[#D6006E] transition-colors shadow-md mt-4 hover:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed">
                           {isBtnLoading ? 'Uploading QRs...' : 'Save New Admin Profile'}
                         </button>
                       </div>
