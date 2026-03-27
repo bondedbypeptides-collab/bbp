@@ -1,4 +1,4 @@
-﻿﻿﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
+﻿﻿﻿﻿﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, writeBatch } from 'firebase/firestore';
@@ -9,7 +9,7 @@ import {
   Lock, Package, Search, ArrowRight, CreditCard,
   Home, LogOut, Trash2, ChevronRight, BookOpen, Printer, ImageIcon,
   Droplet, Repeat, ThermometerSnowflake, Sparkles, AlertTriangle, Calculator,
-  MessageCircle, Send, ScrollText, Edit3, Trash, ShoppingCart
+  MessageCircle, Send, ScrollText, Edit3, Trash, ShoppingCart, RotateCcw, Save
 } from 'lucide-react';
 
 // --- FIREBASE SETUP ---
@@ -54,6 +54,21 @@ const CUTE_PLEAS = [
 const CALCULATOR_DOSE_PRESETS = [0.1, 0.25, 0.5, 1, 2, 2.5, 5, 7.5, 10, 12.5, 15];
 const CALCULATOR_STRENGTH_PRESETS = [1, 5, 10, 15, 20, 50];
 const CALCULATOR_WATER_PRESETS = [0.5, 1, 1.5, 2, 2.5, 3];
+const PARTIAL_SHIP_OPTIONS = [
+  { value: 'ship-ready', label: 'Ship agad pag may ready' },
+  { value: 'wait-complete', label: 'Wait ko makumpleto lahat' }
+];
+const SHOP_ACCESS_STORAGE_KEY = 'bbp-shop-access-code';
+const createEmptyAddressForm = () => ({ shipOpt: '', partialShipPref: '', street: '', brgy: '', city: '', prov: '', zip: '', contact: '' });
+const normalizeAccessCode = (value) => String(value || '').trim().toLowerCase();
+const normalizePartialShipPreference = (value) => {
+  const cleaned = String(value || '').trim().toLowerCase();
+  if (!cleaned) return '';
+  if (['ship-ready', 'ship ready', 'ship agad', 'ship agad pag may ready', 'ship agad pag may ready na'].includes(cleaned)) return 'ship-ready';
+  if (['wait-complete', 'wait complete', 'wait', 'hintay', 'wait ko makumpleto lahat'].includes(cleaned)) return 'wait-complete';
+  return '';
+};
+const getPartialShipPreferenceLabel = (value) => PARTIAL_SHIP_OPTIONS.find(option => option.value === normalizePartialShipPreference(value))?.label || '';
 
 // âœ¨ SUPERCHARGED KNOWLEDGE BASE
 const WIKI_DATA = [
@@ -308,6 +323,10 @@ export default function App() {
   const [selectedProfileEmail, setSelectedProfileEmail] = useState(null);
   const [isBtnLoading, setIsBtnLoading] = useState(false);
   const [proofFile, setProofFile] = useState(null);
+  const [shopAccessCodeInput, setShopAccessCodeInput] = useState('');
+  const [hasShopAccess, setHasShopAccess] = useState(false);
+  const [pendingHitListAdd, setPendingHitListAdd] = useState(null);
+  const [adminNoteDrafts, setAdminNoteDrafts] = useState({});
 
   const [hoveredProof, setHoveredProof] = useState(null);
   const [fullScreenProof, setFullScreenProof] = useState(null);
@@ -338,7 +357,7 @@ export default function App() {
   const heroBubbleFrameRef = useRef(null);
 
   const [isEditingAddress, setIsEditingAddress] = useState(false);
-  const [editAddressForm, setEditAddressForm] = useState({ shipOpt: '', street: '', brgy: '', city: '', prov: '', zip: '', contact: '' });
+  const [editAddressForm, setEditAddressForm] = useState(createEmptyAddressForm());
 
   const [adminPassword, setAdminPassword] = useState('');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
@@ -358,6 +377,7 @@ export default function App() {
   const [users, setUsers] = useState([]);
   const [history, setHistory] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [safetyRecords, setSafetyRecords] = useState([]);
 
   // Initializing with an empty array for admins
   const [settings, setSettings] = useState({
@@ -366,6 +386,7 @@ export default function App() {
     adminFeePhp: 150,
     minOrder: 3,
     storeOpen: true,
+    reviewStageOpen: false,
     paymentsOpen: false,
     addOnly: false,
     gasWebAppUrl: '',
@@ -373,6 +394,7 @@ export default function App() {
     proofFolder: 'proof of payments',
     labelsFolder: 'Order Labels',
     adminPass: 'admin123',
+    shopAccessCode: '',
     shippingOptions: ["Lalamove", "LBC", "J&T", "Pickup"],
     admins: []
   });
@@ -382,7 +404,7 @@ export default function App() {
   const [customerName, setCustomerName] = useState('');
   const [customerHandle, setCustomerHandle] = useState('');
   const [cartItems, setCartItems] = useState({});
-  const [addressForm, setAddressForm] = useState({ shipOpt: '', street: '', brgy: '', city: '', prov: '', zip: '', contact: '' });
+  const [addressForm, setAddressForm] = useState(createEmptyAddressForm());
   const [searchQuery, setSearchQuery] = useState('');
   const [wikiSearchQuery, setWikiSearchQuery] = useState('');
   const [wikiTagFilter, setWikiTagFilter] = useState('All');
@@ -416,6 +438,8 @@ export default function App() {
   const [newProd, setNewProd] = useState({ name: '', kit: '', vial: '', max: '' });
   const [newAdmin, setNewAdmin] = useState({ name: '', banks: [{ details: '', qrFile: null }] });
   const [isScrolled, setIsScrolled] = useState(false);
+  const configuredShopAccessCode = normalizeAccessCode(settings.shopAccessCode);
+  const requiresShopAccessCode = settings.storeOpen !== false && Boolean(configuredShopAccessCode);
   const [isHeroInView, setIsHeroInView] = useState(true);
 
   useEffect(() => {
@@ -495,6 +519,12 @@ export default function App() {
       arr.sort((a, b) => b.timestamp - a.timestamp);
       setLogs(arr);
     });
+    const unsubSafety = onSnapshot(collection(db, colPath('safetyBackups')), (snap) => {
+      const arr = [];
+      snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
+      arr.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+      setSafetyRecords(arr);
+    });
     const unsubChats = onSnapshot(collection(db, colPath('chats')), (snap) => {
       const arr = [];
       snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
@@ -502,7 +532,7 @@ export default function App() {
       setChats(arr);
     });
 
-    return () => { unsubSettings(); unsubProducts(); unsubOrders(); unsubUsers(); unsubHistory(); unsubChats(); unsubLogs(); };
+    return () => { unsubSettings(); unsubProducts(); unsubOrders(); unsubUsers(); unsubHistory(); unsubChats(); unsubLogs(); unsubSafety(); };
   }, [user]);
 
   const currentChatIdentity = useMemo(() => (
@@ -589,7 +619,81 @@ export default function App() {
     });
   }, [settings.admins]);
 
+  useEffect(() => {
+    if (!configuredShopAccessCode) {
+      setHasShopAccess(true);
+      return;
+    }
+
+    try {
+      const savedCode = normalizeAccessCode(window.localStorage.getItem(SHOP_ACCESS_STORAGE_KEY));
+      setHasShopAccess(savedCode === configuredShopAccessCode);
+    } catch (error) {
+      console.warn('Could not read saved shop access code.', error);
+      setHasShopAccess(false);
+    }
+  }, [configuredShopAccessCode]);
+
   const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+  const cloneRecord = (value) => JSON.parse(JSON.stringify(value ?? null));
+
+  const buildSafetyOrderSnapshot = (rows = []) => rows.map(row => ({ ...cloneRecord(row) }));
+  const buildSafetyUserSnapshot = (profiles = []) => profiles.map(profile => ({ ...cloneRecord(profile) }));
+
+  const createSafetyRecord = async (payload) => {
+    return safeAwait(addDoc(collection(db, colPath('safetyBackups')), {
+      createdAt: Date.now(),
+      batchName: settings.batchName || '',
+      ...payload
+    }));
+  };
+
+  const createBatchSnapshot = async (label, details = {}) => {
+    const activeEmails = Array.from(new Set(orders.map(order => order.email)));
+    const activeProfiles = users.filter(profile => activeEmails.includes(profile.id));
+    return createSafetyRecord({
+      kind: 'snapshot',
+      label,
+      status: 'available',
+      details,
+      settingsSnapshot: cloneRecord(settings),
+      ordersSnapshot: buildSafetyOrderSnapshot(orders),
+      usersSnapshot: buildSafetyUserSnapshot(activeProfiles),
+      productsSnapshot: cloneRecord(products),
+      summary: {
+        orders: orders.length,
+        users: activeProfiles.length,
+        products: products.length
+      }
+    });
+  };
+
+  const createRecycleRecord = async ({ label, recycleType, ordersSnapshot = [], userSnapshot = null, proofReference = null, meta = {} }) => {
+    return createSafetyRecord({
+      kind: 'recycle',
+      recycleType,
+      label,
+      status: 'available',
+      ordersSnapshot: buildSafetyOrderSnapshot(ordersSnapshot),
+      userSnapshot: userSnapshot ? cloneRecord(userSnapshot) : null,
+      proofReference: proofReference ? cloneRecord(proofReference) : null,
+      meta: cloneRecord(meta)
+    });
+  };
+
+  const createUndoRecord = async ({ actionType, label, beforeOrders = [], beforeUsers = [], targetEmails = [], replaceCustomerOrders = false, meta = {} }) => {
+    return createSafetyRecord({
+      kind: 'undo',
+      actionType,
+      label,
+      status: 'available',
+      beforeOrders: buildSafetyOrderSnapshot(beforeOrders),
+      beforeUsers: buildSafetyUserSnapshot(beforeUsers),
+      targetEmails: cloneRecord(targetEmails),
+      replaceCustomerOrders,
+      meta: cloneRecord(meta)
+    });
+  };
 
   const getFrozenPaymentSnapshot = (profile) => {
     const snap = profile?.paymentSnapshot;
@@ -754,7 +858,7 @@ export default function App() {
 
     const lines = [
       'Loose Vial Hit List',
-      'If these boxes do not fill before cutoff, the loose vials below will be trimmed.',
+      'If these boxes do not fill before cutoff, the loose vials below may be cut.',
       ''
     ];
 
@@ -762,7 +866,7 @@ export default function App() {
       lines.push(`${group.prod} - Box ${group.boxNum} needs ${group.missingSlots} more`);
       group.rows.forEach(row => {
         const label = row.handle ? `@${String(row.handle).replace(/^@+/, '')}` : row.email;
-        lines.push(`- ${label}: at risk of losing ${row.amountToRemove} vial${row.amountToRemove === 1 ? '' : 's'}`);
+        lines.push(`- ${label}: ${row.amountToRemove} vial${row.amountToRemove === 1 ? '' : 's'} at risk`);
       });
       lines.push('');
     });
@@ -806,6 +910,7 @@ export default function App() {
       const hasAssignedAdmin = Boolean(adminAssigned && adminAssigned !== 'Unassigned');
       const totalVials = itemEntries.reduce((acc, [, qty]) => acc + qty, 0);
       const itemCount = itemEntries.length;
+      const buyerReviewConfirmedAt = Number(profile.buyerReviewConfirmedAt || 0) || null;
       const subtotalUSD = frozenPaymentSnapshot?.subtotalUSD ?? sub;
       const totalUSD = frozenPaymentSnapshot?.totalUSD ?? liveTotalUSD;
       const totalPHP = frozenPaymentSnapshot?.totalPHP ?? liveTotalPHP;
@@ -823,6 +928,9 @@ export default function App() {
         paymentSnapshot: frozenPaymentSnapshot,
         paymentBankDetails: frozenPaymentSnapshot?.bankDetails || '',
         paymentBankQr: frozenPaymentSnapshot?.bankQr || '',
+        buyerReviewConfirmedAt,
+        reviewReady: Boolean(buyerReviewConfirmedAt),
+        adminNotes: profile.adminNotes || '',
         address,
         hasAddress,
         hasProof,
@@ -882,7 +990,19 @@ export default function App() {
       let statusTone = 'border-emerald-200 bg-emerald-50 text-emerald-700';
       let statusHint = 'Paid, assigned, and address is complete.';
 
-      if (!c.hasAssignedAdmin) {
+      if (settings.reviewStageOpen && !settings.paymentsOpen && !c.isPaid) {
+        if (!c.buyerReviewConfirmedAt) {
+          statusKey = 'buyer-review';
+          statusLabel = 'Review Stage';
+          statusTone = 'border-sky-200 bg-sky-50 text-sky-700';
+          statusHint = 'Buyer review is open. Ask customers to double-check their saved orders before payments open.';
+        } else {
+          statusKey = 'review-ready';
+          statusLabel = 'Buyer Confirmed';
+          statusTone = 'border-emerald-200 bg-emerald-50 text-emerald-700';
+          statusHint = 'Buyer already marked this saved order as good to go for the payment stage.';
+        }
+      } else if (!c.hasAssignedAdmin) {
         statusKey = 'needs-admin';
         statusLabel = 'Needs Admin';
         statusTone = 'border-sky-200 bg-sky-50 text-sky-700';
@@ -916,6 +1036,9 @@ export default function App() {
       if (activeOrdersFilter === 'has-proof') return c.hasProof;
       if (activeOrdersFilter === 'ready') return c.isReadyToShip;
       if (activeOrdersFilter === 'high-total') return c.totalPHP >= 10000;
+      if (activeOrdersFilter === 'review-pending') return settings.reviewStageOpen && !c.buyerReviewConfirmedAt;
+      if (activeOrdersFilter === 'buyer-review') return settings.reviewStageOpen && !c.buyerReviewConfirmedAt;
+      if (activeOrdersFilter === 'review-ready') return c.reviewReady;
       return true;
     });
 
@@ -927,15 +1050,18 @@ export default function App() {
       if (activeOrdersSort === 'most-items') return b.itemCount - a.itemCount || b.totalVials - a.totalVials || b.totalPHP - a.totalPHP;
       return b.totalPHP - a.totalPHP || (b.latestTimestamp || 0) - (a.latestTimestamp || 0);
     });
-  }, [customerList, adminGlobalSearch, activeOrdersFilter, activeOrdersSort]);
+  }, [customerList, adminGlobalSearch, activeOrdersFilter, activeOrdersSort, settings.reviewStageOpen, settings.paymentsOpen]);
 
   const activeOrdersSummary = useMemo(() => ({
     total: customerList.length,
     unpaid: customerList.filter(c => !c.isPaid).length,
     missingAddress: customerList.filter(c => !c.hasAddress).length,
     unassignedAdmin: customerList.filter(c => !c.hasAssignedAdmin).length,
-    ready: customerList.filter(c => c.isPaid && c.hasAddress && c.hasAssignedAdmin).length
-  }), [customerList]);
+    ready: customerList.filter(c => c.isPaid && c.hasAddress && c.hasAssignedAdmin).length,
+    reviewPending: customerList.filter(c => settings.reviewStageOpen && !c.buyerReviewConfirmedAt).length,
+    buyerReview: customerList.filter(c => settings.reviewStageOpen && !c.buyerReviewConfirmedAt).length,
+    reviewReady: customerList.filter(c => c.reviewReady).length
+  }), [customerList, settings.reviewStageOpen]);
 
   const paymentCustomers = useMemo(() => {
     const searched = customerList.filter(c => {
@@ -1137,6 +1263,21 @@ export default function App() {
       return next;
     });
   }, [activeOrdersList]);
+
+  useEffect(() => {
+    setAdminNoteDrafts(prev => {
+      const next = { ...prev };
+      customerList.forEach(customer => {
+        if (next[customer.email] === undefined) {
+          next[customer.email] = customer.adminNotes || '';
+        }
+      });
+      Object.keys(next).forEach(email => {
+        if (!customerList.some(customer => customer.email === email)) delete next[email];
+      });
+      return next;
+    });
+  }, [customerList]);
 
   const filteredPackingOrders = useMemo(() => {
     return orders.filter(o => !adminGlobalSearch || o.product.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || o.name.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || o.email.toLowerCase().includes(adminGlobalSearch.toLowerCase()));
@@ -1640,6 +1781,29 @@ export default function App() {
     setTimeout(() => setShakingField(null), 500);
   }
 
+  function unlockShopAccess() {
+    if (!configuredShopAccessCode) {
+      setHasShopAccess(true);
+      return;
+    }
+
+    if (normalizeAccessCode(shopAccessCodeInput) !== configuredShopAccessCode) {
+      triggerShake('shopAccessCode');
+      showToast('Wrong batch code. Check Discord and try again.');
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(SHOP_ACCESS_STORAGE_KEY, configuredShopAccessCode);
+    } catch (error) {
+      console.warn('Could not save shop access code locally.', error);
+    }
+
+    setHasShopAccess(true);
+    setShopAccessCodeInput('');
+    showToast('Batch code accepted.');
+  }
+
   function triggerAmbulance() {
     setShowAmbulance(true);
     setTimeout(() => setShowAmbulance(false), 800);
@@ -1677,7 +1841,7 @@ export default function App() {
   function buildTrimGroupDiscordText(group) {
     const lines = [
       `${group.prod} - Box ${group.boxNum} needs ${group.missingSlots} more`,
-      'If this box does not fill before cutoff, these loose vials will be trimmed:',
+      'If this box does not fill before cutoff, these loose vials may be cut:',
       ''
     ];
 
@@ -1700,6 +1864,67 @@ export default function App() {
     } catch (err) {
       console.error(err);
       showToast('Could not copy this box alert.');
+    }
+  }
+
+  function confirmHitListIncrease(productName, requestedAddQty = 1, hitListContext = {}) {
+    const product = products.find(p => p.name === productName);
+    if (!product) {
+      adjustCartItem(productName, 1);
+      return;
+    }
+
+    const currentQty = cartItems[productName]?.v || existingOrderData.items[productName] || 0;
+    const addQty = Math.max(1, parseInt(requestedAddQty, 10) || 1);
+    const nextQty = currentQty + addQty;
+    const nextSubtotalUSD = subtotalUSD + (Number(product.pricePerVialUSD || 0) * addQty);
+    const nextTotalPHP = lockedPaymentSnapshot?.totalPHP ?? ((nextSubtotalUSD > 0 && settings.fxRate > 0 ? nextSubtotalUSD + (settings.adminFeePhp / settings.fxRate) : 0) * settings.fxRate);
+
+    setPendingHitListAdd({
+      productName,
+      currentQty,
+      addQty,
+      nextQty,
+      pricePerVialUSD: Number(product.pricePerVialUSD || 0),
+      baseSubtotalUSD: subtotalUSD,
+      missingSlots: Number(hitListContext.missingSlots || 0),
+      boxNum: Number(hitListContext.boxNum || 0) || null,
+      nextTotalPHP
+    });
+  }
+
+  async function removeCustomerProof(customer) {
+    if (!customer?.email) return;
+    if (!window.confirm(`Remove proof for ${customer.name || customer.email}?`)) return;
+
+    try {
+      const customerProfile = users.find(userProfile => userProfile.id === customer.email) || null;
+      await createRecycleRecord({
+        label: `Deleted proof reference for ${customer.name || customer.email}`,
+        recycleType: 'proof',
+        userSnapshot: customerProfile || { id: customer.email, name: customer.name || '', email: customer.email },
+        proofReference: {
+          proofUrl: customer.proofUrl || null,
+          proofReview: customer.proofReview || '',
+          paymentSubmittedAt: customerProfile?.paymentSubmittedAt || customer.paymentSubmittedAt || null,
+          isPaid: customer.isPaid || false
+        },
+        meta: {
+          email: customer.email,
+          name: customer.name || ''
+        }
+      });
+
+      await safeAwait(setDoc(doc(db, colPath('users'), customer.email), {
+        isPaid: false,
+        proofUrl: null,
+        proofReview: '',
+        paymentSubmittedAt: null
+      }, { merge: true }));
+      showToast('Proof removed. The reference is saved in Admin Safety so you can restore it.');
+    } catch (error) {
+      console.error(error);
+      showToast('Could not remove proof.');
     }
   }
 
@@ -1728,6 +1953,228 @@ export default function App() {
     }
 
     return direction === 'asc' ? result : -result;
+  }
+
+  async function saveAdminNote(customer, nextNote) {
+    if (!customer?.email) return;
+    try {
+      await safeAwait(setDoc(doc(db, colPath('users'), customer.email), {
+        adminNotes: nextNote,
+        adminNotesUpdatedAt: Date.now()
+      }, { merge: true }));
+      showToast(`Saved note for ${customer.name || customer.email}.`);
+    } catch (error) {
+      console.error(error);
+      showToast('Could not save that note right now.');
+    }
+  }
+
+  async function confirmBuyerReview() {
+    if (!currentCustomerRecord?.email) {
+      showToast('Load your order first with the same email you used to save it.');
+      return;
+    }
+    try {
+      await safeAwait(setDoc(doc(db, colPath('users'), currentCustomerRecord.email), {
+        buyerReviewConfirmedAt: Date.now()
+      }, { merge: true }));
+      showToast('Your order is marked as looking good for the payment stage.');
+    } catch (error) {
+      console.error(error);
+      showToast('Could not save your review confirmation.');
+    }
+  }
+
+  async function toggleReviewStageWindow() {
+    if (settings.reviewStageOpen) {
+      try {
+        const nextSettings = { ...settings, reviewStageOpen: false };
+        await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), nextSettings));
+        setSettings(nextSettings);
+        showToast('Review stage closed.');
+      } catch (error) {
+        console.error(error);
+        showToast('Could not close the review stage right now.');
+      }
+      return;
+    }
+
+    const activeCustomers = customerList.filter(customer => customer.itemCount > 0);
+    if (!activeCustomers.length) {
+      showToast('No active orders to review yet.');
+      return;
+    }
+
+    setIsBtnLoading(true);
+    try {
+      await createBatchSnapshot('Before review stage', { action: 'open-review-stage' });
+      for (const chunk of chunkArray(activeCustomers, 250)) {
+        const batch = writeBatch(db);
+        chunk.forEach(customer => {
+          batch.set(doc(db, colPath('users'), customer.email), {
+            buyerReviewConfirmedAt: null
+          }, { merge: true });
+        });
+        await safeAwait(batch.commit());
+      }
+      const nextSettings = { ...settings, reviewStageOpen: true };
+      await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), nextSettings));
+      setSettings(nextSettings);
+      showToast('Review stage opened. Buyers can now double-check saved orders before payments open.');
+    } catch (error) {
+      console.error(error);
+      showToast('Could not open the review stage right now.');
+    }
+    setIsBtnLoading(false);
+  }
+
+  async function restoreSafetyRecord(record) {
+    if (!record?.id) return;
+
+    try {
+      setIsBtnLoading(true);
+
+      if (record.kind === 'recycle') {
+        if (record.recycleType === 'orders') {
+          if (record.userSnapshot?.id) {
+            const currentOrders = orders.filter(order => order.email === record.userSnapshot.id);
+            for (const chunk of chunkArray(currentOrders, 250)) {
+              const batch = writeBatch(db);
+              chunk.forEach(order => batch.delete(doc(db, colPath('orders'), order.id)));
+              await safeAwait(batch.commit());
+            }
+          }
+          for (const chunk of chunkArray(record.ordersSnapshot || [], 250)) {
+            const batch = writeBatch(db);
+            chunk.forEach(order => {
+              const { id, ...payload } = order;
+              batch.set(doc(db, colPath('orders'), id), payload);
+            });
+            await safeAwait(batch.commit());
+          }
+          if (record.userSnapshot?.id) {
+            const { id, ...payload } = record.userSnapshot;
+            await safeAwait(setDoc(doc(db, colPath('users'), id), payload, { merge: true }));
+          }
+        }
+
+        if (record.recycleType === 'proof' && record.userSnapshot?.id) {
+          const proofReference = record.proofReference || {};
+          await safeAwait(setDoc(doc(db, colPath('users'), record.userSnapshot.id), {
+            proofUrl: proofReference.proofUrl || null,
+            proofReview: proofReference.proofReview || '',
+            paymentSubmittedAt: proofReference.paymentSubmittedAt || null,
+            isPaid: Boolean(proofReference.isPaid)
+          }, { merge: true }));
+        }
+
+        await safeAwait(setDoc(doc(db, colPath('safetyBackups'), record.id), {
+          status: 'restored',
+          restoredAt: Date.now()
+        }, { merge: true }));
+        showToast('Recycle bin item restored.');
+        return;
+      }
+
+      if (record.kind === 'undo') {
+        if (record.replaceCustomerOrders && (record.targetEmails || []).length) {
+          for (const emailChunk of chunkArray(record.targetEmails || [], 100)) {
+            const matchingOrders = orders.filter(order => emailChunk.includes(order.email));
+            for (const deleteChunk of chunkArray(matchingOrders, 250)) {
+              const batch = writeBatch(db);
+              deleteChunk.forEach(order => batch.delete(doc(db, colPath('orders'), order.id)));
+              await safeAwait(batch.commit());
+            }
+          }
+        }
+
+        for (const chunk of chunkArray(record.beforeOrders || [], 250)) {
+          const batch = writeBatch(db);
+          chunk.forEach(order => {
+            const { id, ...payload } = order;
+            batch.set(doc(db, colPath('orders'), id), payload);
+          });
+          await safeAwait(batch.commit());
+        }
+
+        for (const chunk of chunkArray(record.beforeUsers || [], 250)) {
+          const batch = writeBatch(db);
+          chunk.forEach(profile => {
+            const { id, ...payload } = profile;
+            batch.set(doc(db, colPath('users'), id), payload, { merge: true });
+          });
+          await safeAwait(batch.commit());
+        }
+
+        await safeAwait(setDoc(doc(db, colPath('safetyBackups'), record.id), {
+          status: 'used',
+          undoneAt: Date.now()
+        }, { merge: true }));
+        showToast('Undo complete.');
+        return;
+      }
+
+      if (record.kind === 'snapshot') {
+        if (!window.confirm(`Restore batch snapshot "${record.label}"? This will replace the live batch data.`)) {
+          setIsBtnLoading(false);
+          return;
+        }
+
+        for (const chunk of chunkArray(orders, 250)) {
+          const batch = writeBatch(db);
+          chunk.forEach(order => batch.delete(doc(db, colPath('orders'), order.id)));
+          await safeAwait(batch.commit());
+        }
+
+        for (const chunk of chunkArray(record.ordersSnapshot || [], 250)) {
+          const batch = writeBatch(db);
+          chunk.forEach(order => {
+            const { id, ...payload } = order;
+            batch.set(doc(db, colPath('orders'), id), payload);
+          });
+          await safeAwait(batch.commit());
+        }
+
+        for (const chunk of chunkArray(record.usersSnapshot || [], 250)) {
+          const batch = writeBatch(db);
+          chunk.forEach(profile => {
+            const { id, ...payload } = profile;
+            batch.set(doc(db, colPath('users'), id), payload, { merge: true });
+          });
+          await safeAwait(batch.commit());
+        }
+
+        for (const chunk of chunkArray(products, 250)) {
+          const batch = writeBatch(db);
+          chunk.forEach(product => batch.delete(doc(db, colPath('products'), product.id)));
+          await safeAwait(batch.commit());
+        }
+
+        for (const chunk of chunkArray(record.productsSnapshot || [], 250)) {
+          const batch = writeBatch(db);
+          chunk.forEach(product => {
+            const { id, ...payload } = product;
+            const nextRef = id ? doc(db, colPath('products'), id) : doc(collection(db, colPath('products')));
+            batch.set(nextRef, payload);
+          });
+          await safeAwait(batch.commit());
+        }
+
+        if (record.settingsSnapshot) {
+          await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), record.settingsSnapshot));
+        }
+
+        await safeAwait(setDoc(doc(db, colPath('safetyBackups'), record.id), {
+          status: 'restored',
+          restoredAt: Date.now()
+        }, { merge: true }));
+        showToast('Batch snapshot restored.');
+      }
+    } catch (error) {
+      console.error(error);
+      showToast('Could not restore that safety record.');
+    }
+    setIsBtnLoading(false);
   }
 
   function getAvailabilityMessage(prodName, pData, requestedQty = null) {
@@ -1886,7 +2333,11 @@ export default function App() {
     if (profile) {
       setCustomerName(profile.name || '');
       setCustomerHandle(profile.handle || '');
-      setAddressForm(profile.address || { shipOpt: '', street: '', brgy: '', city: '', prov: '', zip: '', contact: '' });
+      setAddressForm({
+        ...createEmptyAddressForm(),
+        ...(profile.address || {}),
+        partialShipPref: normalizePartialShipPreference(profile.address?.partialShipPref)
+      });
 
       const atRisk = trimmingHitList.some(v => v.email === cleanEmail);
       if (settings.addOnly && atRisk && settings.storeOpen !== false) {
@@ -1898,7 +2349,7 @@ export default function App() {
       if (hasActiveOrders) {
         setCustomerName(userOrderRows[0]?.name || '');
         setCustomerHandle(userOrderRows[0]?.handle || '');
-        setAddressForm({ shipOpt: '', street: '', brgy: '', city: '', prov: '', zip: '', contact: '' });
+        setAddressForm(createEmptyAddressForm());
       }
       showToast(
         hasActiveOrders
@@ -1908,7 +2359,7 @@ export default function App() {
       if (!hasActiveOrders) {
         setCustomerName('');
         setCustomerHandle('');
-        setAddressForm({ shipOpt: '', street: '', brgy: '', city: '', prov: '', zip: '', contact: '' });
+        setAddressForm(createEmptyAddressForm());
       }
     }
 
@@ -2025,6 +2476,15 @@ export default function App() {
 
     setIsBtnLoading(true);
     try {
+      const customerProfile = users.find(profile => profile.id === emailLower) || { id: emailLower, name: customerName, handle: customerHandle };
+      await createBatchSnapshot('Before customer order cancel', { action: 'cancel-order', email: emailLower });
+      await createRecycleRecord({
+        label: `Cancelled order for ${customerName || emailLower}`,
+        recycleType: 'orders',
+        ordersSnapshot: userOrderRows,
+        userSnapshot: customerProfile,
+        meta: { email: emailLower, name: customerName || '' }
+      });
       const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
       for (const chunk of chunkArray(userOrderRows, 250)) {
         const batch = writeBatch(db);
@@ -2052,6 +2512,7 @@ export default function App() {
   }
 
   async function submitOrder() {
+    if (isShopAccessLocked) { showToast("Enter the batch code from Discord first."); return; }
     if (!customerEmail) { triggerAmbulance(); showToast("Email address is required."); return; }
     if (customerEmail.toLowerCase().trim() !== customerEmailConfirm.toLowerCase().trim()) {
       triggerAmbulance(); showToast("Email addresses do not match."); return;
@@ -2145,7 +2606,11 @@ export default function App() {
       }
 
       const existingUser = users.find(u => u.id === emailLower);
-      const userUpdatePayload = { name: customerName, handle: customerHandle };
+      const userUpdatePayload = {
+        name: customerName,
+        handle: customerHandle,
+        buyerReviewConfirmedAt: null
+      };
       if (!existingUser || !existingUser.adminAssigned) {
         userUpdatePayload.adminAssigned = normalizedAdmins[Math.floor(Math.random() * normalizedAdmins.length)]?.name || "Admin";
       }
@@ -2167,8 +2632,10 @@ export default function App() {
   }
 
   async function submitPayment() {
+    if (showShopAccessGate) { showToast("Enter the batch code from Discord first."); return; }
     const errs = {};
     if (!addressForm.shipOpt) errs.shipOpt = true;
+    if (!addressForm.partialShipPref) errs.partialShipPref = true;
     if (!addressForm.street?.trim()) errs.street = true;
     if (!addressForm.brgy?.trim()) errs.brgy = true;
     if (!addressForm.city?.trim()) errs.city = true;
@@ -2226,7 +2693,7 @@ export default function App() {
   }
 
   const saveEditedAddress = async () => {
-    if (!editAddressForm.shipOpt || !editAddressForm.street || !editAddressForm.brgy || !editAddressForm.city || !editAddressForm.contact) {
+    if (!editAddressForm.shipOpt || !editAddressForm.partialShipPref || !editAddressForm.street || !editAddressForm.brgy || !editAddressForm.city || !editAddressForm.contact) {
       showToast("Please fill all basic address fields."); return;
     }
     setIsBtnLoading(true);
@@ -2241,7 +2708,11 @@ export default function App() {
   };
 
   const startEditingAddress = (profile) => {
-    setEditAddressForm(profile.address || { shipOpt: '', street: '', brgy: '', city: '', prov: '', zip: '', contact: '' });
+    setEditAddressForm({
+      ...createEmptyAddressForm(),
+      ...(profile.address || {}),
+      partialShipPref: normalizePartialShipPreference(profile.address?.partialShipPref)
+    });
     setIsEditingAddress(true);
   };
 
@@ -2286,6 +2757,7 @@ export default function App() {
             <div class="meta">Handle: <strong>${c.handle || 'N/A'}</strong><br/>Email: ${c.email}</div>
             <div class="address">
                <strong>Ship via: ${c.address.shipOpt}</strong><br/><br/>
+               ${getPartialShipPreferenceLabel(c.address.partialShipPref) ? `<strong>Shipping note:</strong> ${getPartialShipPreferenceLabel(c.address.partialShipPref)}<br/><br/>` : ''}
                ${c.address.street}<br/>
                ${c.address.brgy ? `${c.address.brgy}, ` : ''}${c.address.city}<br/>
                ${c.address.prov} ${c.address.zip}<br/><br/>
@@ -2335,6 +2807,7 @@ export default function App() {
           Zip: c.address?.zip || '',
           Contact: c.address?.contact || '',
           "Shipping Option": c.address?.shipOpt || '',
+          "Partial Ship": getPartialShipPreferenceLabel(c.address?.partialShipPref) || '',
           "Is Paid": c.isPaid ? 'TRUE' : 'FALSE'
         };
       });
@@ -2383,6 +2856,7 @@ export default function App() {
             zip: String(row.Zip || '').trim(),
             contact: String(row.Contact || '').trim(),
             shipOpt: String(row['Shipping Option'] || '').trim(),
+            partialShipPref: normalizePartialShipPreference(row['Partial Ship'] || row['Shipping Note'] || ''),
           }
         })).filter(u => u.email);
 
@@ -2408,7 +2882,7 @@ export default function App() {
   };
 
   const exportCustomersCSVRows = (customers, filenamePrefix = 'BBP_Customers') => {
-    const headers = ["Email", "Name", "Handle", "Subtotal USD", "Total USD", "Total PHP", "Proof Link", "Assigned Admin", "Bank Account", "Label Link", "Street", "Barangay", "City", "Province", "Zip", "Contact", "Shipping Option", "Is Paid"];
+    const headers = ["Email", "Name", "Handle", "Subtotal USD", "Total USD", "Total PHP", "Proof Link", "Assigned Admin", "Bank Account", "Label Link", "Street", "Barangay", "City", "Province", "Zip", "Contact", "Shipping Option", "Partial Ship", "Is Paid"];
     let csvContent = headers.join(",") + "\n";
 
     customers.forEach(c => {
@@ -2416,7 +2890,7 @@ export default function App() {
         `"${c.email}"`, `"${c.name}"`, `"${c.handle || ''}"`, `"${c.subtotalUSD.toFixed(2)}"`, `"${c.totalUSD.toFixed(2)}"`, `"${c.totalPHP}"`,
         `"${c.proofUrl || ''}"`, `"${c.adminAssigned || ''}"`, `"${c.paymentBankDetails || ''}"`, `"N/A (Generated on Demand)"`,
         `"${c.address?.street || ''}"`, `"${c.address?.brgy || ''}"`, `"${c.address?.city || ''}"`, `"${c.address?.prov || ''}"`,
-        `"${c.address?.zip || ''}"`, `"${c.address?.contact || ''}"`, `"${c.address?.shipOpt || ''}"`, `"${c.isPaid ? 'TRUE' : 'FALSE'}"`
+        `"${c.address?.zip || ''}"`, `"${c.address?.contact || ''}"`, `"${c.address?.shipOpt || ''}"`, `"${getPartialShipPreferenceLabel(c.address?.partialShipPref) || ''}"`, `"${c.isPaid ? 'TRUE' : 'FALSE'}"`
       ];
       csvContent += row.join(",") + "\n";
     });
@@ -2433,6 +2907,66 @@ export default function App() {
 
   const exportCustomersCSV = () => {
     exportCustomersCSVRows(customerList);
+  };
+
+  const clearActivityLogs = async () => {
+    if (!sortedLogs.length) {
+      showToast('No activity logs to clear.');
+      return;
+    }
+    if (!window.confirm(`Clear ${sortedLogs.length} visible activity log${sortedLogs.length === 1 ? '' : 's'}?`)) return;
+
+    setIsBtnLoading(true);
+    try {
+      for (const chunk of chunkArray(sortedLogs, 250)) {
+        const batch = writeBatch(db);
+        chunk.forEach(log => batch.delete(doc(db, colPath('logs'), log.id)));
+        await safeAwait(batch.commit());
+      }
+      showToast('Activity logs cleared.');
+    } catch (error) {
+      console.error(error);
+      showToast('Could not clear the activity logs.');
+    }
+    setIsBtnLoading(false);
+  };
+
+  const deleteCustomerOrdersFromAdmin = async (customer) => {
+    if (!customer?.email) return;
+
+    setIsBtnLoading(true);
+    try {
+      const toDelete = orders.filter(order => order.email === customer.email);
+      const customerProfile = users.find(profile => profile.id === customer.email) || { id: customer.email, name: customer.name || '', handle: customer.handle || '' };
+      await createBatchSnapshot('Before admin deleted all order rows', { action: 'delete-all-orders', email: customer.email });
+      await createRecycleRecord({
+        label: `Deleted all active orders for ${customer.name || customer.email}`,
+        recycleType: 'orders',
+        ordersSnapshot: toDelete,
+        userSnapshot: customerProfile,
+        meta: { email: customer.email, name: customer.name || '' }
+      });
+
+      for (const chunk of chunkArray(toDelete, 250)) {
+        const batch = writeBatch(db);
+        chunk.forEach(order => batch.delete(doc(db, colPath('orders'), order.id)));
+        await safeAwait(batch.commit());
+      }
+
+      await safeAwait(addDoc(collection(db, colPath('logs')), {
+        timestamp: Date.now(),
+        email: customer.email,
+        name: customer.name || '',
+        action: 'Deleted All Active Orders',
+        details: `Removed ${toDelete.length} row${toDelete.length === 1 ? '' : 's'} from Active Orders.`
+      }));
+
+      showToast('Orders deleted and sent to the recycle bin.');
+    } catch (error) {
+      console.error(error);
+      showToast('Could not delete those orders.');
+    }
+    setIsBtnLoading(false);
   };
 
   const updateCustomerAdminAssignment = async (customer, adminName) => {
@@ -2457,6 +2991,15 @@ export default function App() {
 
     setIsBtnLoading(true);
     try {
+      const beforeUsers = users.filter(profile => emails.includes(profile.id));
+      await createBatchSnapshot('Before bulk admin assignment', { action: 'bulk-assign-admin', emails, adminName });
+      await createUndoRecord({
+        actionType: 'bulk-assign-admin',
+        label: `Undo admin assignment to ${adminName}`,
+        beforeUsers,
+        targetEmails: emails,
+        meta: { adminName }
+      });
       for (const chunk of chunkArray(emails, 250)) {
         const batch = writeBatch(db);
         chunk.forEach(email => {
@@ -2592,6 +3135,7 @@ export default function App() {
 
     setIsBtnLoading(true);
     try {
+      await createBatchSnapshot('Before payment window opened', { action: 'open-payments' });
       for (const chunk of chunkArray(activeCustomers, 250)) {
         const batch = writeBatch(db);
         chunk.forEach((customer) => {
@@ -2605,7 +3149,7 @@ export default function App() {
         await safeAwait(batch.commit());
       }
 
-      const nextSettings = { ...settings, paymentsOpen: true };
+      const nextSettings = { ...settings, paymentsOpen: true, reviewStageOpen: false };
       await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), nextSettings));
       setSettings(nextSettings);
       showToast('Payment window opened. Totals, assigned admins, and payment routes are now frozen for this batch.');
@@ -2642,6 +3186,44 @@ export default function App() {
       }
       showToast('Auto-Trim complete.');
     } catch (err) { console.error(err); showToast('Error during auto-trim.'); }
+  }
+
+  async function cutAllVisibleHitList() {
+    if (!sortedHitList.length) {
+      showToast('No visible hit list rows to cut.');
+      return;
+    }
+    if (!window.confirm(`Cut all ${sortedHitList.length} visible hit list row${sortedHitList.length === 1 ? '' : 's'}?`)) return;
+
+    try {
+      const affectedOrderIds = new Set(sortedHitList.map(row => row.id));
+      const beforeOrders = orders.filter(order => affectedOrderIds.has(order.id));
+      const affectedEmails = Array.from(new Set(sortedHitList.map(row => row.email)));
+      await createBatchSnapshot('Before bulk hit list cut', { action: 'bulk-cut-hit-list', rows: sortedHitList.length });
+      await createUndoRecord({
+        actionType: 'bulk-cut-hit-list',
+        label: `Undo bulk cut of ${sortedHitList.length} hit list row${sortedHitList.length === 1 ? '' : 's'}`,
+        beforeOrders,
+        beforeUsers: users.filter(profile => affectedEmails.includes(profile.id)),
+        targetEmails: affectedEmails,
+        meta: { rows: sortedHitList.length }
+      });
+      for (const chunk of chunkArray(sortedHitList, 250)) {
+        const batch = writeBatch(db);
+        chunk.forEach(v => {
+          if (v.qty === v.amountToRemove) {
+            batch.delete(doc(db, colPath('orders'), v.id));
+          } else {
+            batch.set(doc(db, colPath('orders'), v.id), { qty: v.qty - v.amountToRemove }, { merge: true });
+          }
+        });
+        await safeAwait(batch.commit());
+      }
+      showToast('Visible hit list rows cut.');
+    } catch (err) {
+      console.error(err);
+      showToast('Could not cut the visible rows.');
+    }
   }
 
   async function syncCurrentBoxCaps() {
@@ -2743,6 +3325,7 @@ export default function App() {
     setIsBtnLoading(true);
     showToast('Archiving and resetting...');
     try {
+      await createBatchSnapshot('Before system reset', { action: 'reset-system' });
       const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
 
       for (const chunk of chunkArray(orders, 200)) {
@@ -2767,7 +3350,7 @@ export default function App() {
         await safeAwait(batch.commit());
       }
 
-      await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), { ...settings, paymentsOpen: false, addOnly: false, storeOpen: true }));
+      await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), { ...settings, paymentsOpen: false, reviewStageOpen: false, addOnly: false, storeOpen: true }));
       showToast('System reset and archived.');
     } catch (err) { console.error(err); showToast(`Error resetting system: ${err.message}`); }
     setIsBtnLoading(false);
@@ -2984,11 +3567,6 @@ export default function App() {
 
   // âœ¨ NEW: Inline Admin Edit Logic
   const openAdminEditModal = (email) => {
-    const targetProfile = users.find(u => u.id === email) || {};
-    if (settings.paymentsOpen || targetProfile.proofUrl || targetProfile.isPaid) {
-      showToast('Order editing is locked once payment routing is live or proof has been submitted.');
-      return;
-    }
     const userOrders = orders.filter(o => o.email === email);
     const initialCart = {};
     userOrders.forEach(o => {
@@ -3008,13 +3586,18 @@ export default function App() {
     try {
       const targetEmail = adminOrderEditTarget;
       const targetProfile = users.find(u => u.id === targetEmail) || {};
-      if (settings.paymentsOpen || targetProfile.proofUrl || targetProfile.isPaid) {
-        showToast("Order editing is locked once payment routing is live or proof has been submitted.");
-        setIsBtnLoading(false);
-        return;
-      }
 
       const oldOrders = orders.filter(o => o.email === targetEmail);
+      await createBatchSnapshot('Before admin cart edit', { action: 'admin-edit-cart', email: targetEmail });
+      await createUndoRecord({
+        actionType: 'admin-edit-cart',
+        label: `Undo admin cart edit for ${targetProfile.name || targetEmail}`,
+        beforeOrders: oldOrders,
+        beforeUsers: [targetProfile],
+        targetEmails: [targetEmail],
+        replaceCustomerOrders: true,
+        meta: { email: targetEmail, name: targetProfile.name || '' }
+      });
       for (const chunk of chunkArray(oldOrders, 250)) {
         const batch = writeBatch(db);
         chunk.forEach(o => batch.delete(doc(db, colPath('orders'), o.id)));
@@ -3039,7 +3622,33 @@ export default function App() {
         await safeAwait(batch.commit());
       }
 
-      await safeAwait(setDoc(doc(db, colPath('users'), targetEmail), { paymentSnapshot: null, proofReview: '' }, { merge: true }));
+      const nextItems = {};
+      newOrders.forEach(item => {
+        nextItems[item.product] = (nextItems[item.product] || 0) + item.qty;
+      });
+      const existingSnapshot = getFrozenPaymentSnapshot(targetProfile);
+      const nextSnapshot = settings.paymentsOpen
+        ? (() => {
+          const rebuilt = buildPaymentSnapshot(nextItems, existingSnapshot?.adminAssigned || targetProfile.adminAssigned, targetEmail);
+          if (!existingSnapshot) return rebuilt;
+          return {
+            ...rebuilt,
+            adminAssigned: existingSnapshot.adminAssigned,
+            bankIndex: existingSnapshot.bankIndex,
+            bankDetails: existingSnapshot.bankDetails,
+            bankQr: existingSnapshot.bankQr
+          };
+        })()
+        : null;
+
+      await safeAwait(setDoc(doc(db, colPath('users'), targetEmail), {
+        paymentSnapshot: nextSnapshot,
+        proofReview: '',
+        proofUrl: null,
+        isPaid: false,
+        paymentSubmittedAt: null,
+        buyerReviewConfirmedAt: null
+      }, { merge: true }));
 
       await safeAwait(addDoc(collection(db, colPath('logs')), { timestamp: Date.now(), email: targetEmail, name: targetProfile.name || 'Unknown', action: "Admin Edited Order", details: `Cart updated via Admin Panel` }));
 
@@ -3088,6 +3697,8 @@ export default function App() {
 
   const currentCustomerRecord = customerList.find(c => c.email === customerEmail.toLowerCase().trim()) || null;
   const currentProfile = users.find(u => u.id === customerEmail.toLowerCase().trim()) || null;
+  const currentBuyerReviewConfirmedAt = currentCustomerRecord?.buyerReviewConfirmedAt || null;
+  const currentReviewReady = Boolean(currentCustomerRecord?.reviewReady);
   const lockedPaymentSnapshot = currentCustomerRecord?.paymentSnapshot || getFrozenPaymentSnapshot(currentProfile);
   const currentPaymentRoute = lockedPaymentSnapshot
     ? {
@@ -3131,6 +3742,9 @@ export default function App() {
     { id: 'no-admin', label: 'No Admin', count: activeOrdersSummary.unassignedAdmin },
     { id: 'has-proof', label: 'Has Proof', count: customerList.filter(c => c.hasProof).length },
     { id: 'ready', label: 'Ready', count: activeOrdersSummary.ready },
+    { id: 'review-pending', label: 'Need Buyer Check', count: activeOrdersSummary.reviewPending },
+    { id: 'buyer-review', label: 'Buyer Review', count: activeOrdersSummary.buyerReview },
+    { id: 'review-ready', label: 'Buyer Confirmed', count: activeOrdersSummary.reviewReady },
     { id: 'high-total', label: 'High Total', count: customerList.filter(c => c.totalPHP >= 10000).length }
   ];
   const activeOrdersSortOptions = [
@@ -3143,8 +3757,14 @@ export default function App() {
   ];
   const liveResultsLabel = filteredShopProducts.length === 1 ? '1 product' : `${filteredShopProducts.length} products`;
   const isStoreClosed = settings.storeOpen === false;
+  const isShopAccessLocked = requiresShopAccessCode && !hasShopAccess;
+  const isReviewStageOpen = Boolean(settings.reviewStageOpen) && !settings.paymentsOpen;
+  const canBypassShopGate = isReviewStageOpen || settings.paymentsOpen;
+  const showShopAccessGate = isShopAccessLocked && !canBypassShopGate;
+  const showCatalogReference = !settings.paymentsOpen && (!isReviewStageOpen || hasShopAccess);
+  const isOrderOnlyMode = settings.paymentsOpen || (isReviewStageOpen && !hasShopAccess);
   const hasExistingOrder = Object.keys(existingMap).length > 0;
-  const isCartEditable = !settings.paymentsOpen && settings.storeOpen !== false;
+  const isCartEditable = !settings.paymentsOpen && !settings.reviewStageOpen && settings.storeOpen !== false;
   const isHitListSaveReady = Boolean(
     customerName.trim() &&
     customerEmail.trim() &&
@@ -3158,17 +3778,47 @@ export default function App() {
   const desktopCartTitleClass = isHeroCartCompact
     ? 'brand-title mt-2 text-[1.45rem] leading-[0.98] text-[#D6006E] transition-all duration-300'
     : 'brand-title mt-2 text-[1.65rem] leading-[0.95] text-[#D6006E] transition-all duration-300';
-  const orderCardEyebrow = settings.addOnly ? 'Add-only protection' : hasExistingOrder ? 'Current order loaded' : 'Order details';
-  const orderCardTitle = hasExistingOrder ? 'Update your order' : 'Start your order';
-  const orderCardDescription = settings.addOnly
-    ? 'Your old numbers stay protected. You can add more, but you cannot reduce them.'
-    : hasExistingOrder
-      ? 'Your saved order is loaded below. Adjust what you need, then save.'
-      : 'Enter your details, then choose your vial totals below.';
-  const orderCardFlowLabel = settings.paymentsOpen ? 'Payments are open' : 'Ready to order';
+  const heroPrimaryCtaLabel = settings.paymentsOpen
+    ? 'Find My Order'
+    : isReviewStageOpen
+      ? 'Review My Order'
+      : 'Start Order';
+  const heroIntroCopy = settings.paymentsOpen
+    ? 'Load your saved order with the same email, confirm the total, and upload payment proof here.'
+    : isReviewStageOpen
+      ? 'Review your saved order with the same email before payments open. Shopping is paused during this check window.'
+      : 'Save your order, protect full kits, and come back with the same email when the payment window opens.';
+  const orderCardEyebrow = settings.paymentsOpen
+    ? 'Payment lookup'
+    : isReviewStageOpen
+      ? 'Review lookup'
+      : settings.addOnly
+        ? 'Add-only protection'
+        : hasExistingOrder
+          ? 'Current order loaded'
+          : 'Order details';
+  const orderCardTitle = settings.paymentsOpen
+    ? (hasExistingOrder ? 'Complete your payment' : 'Find your saved order')
+    : isReviewStageOpen
+      ? (hasExistingOrder ? 'Review your order' : 'Find your saved order')
+      : hasExistingOrder
+        ? 'Update your order'
+        : 'Start your order';
+  const orderCardDescription = settings.paymentsOpen
+    ? 'Use the same email from your saved order so the final total, route, and proof upload can load below.'
+    : isReviewStageOpen
+      ? 'Review stage is live. Buyer edits are frozen so everyone can check saved orders before payments open.'
+      : settings.addOnly
+        ? 'Your old numbers stay protected. You can add more, but you cannot reduce them.'
+        : hasExistingOrder
+          ? 'Your saved order is loaded below. Adjust what you need, then save.'
+          : 'Enter your details, then choose your vial totals below.';
+  const orderCardFlowLabel = settings.paymentsOpen ? 'Payments are open' : isReviewStageOpen ? 'Review stage live' : 'Ready to order';
   const orderCardFlowCopy = settings.paymentsOpen
     ? 'Your saved items are locked in. Use your email below to continue.'
-    : hasExistingOrder
+    : isReviewStageOpen
+      ? 'Saved orders are frozen so everyone can double-check what looks good before payments open.'
+      : hasExistingOrder
       ? 'Your order is loaded. Update counts, then save.'
       : 'Choose vial totals, review the cart, and save.';
   const orderCardProfileCopy = customerProfile?.address?.street
@@ -3179,6 +3829,8 @@ export default function App() {
     : 'Every 10 vials makes 1 protected kit.';
   const orderCardStatus = settings.paymentsOpen
     ? 'Payments open'
+    : isReviewStageOpen
+      ? 'Review stage'
     : settings.addOnly
       ? 'Add-only mode'
       : hasExistingOrder
@@ -3190,6 +3842,15 @@ export default function App() {
   ].filter(Boolean).join(' ');
   const selectedActiveOrderEmails = Object.keys(selectedActiveOrders).filter(email => selectedActiveOrders[email]);
   const areAllVisibleActiveOrdersSelected = activeOrdersList.length > 0 && activeOrdersList.every(c => selectedActiveOrders[c.email]);
+  const availableUndoRecords = safetyRecords.filter(record => record.kind === 'undo' && record.status === 'available');
+  const recycleBinRecords = safetyRecords.filter(record => record.kind === 'recycle');
+  const snapshotRecords = safetyRecords.filter(record => record.kind === 'snapshot');
+  const safetySummary = {
+    undo: availableUndoRecords.length,
+    recycle: recycleBinRecords.filter(record => record.status === 'available').length,
+    snapshots: snapshotRecords.length,
+    proofs: recycleBinRecords.filter(record => record.recycleType === 'proof').length
+  };
   const renderAdminToggle = ({ label, description, active, activeText, inactiveText, onToggle, activeTone, inactiveTone }) => {
     const tone = active ? activeTone : inactiveTone;
     const statusText = active ? activeText : inactiveText;
@@ -3266,6 +3927,10 @@ export default function App() {
   };
 
   const getActiveOrderRowTone = (customer) => {
+    if (customer.statusKey === 'needs-changes') return 'bg-rose-50/60';
+    if (customer.statusKey === 'review-pending') return 'bg-sky-50/55';
+    if (customer.statusKey === 'buyer-review') return 'bg-amber-50/55';
+    if (customer.statusKey === 'review-ready') return 'bg-emerald-50/45';
     if (customer.statusKey === 'needs-address') return 'bg-rose-50/55';
     if (customer.statusKey === 'needs-admin') return 'bg-sky-50/60';
     if (customer.statusKey === 'waiting-payment') return 'bg-amber-50/55';
@@ -3577,6 +4242,12 @@ export default function App() {
                           className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-violet-700 transition-colors hover:border-violet-300">
                           View
                         </button>
+                        <button
+                          onClick={() => removeCustomerProof(c)}
+                          className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300"
+                        >
+                          Remove
+                        </button>
                         {c.needsRecheck && <span className="text-[9px] font-black uppercase tracking-widest text-rose-600">Recheck</span>}
                       </div>
                     ) : (
@@ -3612,6 +4283,14 @@ export default function App() {
                           className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest transition-colors ${c.needsRecheck ? 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300' : 'border-violet-200 bg-violet-50 text-violet-700 hover:border-violet-300'}`}
                         >
                           {c.needsRecheck ? 'Clear Recheck' : 'Needs Recheck'}
+                        </button>
+                      )}
+                      {c.hasProof && (
+                        <button
+                          onClick={() => removeCustomerProof(c)}
+                          className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300"
+                        >
+                          Remove Proof
                         </button>
                       )}
                     </div>
@@ -3983,7 +4662,7 @@ export default function App() {
       )}
 
       {/* âœ¨ NEW: Floating Live Chat Button & Panel */}
-      {view === 'shop' && (
+      {view === 'shop' && hasShopAccess && (
         <div className="fixed bottom-24 lg:bottom-8 right-4 lg:right-8 z-[70] flex flex-col items-end">
 
           {/* Transparent Preview Bubble (Shows when chat is closed and a new message arrives) */}
@@ -4097,12 +4776,12 @@ export default function App() {
 
                   {isStoreClosed ? (
                     <>
-                      <div className="w-full min-w-0 flex-1 flex flex-col justify-center items-center text-center max-w-3xl mx-auto lg:max-w-[1100px] xl:max-w-[1180px] py-1 lg:mx-0 lg:items-start lg:text-left">
+                      <div className="w-full min-w-0 flex-1 flex flex-col justify-center items-center gap-2 text-center max-w-3xl mx-auto lg:max-w-[1100px] xl:max-w-[1180px] py-1 lg:mx-0 lg:items-start lg:text-left">
                         <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#D6006E]">BBP Group Buy</p>
-                        <h1 className="brand-title mt-3 text-[2.95rem] sm:text-[4.1rem] lg:text-[5.75rem] xl:text-[6.2rem] lg:whitespace-nowrap lg:tracking-[-0.035em] leading-[0.98] text-[#D6006E]">
+                        <h1 className="brand-title mt-2 mb-0 pb-5 sm:pb-6 lg:pb-7 text-[2.95rem] sm:text-[4.1rem] lg:text-[5.75rem] xl:text-[6.2rem] lg:whitespace-nowrap lg:tracking-[-0.035em] leading-[1.06] text-[#D6006E]">
                           Bonded by Peptides
                         </h1>
-                        <p className="mt-5 max-w-[38rem] text-[15px] sm:text-[18px] font-bold leading-relaxed text-[#8F2C5D]">
+                        <p className="mt-4 max-w-[38rem] text-[15px] sm:text-[18px] font-bold leading-relaxed text-[#8F2C5D]">
                           Ordering is paused right now, but your profile, order history, wiki, and calculator are still here while BBP gets the next batch ready.
                         </p>
                       </div>
@@ -4130,27 +4809,29 @@ export default function App() {
                     </>
                   ) : (
                     <>
-                      <div className="w-full min-w-0 flex-1 flex flex-col justify-center items-center text-center max-w-[760px] lg:max-w-[980px] xl:max-w-[1080px] py-2 lg:items-start lg:text-left">
+                      <div className="w-full min-w-0 flex-1 flex flex-col justify-center items-center gap-2 text-center max-w-[760px] lg:max-w-[980px] xl:max-w-[1080px] py-2 lg:items-start lg:text-left">
                         <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#D6006E]">BBP Group Buy</p>
-                        <h1 className="brand-title mt-3 text-[2.95rem] sm:text-[4.1rem] lg:text-[4.7rem] xl:text-[5.05rem] lg:whitespace-nowrap leading-[1.02] text-[#D6006E]">
+                        <h1 className="brand-title mt-2 mb-0 pb-5 sm:pb-6 lg:pb-7 text-[2.95rem] sm:text-[4.1rem] lg:text-[4.7rem] xl:text-[5.05rem] lg:whitespace-nowrap leading-[1.08] text-[#D6006E]">
                           Bonded by Peptides
                         </h1>
-                        <p className="mt-5 max-w-[38rem] text-[15px] sm:text-[18px] font-bold leading-relaxed text-[#8F2C5D]">
-                          Save your order, protect full kits, and come back with the same email when the payment window opens.
+                        <p className="mt-4 max-w-[38rem] text-[15px] sm:text-[18px] font-bold leading-relaxed text-[#8F2C5D]">
+                          {heroIntroCopy}
                         </p>
-                        <div className="mt-7 flex flex-wrap justify-center gap-3 lg:justify-start">
+                        <div className="mt-6 flex flex-wrap justify-center gap-3 lg:justify-start">
                           <button
                             onClick={() => document.getElementById('top-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
                             className="bg-gradient-to-r from-[#FF1493] to-[#FF69B4] text-white px-6 py-3 rounded-full text-[11px] font-black uppercase tracking-[0.2em] shadow-[0_16px_32px_rgba(255,20,147,0.2)] transition-transform hover:translate-y-[-1px]"
                           >
-                            Start Order
+                            {heroPrimaryCtaLabel}
                           </button>
-                          <button
-                            onClick={() => document.getElementById('catalog-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                            className="bg-white/90 text-[#D6006E] border-2 border-[#FFC0CB] px-6 py-3 rounded-full text-[11px] font-black uppercase tracking-[0.2em] shadow-[0_10px_24px_rgba(255,20,147,0.08)] transition-transform hover:translate-y-[-1px]"
-                          >
-                            Browse Catalog
-                          </button>
+                          {showCatalogReference && (
+                            <button
+                              onClick={() => document.getElementById('catalog-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                              className="bg-white/90 text-[#D6006E] border-2 border-[#FFC0CB] px-6 py-3 rounded-full text-[11px] font-black uppercase tracking-[0.2em] shadow-[0_10px_24px_rgba(255,20,147,0.08)] transition-transform hover:translate-y-[-1px]"
+                            >
+                              Browse Catalog
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -4240,7 +4921,7 @@ export default function App() {
                 </div>
                 )}
                 {!isStoreClosed && (
-                  <div className="soft-panel rounded-[30px] p-5 flex flex-col gap-4 w-full min-w-0 overflow-hidden lg:self-stretch bg-[linear-gradient(180deg,rgba(255,249,252,0.94),rgba(255,241,246,0.88))] border-[#F3C9D7] shadow-[0_18px_38px_rgba(214,0,110,0.09)]">
+                  <div className="soft-panel hidden lg:flex rounded-[30px] p-5 flex-col gap-4 w-full min-w-0 overflow-hidden lg:self-stretch bg-[linear-gradient(180deg,rgba(255,249,252,0.94),rgba(255,241,246,0.88))] border-[#F3C9D7] shadow-[0_18px_38px_rgba(214,0,110,0.09)]">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-[10px] font-black text-[#B30065] uppercase tracking-[0.28em]">Current Batch</p>
@@ -4300,7 +4981,51 @@ export default function App() {
               </span>
             </div>
 
-            {settings.storeOpen === false ? null : (
+            {settings.storeOpen === false ? null : showShopAccessGate ? (
+              <div className="shop-surface rounded-[30px] p-5 sm:p-6 shadow-sm relative z-10">
+                <div className="mx-auto max-w-2xl rounded-[28px] border-2 border-pink-100 bg-white/92 p-5 sm:p-7 text-center shadow-[0_18px_40px_rgba(214,0,110,0.08)]">
+                  <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#D6006E]">Private Batch Access</p>
+                  <h2 className="mt-3 text-[1.8rem] sm:text-[2.3rem] font-black text-[#4A042A] leading-[1.02]">
+                    Enter batch code
+                  </h2>
+                  <p className="mt-3 text-sm sm:text-base font-bold leading-relaxed text-[#8F2C5D]">
+                    This catalog is private to the group. Get the current batch code from Discord, then enter it here.
+                  </p>
+
+                  <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+                    <span className="hero-chip inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[#8A1555] font-black text-[10px] uppercase tracking-[0.22em]">
+                      For group members first
+                    </span>
+                    <span className="hero-chip inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[#8A1555] font-black text-[10px] uppercase tracking-[0.22em]">
+                      {settings.batchName || 'Current Batch'}
+                    </span>
+                  </div>
+
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      unlockShopAccess();
+                    }}
+                    className="mt-6 grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]"
+                  >
+                    <input
+                      type="text"
+                      value={shopAccessCodeInput}
+                      onChange={(e) => setShopAccessCodeInput(e.target.value)}
+                      placeholder="Paste the batch code here"
+                      className={`${customerFormInput} ${shakingField === 'shopAccessCode' ? 'animate-shake border-red-500 bg-red-50 text-red-700 placeholder:text-red-300' : ''}`}
+                    />
+                    <button type="submit" className={`${originalBtn} w-full justify-center`}>
+                      Enter Shop
+                    </button>
+                  </form>
+
+                  <p className="mt-4 text-xs font-bold text-[#9E2A5E]">
+                    Use the latest batch code from Discord to enter this batch.
+                  </p>
+                </div>
+              </div>
+            ) : (
               <>
                 {settings.paymentsOpen && (
                   <div className="glass-note border-l-4 border-[#FF1493] p-3 rounded-[22px] mb-4 text-sm font-bold shadow-sm">Payments open: check your email below to pay.</div>
@@ -4316,6 +5041,44 @@ export default function App() {
                     </button>
                   </div>
                 )}
+                {isReviewStageOpen && (
+                  <div className="glass-note border-l-4 border-sky-500 p-4 rounded-[22px] mb-6 shadow-sm flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-black text-sky-700">Review stage is open</span>
+                        {hasExistingOrder && (
+                          <>
+                            {currentBuyerReviewConfirmedAt && (
+                              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-emerald-700">
+                                Marked Looks Good
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      <div className="mt-2 text-xs font-bold text-slate-500">
+                        {!hasExistingOrder
+                          ? 'New orders are paused right now while admins review the saved batch before opening payments.'
+                          : currentReviewReady
+                            ? 'You already marked this saved order as looking good for the payment stage.'
+                            : 'Open Review to inspect your saved order. If everything looks good, you can mark it below before payments open.'}
+                      </div>
+                    </div>
+                    {hasExistingOrder ? (
+                      <button
+                        onClick={confirmBuyerReview}
+                        disabled={currentReviewReady}
+                        className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition-colors hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {currentReviewReady ? 'Already Marked' : 'Looks Good To Me'}
+                      </button>
+                    ) : (
+                      <span className="rounded-full border border-sky-200 bg-sky-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-sky-700">
+                        Review Freeze
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {/* âœ¨ FIXED: Tighter Desktop Sidebars */}
                 <div className={shopDesktopLayoutClass}>
@@ -4325,7 +5088,7 @@ export default function App() {
                       <div className="glass-note border border-rose-300 p-4 rounded-[22px] shadow-sm animate-pulse flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                         <div>
                           <h3 className="text-rose-700 font-black text-sm mb-1">Your vials are at risk</h3>
-                          <p className="text-xs text-rose-600 font-bold">You have loose vials on the Hit List. If the box isn't completed before cutoff, they will be deleted. Help fill the box!</p>
+                          <p className="text-xs text-rose-600 font-bold">You have loose vials on the hit list. If the box does not fill, those loose vials may be cut. Try to help fill the box first.</p>
                         </div>
                         <button onClick={() => setShowHitListModal(true)} className="bg-rose-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md hover:bg-rose-700 whitespace-nowrap transition-transform hover:scale-105">
                           View hit list
@@ -4368,7 +5131,7 @@ export default function App() {
                                 View Profile & History
                               </button>
                             )}
-                            {hasExistingOrder && !settings.paymentsOpen && !settings.addOnly && (
+                            {hasExistingOrder && !settings.paymentsOpen && !settings.addOnly && !settings.reviewStageOpen && (
                               confirmAction.type === 'cancelOrder' && confirmAction.id === customerEmail.toLowerCase().trim() ? (
                                 <>
                                   <button onClick={cancelEntireOrder} className="inline-flex items-center rounded-full bg-rose-500 px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-white shadow-sm transition-colors hover:bg-rose-600">
@@ -4414,11 +5177,11 @@ export default function App() {
 
                               <div className="sm:col-span-1">
                                 <label className="mb-1 block pl-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">Name</label>
-                                <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} className={getCustomerFormInputClass('name')} placeholder="Full name" disabled={settings.paymentsOpen} />
+                                <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} className={getCustomerFormInputClass('name')} placeholder="Full name" disabled={settings.paymentsOpen || settings.reviewStageOpen} />
                               </div>
                               <div className="sm:col-span-1">
                                 <label className="mb-1 block pl-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">Handle</label>
-                                <input type="text" value={customerHandle} onChange={e => setCustomerHandle(e.target.value)} className={customerFormInput} placeholder="@username" disabled={settings.paymentsOpen} />
+                                <input type="text" value={customerHandle} onChange={e => setCustomerHandle(e.target.value)} className={customerFormInput} placeholder="@username" disabled={settings.paymentsOpen || settings.reviewStageOpen} />
                               </div>
                             </div>
                           </div>
@@ -4498,145 +5261,265 @@ export default function App() {
                     </div>
 
                     <div id="catalog-panel" className={`shop-surface rounded-[30px] shadow-sm relative z-10 transition-all duration-300 ${shakingField === 'products' ? 'animate-shake border-red-500 ring-4 ring-red-100' : ''}`}>
-                      <div className="sticky top-0 z-30 px-3 py-1.5 sm:p-5 border-b border-white/60 flex flex-col sm:flex-row justify-between items-center gap-1.5 sm:gap-4 bg-white/45 backdrop-blur-2xl rounded-t-[30px] shadow-sm">
-                        <div className={`w-full sm:w-auto transition-all duration-300 ${isScrolled ? 'hidden sm:block' : 'block'}`}>
-                          <h2 className="font-black text-[#D6006E] uppercase tracking-widest text-sm sm:text-base flex items-center gap-2 whitespace-nowrap">
-                            <Package size={22} className="text-[#FF1493]" /> Shop Catalog
-                          </h2>
-                          <p className="text-[10px] sm:text-xs font-bold text-slate-400 mt-1">
-                            {liveResultsLabel} shown, {selectedVialCount} vials selected
-                          </p>
-                        </div>
-
-                        {/* âœ¨ NEW: Category Filter Pills */}
-                        <div className="flex-1 w-full flex flex-col gap-1 sm:gap-2">
-                          <div className="flex gap-2 overflow-x-auto hide-scroll pb-1">
-                            {POPULAR_CATEGORIES.map(cat => (
-                              <button
-                                key={cat}
-                                onClick={() => setSelectedCategory(cat)}
-                                className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest whitespace-nowrap transition-colors border shadow-sm ${selectedCategory === cat ? 'bg-[#D6006E] text-white border-[#D6006E]' : 'bg-white text-slate-500 border-pink-100 hover:border-pink-300 hover:text-pink-600'}`}
-                              >
-                                {cat}
-                              </button>
-                            ))}
-                          </div>
-                          <div className="relative w-full">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-400" size={18} />
-                            <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search products..." className="w-full pl-11 pr-4 py-1.5 sm:py-3 rounded-xl sm:rounded-2xl text-sm sm:text-base font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-[#FFF0F5] placeholder:text-pink-300 text-[#4A042A] shadow-inner" />
-                          </div>
-                          {(searchQuery || selectedCategory !== 'All') && (
-                            <div className="flex items-center justify-between gap-3 px-1">
-                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                                Viewing {liveResultsLabel}
-                              </p>
-                              <button onClick={() => { setSearchQuery(''); setSelectedCategory('All'); }} className="text-[10px] font-black text-[#D6006E] uppercase tracking-widest hover:underline">
-                                Clear Filters
-                              </button>
+                      {isOrderOnlyMode ? (
+                        <>
+                          <div className="sticky top-0 z-30 px-3 py-3 sm:p-5 border-b border-white/60 flex flex-col gap-2 bg-white/45 backdrop-blur-2xl rounded-t-[30px] shadow-sm">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                              <div className={`w-full sm:w-auto transition-all duration-300 ${isScrolled ? 'hidden sm:block' : 'block'}`}>
+                                <h2 className="font-black text-[#D6006E] uppercase tracking-widest text-sm sm:text-base flex items-center gap-2 whitespace-nowrap">
+                                  {settings.paymentsOpen ? <ShieldCheck size={22} className="text-emerald-500" /> : <ClipboardList size={22} className="text-sky-600" />}
+                                  {settings.paymentsOpen ? 'Payment Window Live' : 'Review Window Live'}
+                                </h2>
+                                <p className="text-[10px] sm:text-xs font-bold text-slate-400 mt-1">
+                                  {settings.paymentsOpen
+                                    ? 'Catalog is hidden now so buyers stay focused on saved orders and payment.'
+                                    : 'Catalog stays private unless the batch code was entered, but buyers can still review saved orders here.'}
+                                </p>
+                              </div>
+                              <div className={`rounded-[22px] px-4 py-3 text-left sm:max-w-[260px] ${settings.paymentsOpen ? 'border border-emerald-200 bg-emerald-50' : 'border border-sky-200 bg-sky-50'}`}>
+                                <p className={`text-[10px] font-black uppercase tracking-[0.22em] ${settings.paymentsOpen ? 'text-emerald-700' : 'text-sky-700'}`}>Next step</p>
+                                <p className={`mt-1.5 text-xs font-black leading-relaxed ${settings.paymentsOpen ? 'text-emerald-900' : 'text-sky-900'}`}>
+                                  {settings.paymentsOpen
+                                    ? 'Use Review to confirm your saved order, then continue to Pay Now when you are ready.'
+                                    : 'Load your saved order, check that everything looks right, and mark it if you are good before payments open.'}
+                                </p>
+                              </div>
                             </div>
-                          )}
-                        </div>
-                      </div>
+                          </div>
 
-                      {products.length === 0 ? (
-                        <div className="p-12 text-center text-pink-400 font-bold italic">No products available yet.</div>
-                      ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-3 p-2 sm:p-3 bg-white/10 rounded-b-[30px]">
-                          {filteredShopProducts.map(p => {
-                            const cart = cartItems[p.name] || { v: 0 };
-                            const active = cart.v > 0;
-                            const exist = existingMap[p.name] || 0;
-                            const productInfo = buildProductInfo(p.name);
-                            const productImage = getProductImageSrc(productInfo);
-                            const productImageSrc = getRealProductImageSrc(p.name, p.imageUrl || '');
-                            const protectedKits = Math.floor((cart.v || 0) / 10);
-                            const looseVials = (cart.v || 0) % 10;
-                            const compactStatusText = p.statusKey === 'locked'
-                              ? 'locked'
-                              : p.statusKey === 'full'
-                                ? 'full'
-                                : p.totalVials === 0
-                                  ? 'new'
-                                  : p.slotsLeft === 0
-                                    ? 'open'
-                                    : `${p.slotsLeft} left`;
-
-                            const bgClass = shakingProd === p.name ? 'animate-shake border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)] z-20 bg-red-50'
-                              : (active ? 'bg-[#FFF0F5] border-[#D6006E] shadow-md scale-[1.01] z-10'
-                                : (exist > 0 ? 'bg-[#F0FDF4] border-[#4ADE80] shadow-sm'
-                                  : 'bg-white border-[#FFE4E1] hover:border-pink-300'));
-
-                            return (
-                              <div
-                                key={p.id}
-                                data-name={p.name}
-                                onClick={p.isClosed ? () => showToast(getAvailabilityMessage(p.name, p), 6000) : undefined}
-                                className={`relative p-2 sm:p-2.5 rounded-2xl border-2 transition-all duration-300 overflow-hidden ${bgClass} ${p.isClosed ? 'cursor-not-allowed' : ''}`}
-                              >
-
-                                {exist > 0 && (
-                                  <div className="bg-[#22C55E] text-white text-[9px] font-black uppercase px-2.5 py-1 -mx-2.5 sm:-mx-3 -mt-2.5 sm:-mt-3 mb-2 flex justify-between items-center shadow-sm">
-                                    <span className="flex items-center gap-1">{active && cart.v !== exist ? 'You Have' : 'In Your Order'}</span>
-                                    <div className="flex items-center gap-1">
-                                      <span className="bg-white/25 px-2 py-0.5 rounded-md">{exist} Vials</span>
-                                      {active && cart.v !== exist && (
-                                        <span className="bg-[#FFE066] text-[#7A4B00] px-2 py-0.5 rounded-md">Now {cart.v}</span>
-                                      )}
-                                    </div>
+                          <div className="rounded-b-[30px] bg-white/10 p-3 sm:p-4">
+                            {cartList.length === 0 ? (
+                              <div className="rounded-[24px] border border-dashed border-pink-200 bg-white/80 px-5 py-10 text-center">
+                                <p className="text-sm font-black text-[#4A042A]">Load your saved order first</p>
+                                <p className="mt-2 text-xs font-bold leading-relaxed text-slate-500">
+                                  Enter the same email you used for your order so the saved items, total, and payment details can appear here.
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="space-y-3">
+                                <div className="grid gap-3 sm:grid-cols-3">
+                                  <div className="rounded-[22px] border border-pink-100 bg-white/80 p-4 shadow-sm">
+                                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Saved items</p>
+                                    <p className="mt-2 text-2xl font-black text-[#4A042A]">{cartList.length}</p>
+                                    <p className="mt-1 text-xs font-bold text-slate-500">products in your locked order</p>
                                   </div>
-                                )}
+                                  <div className="rounded-[22px] border border-pink-100 bg-white/80 p-4 shadow-sm">
+                                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Total vials</p>
+                                    <p className="mt-2 text-2xl font-black text-[#4A042A]">{selectedVialCount}</p>
+                                    <p className="mt-1 text-xs font-bold text-slate-500">{settings.paymentsOpen ? 'already frozen for this payment window' : 'currently saved in your review copy'}</p>
+                                  </div>
+                                  <div className="rounded-[22px] border border-pink-100 bg-white/80 p-4 shadow-sm">
+                                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">{settings.paymentsOpen ? 'Amount due' : 'Current total'}</p>
+                                    <p className="mt-2 text-2xl font-black text-[#4A042A]">₱{totalPHP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                    <p className="mt-1 text-xs font-bold text-slate-500">{settings.paymentsOpen ? 'includes admin fee' : 'review this total before payments open'}</p>
+                                  </div>
+                                </div>
 
-                                <div className="grid grid-cols-[40px_1fr_62px] gap-2 items-center">
-                                  <img src={productImageSrc} alt={`${p.name} vial`} onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = productImage; }} className="w-[40px] h-[52px] shrink-0 rounded-lg border border-pink-100 bg-white object-cover shadow-sm" />
-
-                                  <div className={`min-w-0 ${p.isClosed ? 'opacity-40 pointer-events-none' : ''}`}>
-                                    <div className="flex items-start gap-1 min-w-0">
-                                      <h3 className="font-black text-[16px] sm:text-[17px] text-[#4A042A] leading-[1.05] line-clamp-2 flex-1 min-w-0">{p.name}</h3>
-                                      <button onClick={() => setQuickInfoProduct(productInfo)} className="shrink-0 rounded-full border border-pink-200 bg-pink-50 text-pink-600 w-4 h-4 flex items-center justify-center text-[9px] font-black leading-none hover:bg-pink-100 transition-colors" title="Learn more">
-                                        ?
+                                <div className="rounded-[24px] border border-pink-100 bg-white/85 p-4 shadow-sm">
+                                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                      <h3 className="text-sm font-black uppercase tracking-[0.2em] text-[#D6006E]">Saved Order Snapshot</h3>
+                                      <p className="mt-1 text-xs font-bold text-slate-500">
+                                        {settings.paymentsOpen ? 'This is the order that will be used for payment.' : 'This is the saved order you are reviewing before payments open.'}
+                                      </p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                      <button onClick={() => setShowPreviewModal(true)} className="rounded-full border-2 border-pink-200 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-[#D6006E] shadow-sm hover:bg-pink-50">
+                                        Review Saved Order
                                       </button>
-                                    </div>
-
-                                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                                      <span className="bg-[#FF1493] text-white px-2 py-0.5 rounded-full text-[11px] font-black shadow-sm">${p.pricePerVialUSD.toFixed(2)} / vial</span>
-                                      {productInfo.strength && (
-                                        <span className="text-[10px] font-bold text-slate-500 uppercase">{productInfo.strength}</span>
+                                      {settings.paymentsOpen ? (
+                                        <button onClick={() => setShowPayModal(true)} className="rounded-full bg-[#008040] px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-md hover:scale-[0.98] transition-transform active:scale-95">
+                                          Pay Now
+                                        </button>
+                                      ) : (
+                                        <button
+                                          onClick={confirmBuyerReview}
+                                          disabled={currentReviewReady}
+                                          className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition-colors hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                          {currentReviewReady ? 'Already Marked' : 'Looks Good To Me'}
+                                        </button>
                                       )}
-                                    </div>
-
-                                    <div className="hidden sm:block text-[10px] font-bold text-slate-600 leading-snug truncate mt-1">{productInfo.shortDesc}</div>
-
-                                    <div className="flex items-center gap-2 mt-1 text-[8px] font-black uppercase tracking-widest">
-                                      <span className={`${p.statusKey === 'available' ? 'text-emerald-600' : p.statusKey === 'full' ? 'text-rose-500' : p.statusKey === 'locked' ? 'text-slate-400' : 'text-violet-500'}`}>
-                                        {compactStatusText}
-                                      </span>
-                                      <span className="text-pink-500">{protectedKits} kit</span>
-                                      <span className="text-pink-400">{looseVials} loose</span>
                                     </div>
                                   </div>
 
-                                  <div className={`flex flex-col items-end gap-1 ${p.isClosed ? 'opacity-40 pointer-events-none' : ''}`}>
-                                    <span className="text-[7px] font-black uppercase tracking-widest text-slate-400">Vials</span>
-                                    <label className="bg-slate-50 border border-pink-100 rounded-lg px-1.5 py-1 flex items-center justify-end shadow-inner w-full">
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        value={cartInputDrafts[p.name] ?? (cart.v || '')}
-                                        onFocus={e => handleCartFocus(p.name, e)}
-                                        onChange={e => handleCartChange(p.name, e.target.value)}
-                                        onBlur={() => handleCartBlur(p.name)}
-                                        className={`w-full text-right font-black text-[16px] outline-none bg-transparent placeholder:text-pink-200 ${shakingProd === p.name ? 'text-red-600' : 'text-[#D6006E]'}`}
-                                        placeholder="0"
-                                        disabled={p.isClosed}
-                                      />
-                                    </label>
-                                    <span className="text-[7px] font-bold text-slate-400 whitespace-nowrap">10 = 1 kit</span>
+                                  <div className="mt-4 grid gap-2">
+                                    {cartList.map((item, idx) => (
+                                      <div key={`${item.product}-${idx}`} className="flex items-center justify-between gap-3 rounded-[18px] border border-pink-50 bg-[#FFF8FC] px-3 py-2.5">
+                                        <div className="min-w-0">
+                                          <p className="truncate text-sm font-black text-[#4A042A]">{item.product}</p>
+                                          <p className="mt-1 text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">x{item.qty} locked in</p>
+                                        </div>
+                                        <div className="shrink-0 text-right">
+                                          <p className="text-sm font-black text-[#D6006E]">${item.total.toFixed(2)}</p>
+                                          <p className="mt-1 text-[10px] font-bold text-slate-400">${item.price.toFixed(2)} / vial</p>
+                                        </div>
+                                      </div>
+                                    ))}
                                   </div>
                                 </div>
                               </div>
-                            );
-                          })}
-                        </div>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="sticky top-0 z-30 px-3 py-1.5 sm:p-5 border-b border-white/60 flex flex-col sm:flex-row justify-between items-center gap-1.5 sm:gap-4 bg-white/45 backdrop-blur-2xl rounded-t-[30px] shadow-sm">
+                            <div className={`w-full sm:w-auto transition-all duration-300 ${isScrolled ? 'hidden sm:block' : 'block'}`}>
+                              <h2 className="font-black text-[#D6006E] uppercase tracking-widest text-sm sm:text-base flex items-center gap-2 whitespace-nowrap">
+                                <Package size={22} className="text-[#FF1493]" /> Shop Catalog
+                              </h2>
+                              <p className="text-[10px] sm:text-xs font-bold text-slate-400 mt-1">
+                                {liveResultsLabel} shown, {selectedVialCount} vials selected
+                              </p>
+                            </div>
+
+                            <div className="flex-1 w-full flex flex-col gap-1 sm:gap-2">
+                              <div className="flex gap-2 overflow-x-auto hide-scroll pb-1 pl-[106px] sm:pl-0">
+                                {POPULAR_CATEGORIES.map(cat => (
+                                  <button
+                                    key={cat}
+                                    onClick={() => setSelectedCategory(cat)}
+                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest whitespace-nowrap transition-colors border shadow-sm ${selectedCategory === cat ? 'bg-[#D6006E] text-white border-[#D6006E]' : 'bg-white text-slate-500 border-pink-100 hover:border-pink-300 hover:text-pink-600'}`}
+                                  >
+                                    {cat}
+                                  </button>
+                                ))}
+                              </div>
+                              <div className="relative w-full">
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-400" size={18} />
+                                <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search products..." className="w-full pl-11 pr-4 py-1.5 sm:py-3 rounded-xl sm:rounded-2xl text-sm sm:text-base font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-[#FFF0F5] placeholder:text-pink-300 text-[#4A042A] shadow-inner" />
+                              </div>
+                              {(searchQuery || selectedCategory !== 'All') && (
+                                <div className="flex items-center justify-between gap-3 px-1">
+                                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                    Viewing {liveResultsLabel}
+                                  </p>
+                                  <button onClick={() => { setSearchQuery(''); setSelectedCategory('All'); }} className="text-[10px] font-black text-[#D6006E] uppercase tracking-widest hover:underline">
+                                    Clear Filters
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {isReviewStageOpen && (
+                            <div className="mx-2 mt-2 rounded-[22px] border border-sky-200 bg-sky-50 px-4 py-3 text-left shadow-sm sm:mx-3 sm:mt-3">
+                              <div className="flex items-start gap-3">
+                                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-sky-600 shadow-inner">
+                                  <ClipboardList size={15} />
+                                </div>
+                                <div>
+                                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-sky-700">Reference only</p>
+                                  <p className="mt-1.5 text-xs font-black leading-relaxed text-sky-900">
+                                    Catalog stays visible during review so buyers can compare products and prices, but quantities are locked until payments open.
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {products.length === 0 ? (
+                            <div className="p-12 text-center text-pink-400 font-bold italic">No products available yet.</div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-3 p-2 sm:p-3 bg-white/10 rounded-b-[30px]">
+                              {filteredShopProducts.map(p => {
+                                const cart = cartItems[p.name] || { v: 0 };
+                                const active = cart.v > 0;
+                                const exist = existingMap[p.name] || 0;
+                                const productInfo = buildProductInfo(p.name);
+                                const productImage = getProductImageSrc(productInfo);
+                                const productImageSrc = getRealProductImageSrc(p.name, p.imageUrl || '');
+                                const protectedKits = Math.floor((cart.v || 0) / 10);
+                                const looseVials = (cart.v || 0) % 10;
+                                const compactStatusText = p.statusKey === 'locked'
+                                  ? 'locked'
+                                  : p.statusKey === 'full'
+                                    ? 'full'
+                                    : p.totalVials === 0
+                                      ? 'new'
+                                      : p.slotsLeft === 0
+                                        ? 'open'
+                                        : `${p.slotsLeft} left`;
+
+                                const bgClass = shakingProd === p.name ? 'animate-shake border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)] z-20 bg-red-50'
+                                  : (active ? 'bg-[#FFF0F5] border-[#D6006E] shadow-md scale-[1.01] z-10'
+                                    : (exist > 0 ? 'bg-[#F0FDF4] border-[#4ADE80] shadow-sm'
+                                      : 'bg-white border-[#FFE4E1] hover:border-pink-300'));
+
+                                return (
+                                  <div
+                                    key={p.id}
+                                    data-name={p.name}
+                                    onClick={!isCartEditable ? () => showToast(isReviewStageOpen ? 'Review stage is live. Buyers cannot change quantities right now.' : 'This order is locked right now.', 5000) : (p.isClosed ? () => showToast(getAvailabilityMessage(p.name, p), 6000) : undefined)}
+                                    className={`relative p-2 sm:p-2.5 rounded-2xl border-2 transition-all duration-300 overflow-hidden ${bgClass} ${(!isCartEditable || p.isClosed) ? 'cursor-not-allowed' : ''}`}
+                                  >
+
+                                    {exist > 0 && (
+                                      <div className="bg-[#22C55E] text-white text-[9px] font-black uppercase px-2.5 py-1 -mx-2.5 sm:-mx-3 -mt-2.5 sm:-mt-3 mb-2 flex justify-between items-center shadow-sm">
+                                        <span className="flex items-center gap-1">{active && cart.v !== exist ? 'You Have' : 'In Your Order'}</span>
+                                        <div className="flex items-center gap-1">
+                                          <span className="bg-white/25 px-2 py-0.5 rounded-md">{exist} Vials</span>
+                                          {active && cart.v !== exist && (
+                                            <span className="bg-[#FFE066] text-[#7A4B00] px-2 py-0.5 rounded-md">Now {cart.v}</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    <div className="grid grid-cols-[40px_1fr_62px] gap-2 items-center">
+                                      <img src={productImageSrc} alt={`${p.name} vial`} onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = productImage; }} className="w-[40px] h-[52px] shrink-0 rounded-lg border border-pink-100 bg-white object-cover shadow-sm" />
+
+                                      <div className={`min-w-0 ${(!isCartEditable || p.isClosed) ? 'opacity-40 pointer-events-none' : ''}`}>
+                                        <div className="flex items-start gap-1 min-w-0">
+                                          <h3 className="font-black text-[16px] sm:text-[17px] text-[#4A042A] leading-[1.05] line-clamp-2 flex-1 min-w-0">{p.name}</h3>
+                                          <button onClick={() => setQuickInfoProduct(productInfo)} className="shrink-0 rounded-full border border-pink-200 bg-pink-50 text-pink-600 w-4 h-4 flex items-center justify-center text-[9px] font-black leading-none hover:bg-pink-100 transition-colors" title="Learn more">
+                                            ?
+                                          </button>
+                                        </div>
+
+                                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                          <span className="bg-[#FF1493] text-white px-2 py-0.5 rounded-full text-[11px] font-black shadow-sm">${p.pricePerVialUSD.toFixed(2)} / vial</span>
+                                          {productInfo.strength && (
+                                            <span className="text-[10px] font-bold text-slate-500 uppercase">{productInfo.strength}</span>
+                                          )}
+                                        </div>
+
+                                        <div className="hidden sm:block text-[10px] font-bold text-slate-600 leading-snug truncate mt-1">{productInfo.shortDesc}</div>
+
+                                        <div className="flex items-center gap-2 mt-1 text-[8px] font-black uppercase tracking-widest">
+                                          <span className={`${p.statusKey === 'available' ? 'text-emerald-600' : p.statusKey === 'full' ? 'text-rose-500' : p.statusKey === 'locked' ? 'text-slate-400' : 'text-violet-500'}`}>
+                                            {compactStatusText}
+                                          </span>
+                                          <span className="text-pink-500">{protectedKits} kit</span>
+                                          <span className="text-pink-400">{looseVials} loose</span>
+                                        </div>
+                                      </div>
+
+                                      <div className={`flex flex-col items-end gap-1 ${(!isCartEditable || p.isClosed) ? 'opacity-40 pointer-events-none' : ''}`}>
+                                        <span className="text-[7px] font-black uppercase tracking-widest text-slate-400">Vials</span>
+                                        <label className="bg-slate-50 border border-pink-100 rounded-lg px-1.5 py-1 flex items-center justify-end shadow-inner w-full">
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            value={cartInputDrafts[p.name] ?? (cart.v || '')}
+                                            onFocus={e => handleCartFocus(p.name, e)}
+                                            onChange={e => handleCartChange(p.name, e.target.value)}
+                                            onBlur={() => handleCartBlur(p.name)}
+                                            className={`w-full text-right font-black text-[16px] outline-none bg-transparent placeholder:text-pink-200 ${shakingProd === p.name ? 'text-red-600' : 'text-[#D6006E]'}`}
+                                            placeholder="0"
+                                            disabled={!isCartEditable || p.isClosed}
+                                          />
+                                        </label>
+                                        <span className="text-[7px] font-bold text-slate-400 whitespace-nowrap">10 = 1 kit</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -4703,9 +5586,15 @@ export default function App() {
                       <div className="flex flex-col gap-2 mt-6">
                         <button onClick={() => setShowPreviewModal(true)} disabled={cartList.length === 0} className="w-full bg-white text-[#D6006E] border-2 border-pink-200 font-bold py-4 rounded-full uppercase tracking-widest text-sm shadow-sm hover:bg-pink-50 disabled:opacity-50 transition-transform hover:scale-[0.98] active:scale-95">Review</button>
                         {!settings.paymentsOpen ? (
+                          isReviewStageOpen ? (
+                            <div className="rounded-[22px] border border-sky-200 bg-sky-50 px-4 py-3 text-center text-[10px] font-black uppercase tracking-widest text-sky-700">
+                              Buyer edits paused during review
+                            </div>
+                          ) : (
                           <button onClick={submitOrder} disabled={isBtnLoading} className={`${originalBtn} w-full py-4`}>
                             {isBtnLoading ? "Saving..." : "Save Order"}
                           </button>
+                          )
                         ) : (
                           <button onClick={() => setShowPayModal(true)} disabled={cartList.length === 0} className="w-full bg-[#008040] text-white font-bold py-4 rounded-full uppercase tracking-widest text-sm shadow-md hover:scale-[0.98] transition-transform active:scale-95 disabled:opacity-50">Pay Now</button>
                         )}
@@ -4718,7 +5607,7 @@ export default function App() {
           </div>
 
           {/* Sticky Mobile Footer ONLY when Store is Open */}
-          {settings.storeOpen !== false && (
+          {settings.storeOpen !== false && !showShopAccessGate && (
             <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t-2 border-[#FF1493] p-4 rounded-t-3xl shadow-[0_-10px_20px_rgba(0,0,0,0.1)] z-50 flex justify-between items-center gap-2">
               <div className="shrink-0">
                 <div className="text-[10px] font-black text-[#D6006E] uppercase">Total Estimate</div>
@@ -4730,6 +5619,10 @@ export default function App() {
 
                 {settings.paymentsOpen ? (
                   <button onClick={() => setShowPayModal(true)} disabled={cartList.length === 0} className="bg-[#008040] text-white px-4 sm:px-6 py-2 sm:py-3 rounded-full font-bold uppercase text-[10px] sm:text-sm shadow-md disabled:opacity-50 whitespace-nowrap active:scale-95 transition-transform">Pay Now</button>
+                ) : isReviewStageOpen ? (
+                  <button disabled className="bg-sky-100 text-sky-700 px-4 sm:px-6 py-2 sm:py-3 rounded-full font-black uppercase text-[10px] sm:text-sm shadow-md opacity-70 whitespace-nowrap">
+                    Review Freeze
+                  </button>
                 ) : (
                   <button onClick={submitOrder} disabled={isBtnLoading} className="bg-[#D6006E] text-white px-4 sm:px-6 py-2 sm:py-3 rounded-full font-black uppercase text-[10px] sm:text-sm shadow-md disabled:opacity-50 whitespace-nowrap active:scale-95 transition-transform">
                     {isBtnLoading ? 'Saving' : 'Save'}
@@ -4783,10 +5676,19 @@ export default function App() {
                   </div>
 
                   <div className="space-y-2.5">
-                    <select value={addressForm.shipOpt} onChange={e => setAddressForm({ ...addressForm, shipOpt: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none transition-all ${addressErrors.shipOpt ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200 focus:border-[#D6006E]'}`}>
-                      <option value="" disabled>Select Courier...</option>
-                      {settings.shippingOptions.map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <select value={addressForm.shipOpt} onChange={e => setAddressForm({ ...addressForm, shipOpt: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-xs sm:text-sm font-bold text-[#4A042A] outline-none transition-all ${addressErrors.shipOpt ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200 focus:border-[#D6006E]'}`}>
+                        <option value="" disabled>Select Courier...</option>
+                        {settings.shippingOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                      <select value={addressForm.partialShipPref} onChange={e => setAddressForm({ ...addressForm, partialShipPref: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-xs sm:text-sm font-bold text-[#4A042A] outline-none transition-all ${addressErrors.partialShipPref ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200 focus:border-[#D6006E]'}`}>
+                        <option value="" disabled>If may maunang dumating...</option>
+                        {PARTIAL_SHIP_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                    </div>
+                    <p className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-[11px] font-bold leading-relaxed text-amber-700">
+                      Minsan hiwa-hiwalay dumadating ang kits. Pili ka dito kung gusto mo i-ship agad yung ready na, or okay lang sayo maghintay hanggang kumpleto lahat.
+                    </p>
                     <div className="grid grid-cols-2 gap-2.5">
                       <input type="text" value={addressForm.street} onChange={e => setAddressForm({ ...addressForm, street: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 transition-all ${addressErrors.street ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Street / Lot / Bldg *" />
                       <input type="text" value={addressForm.brgy} onChange={e => setAddressForm({ ...addressForm, brgy: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 sm:col-span-1 transition-all ${addressErrors.brgy ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Barangay *" />
@@ -4831,7 +5733,13 @@ export default function App() {
                 <div className="bg-[#FFF0F5] p-5 flex justify-between items-center border-b-2 border-[#FFC0CB]">
                   <div>
                     <h2 className="brand-title text-2xl text-pink-600">Order Confirmation</h2>
-                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-pink-400 mt-1">Adjust quantities before you save</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-pink-400 mt-1">
+                      {settings.paymentsOpen
+                        ? 'Check your saved order before payment'
+                        : isReviewStageOpen
+                          ? 'Review your saved order before payments open'
+                          : 'Adjust quantities before you save'}
+                    </p>
                   </div>
                   <button onClick={() => setShowPreviewModal(false)} className="text-pink-600 font-black text-2xl hover:scale-110 transition-transform">&times;</button>
                 </div>
@@ -4889,16 +5797,22 @@ export default function App() {
                   </div>
                   <div className="flex flex-col gap-2">
                     {!settings.paymentsOpen ? (
+                      isReviewStageOpen ? (
+                        <div className="w-full rounded-full border-2 border-sky-200 bg-sky-50 py-3 text-center text-sm font-black uppercase tracking-widest text-sky-700">
+                          Review Only - Edits Paused
+                        </div>
+                      ) : (
                       <button onClick={submitOrder} disabled={isBtnLoading} className={originalBtn + " w-full"}>
                         {isBtnLoading ? 'Saving...' : 'Save Order'}
                       </button>
+                      )
                     ) : (
                       <button onClick={() => { setShowPreviewModal(false); setShowPayModal(true); }} disabled={cartList.length === 0} className="w-full bg-[#008040] text-white font-bold py-3 rounded-full uppercase tracking-widest text-sm shadow-md disabled:opacity-50">
                         Pay Now
                       </button>
                     )}
                     <button onClick={() => setShowPreviewModal(false)} className="w-full rounded-full border-2 border-pink-200 bg-white py-3 text-sm font-black uppercase tracking-widest text-[#D6006E] hover:bg-pink-50">
-                      Continue Shopping
+                      {settings.paymentsOpen ? 'Close Review' : isReviewStageOpen ? 'Back to Review' : 'Continue Shopping'}
                     </button>
                   </div>
                 </div>
@@ -4972,43 +5886,53 @@ export default function App() {
                           const myExistingQty = existingOrderData.items[group.prod] || 0;
                           const canDecrease = isCartEditable && (!settings.addOnly ? myCurrentQty > 0 : myCurrentQty > myExistingQty);
                           const canIncrease = isCartEditable;
+                          const pricePerVialUSD = Number(products.find(p => p.name === group.prod)?.pricePerVialUSD || 0);
                           return (
                             <details key={group.key} className={`rounded-lg border px-2.5 py-1.5 shadow-sm ${group.myRisk ? 'bg-rose-100 border-rose-400' : 'bg-white border-rose-100'}`}>
                               <summary className="list-none cursor-pointer">
-                                <div className="flex items-center gap-1.5 text-[11px] sm:text-[12px] font-black text-[#4A042A]">
-                                  <span className="truncate flex-1 min-w-0">{group.prod}</span>
-                                  <span className="text-slate-300">|</span>
-                                  <span className="shrink-0 text-rose-500">B{group.boxNum}</span>
-                                  <span className="text-slate-300">|</span>
-                                  <span className="shrink-0">need {group.missingSlots}</span>
-                                  {group.myRisk && (
-                                    <>
-                                      <span className="text-slate-300">|</span>
-                                      <span className="shrink-0 text-rose-500">yours</span>
-                                    </>
-                                  )}
-                                  <span className="text-slate-300">|</span>
-                                  <span className="shrink-0">qty {myCurrentQty}</span>
-                                  <span className="text-slate-300">|</span>
-                                  <button
-                                    onClick={(e) => { e.preventDefault(); adjustCartItem(group.prod, -1); }}
-                                    disabled={!canDecrease}
-                                    className="h-7 min-w-7 rounded-md border border-pink-200 bg-white px-1.5 text-[12px] font-black text-[#D6006E] transition-colors hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-40"
-                                  >
-                                    -
-                                  </button>
-                                  <button
-                                    onClick={(e) => { e.preventDefault(); adjustCartItem(group.prod, 1); }}
-                                    disabled={!canIncrease}
-                                    className="h-7 min-w-7 rounded-md bg-[#FF1493] px-1.5 text-[12px] font-black text-white transition-colors hover:bg-[#D6006E] disabled:cursor-not-allowed disabled:opacity-40"
-                                  >
-                                    +
-                                  </button>
-                                  <span className="text-slate-300">|</span>
-                                  <span className="shrink-0 text-slate-500">buyers {group.rows.length}</span>
+                                <div className="min-w-0 text-[#4A042A]">
+                                  <div className="min-w-0">
+                                    <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[12px] font-black">
+                                      <span className="min-w-0 flex-1 truncate">{group.prod}</span>
+                                      <span className="shrink-0 rounded-full border border-pink-200 bg-pink-50 px-2 py-0.5 text-[9px] uppercase tracking-widest text-[#D6006E]">
+                                        ${pricePerVialUSD.toFixed(2)} / vial • you {myCurrentQty}
+                                      </span>
+                                      {group.myRisk && (
+                                        <span className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[9px] uppercase tracking-widest text-rose-600">
+                                          yours at risk
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="mt-1 flex items-center gap-1 overflow-x-auto hide-scroll whitespace-nowrap text-[10px] font-black uppercase tracking-widest">
+                                    <span className="rounded-full border border-pink-200 bg-white px-2 py-1 text-rose-500">B{group.boxNum}</span>
+                                    <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700">Need {group.missingSlots}</span>
+                                    <span className="rounded-full border border-slate-200 bg-white px-2 py-1 text-slate-500">Buyers {group.rows.length}</span>
+                                    <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-sky-700">Saved {myExistingQty}</span>
+                                    <div className="ml-auto flex items-center gap-1 pl-1">
+                                      <button
+                                        onClick={(e) => { e.preventDefault(); adjustCartItem(group.prod, -1); }}
+                                        disabled={!canDecrease}
+                                        className="h-7 min-w-7 rounded-full border border-pink-200 bg-white px-1.5 text-[12px] font-black text-[#D6006E] transition-colors hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                      >
+                                        -
+                                      </button>
+                                      <button
+                                        onClick={(e) => { e.preventDefault(); confirmHitListIncrease(group.prod, 1, { missingSlots: group.missingSlots, boxNum: group.boxNum }); }}
+                                        disabled={!canIncrease}
+                                        className="h-7 min-w-7 rounded-full bg-[#FF1493] px-1.5 text-[12px] font-black text-white transition-colors hover:bg-[#D6006E] disabled:cursor-not-allowed disabled:opacity-40"
+                                      >
+                                        Add
+                                      </button>
+                                    </div>
+                                  </div>
                                 </div>
                               </summary>
-                                <div className="mt-1.5 border-t border-rose-100 pt-1.5 space-y-1">
+                                <div className="mt-1.5 border-t border-rose-100 pt-1.5 space-y-1.5">
+                                  <p className="text-[10px] font-bold leading-relaxed text-slate-500">
+                                    If this box does not fill, the loose vials below may be cut. Try filling the box first. Admins should message buyers before removing loose vials.
+                                  </p>
                                   {group.rows.map((row) => {
                                     const isMyItem = row.email === userEmailTrimmed;
                                     return (
@@ -5018,7 +5942,7 @@ export default function App() {
                                         {isMyItem ? ' | yours' : ''}
                                       </div>
                                       <div className="shrink-0 font-black text-slate-500">
-                                        lose {row.amountToRemove}
+                                        at risk {row.amountToRemove}
                                       </div>
                                     </div>
                                   );
@@ -5037,10 +5961,10 @@ export default function App() {
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         onClick={submitOrder}
-                        disabled={isBtnLoading || !isHitListSaveReady}
+                        disabled={isBtnLoading || !isHitListSaveReady || !isCartEditable}
                         className={`${originalBtn} w-full py-3 text-sm disabled:opacity-50 disabled:cursor-not-allowed`}
                       >
-                        {isBtnLoading ? 'Saving...' : 'Save Changes'}
+                        {isReviewStageOpen ? 'Review Freeze' : isBtnLoading ? 'Saving...' : 'Save Changes'}
                       </button>
                       <button onClick={() => setShowHitListModal(false)} className="w-full py-3 text-sm rounded-full border-2 border-pink-200 bg-white text-[#D6006E] font-bold uppercase tracking-widest shadow-sm hover:bg-pink-50 transition-colors">
                         Close
@@ -5051,6 +5975,123 @@ export default function App() {
               </div>
             );
           })()}
+
+          {pendingHitListAdd && (
+            <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[120] flex items-center justify-center p-4">
+              <div className="w-full max-w-sm rounded-[28px] border-2 border-pink-200 bg-white p-5 shadow-2xl">
+                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#D6006E]">Add More From Hit List</p>
+                <h3 className="mt-2 text-xl font-black leading-tight text-[#4A042A]">{pendingHitListAdd.productName}</h3>
+                <div className="mt-4 space-y-2 rounded-[22px] border border-pink-100 bg-[#FFF7FA] p-4 text-sm font-bold text-[#7B1B53]">
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Price per vial • your qty now</span>
+                    <span>${pendingHitListAdd.pricePerVialUSD.toFixed(2)} • {pendingHitListAdd.currentQty}</span>
+                  </div>
+                  {pendingHitListAdd.missingSlots > 0 && (
+                    <div className="flex items-center justify-between gap-3">
+                      <span>{pendingHitListAdd.boxNum ? `Box ${pendingHitListAdd.boxNum}` : 'Current box'} still needs</span>
+                      <span>{pendingHitListAdd.missingSlots} vial{pendingHitListAdd.missingSlots === 1 ? '' : 's'}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Add this many</span>
+                    <div className="flex items-center gap-1 rounded-full border border-pink-200 bg-white px-1 py-1">
+                      <button
+                        onClick={() => setPendingHitListAdd(prev => {
+                          const addQty = Math.max(1, (prev?.addQty || 1) - 1);
+                          const nextQty = (prev?.currentQty || 0) + addQty;
+                          const nextSubtotalUSD = (prev?.baseSubtotalUSD || 0) + ((prev?.pricePerVialUSD || 0) * addQty);
+                          return {
+                            ...prev,
+                            addQty,
+                            nextQty,
+                            nextTotalPHP: lockedPaymentSnapshot?.totalPHP ?? ((nextSubtotalUSD > 0 && settings.fxRate > 0 ? nextSubtotalUSD + (settings.adminFeePhp / settings.fxRate) : 0) * settings.fxRate)
+                          };
+                        })}
+                        className="h-8 w-8 rounded-full border border-pink-200 bg-white text-sm font-black text-[#D6006E] hover:bg-pink-50"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min="1"
+                        value={pendingHitListAdd.addQty}
+                        onChange={(e) => {
+                          const addQty = Math.max(1, parseInt(e.target.value, 10) || 1);
+                          const nextQty = pendingHitListAdd.currentQty + addQty;
+                          const nextSubtotalUSD = pendingHitListAdd.baseSubtotalUSD + (pendingHitListAdd.pricePerVialUSD * addQty);
+                          setPendingHitListAdd(prev => ({
+                            ...prev,
+                            addQty,
+                            nextQty,
+                            nextTotalPHP: lockedPaymentSnapshot?.totalPHP ?? ((nextSubtotalUSD > 0 && settings.fxRate > 0 ? nextSubtotalUSD + (settings.adminFeePhp / settings.fxRate) : 0) * settings.fxRate)
+                          }));
+                        }}
+                        className="w-14 bg-transparent text-center text-sm font-black text-[#D6006E] outline-none"
+                      />
+                      <button
+                        onClick={() => setPendingHitListAdd(prev => {
+                          const addQty = Math.max(1, (prev?.addQty || 1) + 1);
+                          const nextQty = (prev?.currentQty || 0) + addQty;
+                          const nextSubtotalUSD = (prev?.baseSubtotalUSD || 0) + ((prev?.pricePerVialUSD || 0) * addQty);
+                          return {
+                            ...prev,
+                            addQty,
+                            nextQty,
+                            nextTotalPHP: lockedPaymentSnapshot?.totalPHP ?? ((nextSubtotalUSD > 0 && settings.fxRate > 0 ? nextSubtotalUSD + (settings.adminFeePhp / settings.fxRate) : 0) * settings.fxRate)
+                          };
+                        })}
+                        className="h-8 w-8 rounded-full border border-pink-200 bg-white text-sm font-black text-[#D6006E] hover:bg-pink-50"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Your qty after this</span>
+                    <span>{pendingHitListAdd.nextQty}</span>
+                  </div>
+                  {pendingHitListAdd.missingSlots > 0 && (
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Needed left after this</span>
+                      <span>
+                        {Math.max(0, pendingHitListAdd.missingSlots - pendingHitListAdd.addQty)}
+                        {pendingHitListAdd.addQty > pendingHitListAdd.missingSlots ? ` • +${pendingHitListAdd.addQty - pendingHitListAdd.missingSlots} extra` : ''}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Estimated total</span>
+                    <span>₱{pendingHitListAdd.nextTotalPHP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+                <p className="mt-3 text-xs font-bold leading-relaxed text-slate-500">
+                  Pick how many vials you want to add, then save the updated total in one step.
+                </p>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      setCartItems(prev => ({ ...prev, [pendingHitListAdd.productName]: { v: pendingHitListAdd.nextQty } }));
+                      setCartInputDrafts(prev => {
+                        const updated = { ...prev };
+                        delete updated[pendingHitListAdd.productName];
+                        return updated;
+                      });
+                      setPendingHitListAdd(null);
+                    }}
+                    className={`${originalBtn} w-full justify-center py-3 text-sm`}
+                  >
+                    Add To Cart
+                  </button>
+                  <button
+                    onClick={() => setPendingHitListAdd(null)}
+                    className="w-full rounded-full border-2 border-pink-200 bg-white py-3 text-sm font-black uppercase tracking-widest text-[#D6006E] hover:bg-pink-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {showCalculatorModal && (
             <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[390] flex items-center justify-center p-4">
@@ -5429,7 +6470,8 @@ export default function App() {
                   { id: 'payments', icon: <BadgeDollarSign size={18} />, label: 'Payments' },
                   { id: 'audit', icon: <AlertTriangle size={18} />, label: 'Audit' },
                   { id: 'packing', icon: <ClipboardList size={18} />, label: 'Packing Guide' },
-                  { id: 'trimming', icon: <Scissors size={18} />, label: 'Hit List' }
+                  { id: 'trimming', icon: <Scissors size={18} />, label: 'Hit List' },
+                  { id: 'safety', icon: <RotateCcw size={18} />, label: 'Admin Safety' }
                 ].map(t => (
                   <button key={t.id} onClick={() => setAdminTab(t.id)} className={`nav-item w-full flex items-center gap-3 px-4 py-3 font-black text-xs uppercase tracking-widest transition-all ${adminTab === t.id ? 'active shadow-lg' : 'text-pink-300/60 hover:text-white'}`}>
                     {t.icon} {t.label}
@@ -5481,6 +6523,7 @@ export default function App() {
                   <option value="audit">Audit</option>
                   <option value="packing">Packing</option>
                   <option value="trimming">Hit List</option>
+                  <option value="safety">Admin Safety</option>
                   <option value="customers">Customers DB</option>
                   <option value="logs">Activity Logs</option>
                   <option value="settings-core">Settings</option>
@@ -5767,6 +6810,7 @@ export default function App() {
                               {renderSortableHeader('Order Items', 'items', activeOrdersTableSort, setActiveOrdersTableSort)}
                               {renderSortableHeader('Status', 'status', activeOrdersTableSort, setActiveOrdersTableSort)}
                               {renderSortableHeader('Assigned Admin', 'admin', activeOrdersTableSort, setActiveOrdersTableSort)}
+                              <th>Notes</th>
                               {renderSortableHeader('Total PHP', 'totalPHP', activeOrdersTableSort, setActiveOrdersTableSort, 'text-center')}
                               <th className="text-center">Actions</th>
                             </tr>
@@ -5808,6 +6852,20 @@ export default function App() {
                                           Proof Sent
                                         </span>
                                       )}
+                                      {settings.reviewStageOpen && (
+                                        <span className={`rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-widest ${
+                                          c.buyerReviewConfirmedAt
+                                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                            : 'border-sky-200 bg-sky-50 text-sky-700'
+                                        }`}>
+                                          {c.buyerReviewConfirmedAt ? 'Buyer Confirmed' : 'Needs Buyer Check'}
+                                        </span>
+                                      )}
+                                      {settings.reviewStageOpen && c.buyerReviewConfirmedAt && (
+                                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-emerald-700">
+                                          Looks Good
+                                        </span>
+                                      )}
                                     </div>
                                     <p className="mt-1.5 text-[10px] font-bold text-slate-400">
                                       Updated {c.latestTimestamp ? new Date(c.latestTimestamp).toLocaleString() : 'No timestamp'}
@@ -5842,12 +6900,40 @@ export default function App() {
                                       {normalizedAdmins.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
                                     </select>
                                   </td>
+                                  <td className="py-3">
+                                    <div className="min-w-[220px] max-w-[280px] space-y-2">
+                                      <textarea
+                                        value={adminNoteDrafts[c.email] ?? c.adminNotes ?? ''}
+                                        onChange={(e) => setAdminNoteDrafts(prev => ({ ...prev, [c.email]: e.target.value }))}
+                                        rows={2}
+                                        className="w-full rounded-2xl border border-pink-100 bg-[#FFF9FC] px-3 py-2 text-xs font-bold text-[#4A042A] outline-none focus:border-[#D6006E]"
+                                        placeholder="Order note..."
+                                      />
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => saveAdminNote(c, adminNoteDrafts[c.email] ?? '')}
+                                          className="inline-flex items-center gap-1 rounded-full border border-pink-200 bg-pink-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-[#D6006E] transition-colors hover:border-pink-300"
+                                        >
+                                          <Save size={12} /> Save
+                                        </button>
+                                        {c.adminNotes && (
+                                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Saved</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </td>
                                   <td className="text-center py-3">
                                     <p className="font-black text-base text-pink-600">₱{c.totalPHP.toLocaleString()}</p>
                                     {!c.isPaid && <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-amber-600">Unpaid</p>}
                                   </td>
                                   <td className="text-center py-3">
                                     <div className="flex flex-col items-center justify-center gap-1.5">
+                                      {settings.reviewStageOpen && !settings.paymentsOpen && !c.isPaid && (
+                                        <p className="max-w-[170px] text-[9px] font-bold text-slate-400">
+                                          Buyer: {c.buyerReviewConfirmedAt ? new Date(c.buyerReviewConfirmedAt).toLocaleString() : 'Waiting'}
+                                        </p>
+                                      )}
                                       <button onClick={() => openAdminEditModal(c.email)} className="bg-indigo-50 text-indigo-600 border border-indigo-200 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-indigo-100 flex items-center gap-1 shadow-sm transition-colors">
                                         <Edit3 size={12} /> Edit Cart
                                       </button>
@@ -5855,15 +6941,7 @@ export default function App() {
                                         {confirmAction.type === 'deleteAllOrders' && confirmAction.id === c.email ? (
                                           <div className="flex gap-1 justify-center animate-fadeIn bg-rose-50 p-1 rounded-lg border border-rose-200">
                                             <button onClick={async () => {
-                                              setIsBtnLoading(true);
-                                              try {
-                                                const toDelete = orders.filter(o => o.email === c.email);
-                                                const batch = writeBatch(db);
-                                                toDelete.forEach(o => batch.delete(doc(db, colPath('orders'), o.id)));
-                                                await safeAwait(batch.commit());
-                                                showToast("Orders deleted.");
-                                              } catch (e) { console.error(e); }
-                                              setIsBtnLoading(false);
+                                              await deleteCustomerOrdersFromAdmin(c);
                                               setConfirmAction({ type: null, id: null });
                                             }} className="bg-rose-500 text-white px-2 py-1 rounded text-[9px] font-black hover:bg-rose-600">YES</button>
                                             <button onClick={() => setConfirmAction({ type: null, id: null })} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[9px] font-black hover:bg-slate-300">NO</button>
@@ -5877,7 +6955,7 @@ export default function App() {
                                 </tr>
                               );
                             })}
-                            {activeOrdersList.length === 0 && <tr><td colSpan="7" className="text-center p-8 text-pink-300 font-bold italic">No active orders found.</td></tr>}
+                            {activeOrdersList.length === 0 && <tr><td colSpan="8" className="text-center p-8 text-pink-300 font-bold italic">No active orders found.</td></tr>}
                           </tbody>
                         </table>
                       </div>
@@ -5888,7 +6966,17 @@ export default function App() {
                 {adminTab === 'logs' && (
                   <div className="space-y-6">
                     <div className="space-y-3">
-                      <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">System Activity Logs</h2>
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">System Activity Logs</h2>
+                        <button
+                          type="button"
+                          onClick={clearActivityLogs}
+                          disabled={isBtnLoading || !sortedLogs.length}
+                          className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-rose-700 shadow-sm transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Clear Activity Logs
+                        </button>
+                      </div>
                       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
                         {renderCompactAdminStat('Visible Logs', logsSummary.total, 'pink', 'Matches current search')}
                         {renderCompactAdminStat('Today', logsSummary.today, 'blue', 'Logged today')}
@@ -6011,9 +7099,14 @@ export default function App() {
                     <div className="space-y-3">
                       <div className="flex justify-between items-center gap-3 flex-wrap">
                         <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Loose Vial Hit List</h2>
-                        <button onClick={copyTrimListForDiscord} className="rounded-xl border border-pink-200 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-[#D6006E] shadow-sm transition-colors hover:bg-pink-50">
-                          Copy for Discord
-                        </button>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button onClick={copyTrimListForDiscord} className="rounded-xl border border-pink-200 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-[#D6006E] shadow-sm transition-colors hover:bg-pink-50">
+                            Copy for Discord
+                          </button>
+                          <button onClick={cutAllVisibleHitList} disabled={!sortedHitList.length} className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-rose-700 shadow-sm transition-colors hover:bg-rose-100 disabled:opacity-50 disabled:cursor-not-allowed">
+                            Cut All Visible
+                          </button>
+                        </div>
                       </div>
                       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
                         {renderCompactAdminStat('At-Risk Rows', hitListSummary.rows, 'rose', 'Visible after search')}
@@ -6031,8 +7124,18 @@ export default function App() {
                           <tbody className="divide-y divide-pink-50">
                             {sortedHitList.map((v, i) => (
                               <tr key={v.id}>
-                                <td className="font-bold">{v.prod}</td>
-                                <td className="text-[10px] font-black text-rose-500 uppercase">Box {v.boxNum} needs {v.missingSlots} more</td>
+                                <td className="font-bold">
+                                  <div>{v.prod}</div>
+                                  <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-pink-500">
+                                    ${Number(enrichedProducts.find(product => product.name === v.prod)?.pricePerVialUSD || 0).toFixed(2)} / vial
+                                  </div>
+                                </td>
+                                <td className="text-[10px] font-black text-rose-500 uppercase">
+                                  <div>Box {v.boxNum} needs {v.missingSlots} more</div>
+                                  <div className="mt-1 text-[9px] normal-case tracking-normal text-slate-500">
+                                    If this box does not fill, these loose vials may be cut.
+                                  </div>
+                                </td>
                                 <td>
                                   <button onClick={() => { setSelectedProfileEmail(v.email); setIsEditingAddress(false); }} className="font-bold text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">{v.handle || 'Guest'}</button>
                                   <p className="text-[10px] text-slate-400">{v.email}</p>
@@ -6054,6 +7157,155 @@ export default function App() {
                         </table>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {adminTab === 'safety' && (
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between gap-4 flex-wrap">
+                      <div>
+                        <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Admin Safety & Recovery</h2>
+                        <p className="mt-1 text-sm font-bold text-slate-500">Recycle bin, proof recovery, batch snapshots, and one-click undo for the latest risky admin actions.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setIsBtnLoading(true);
+                          try {
+                            await createBatchSnapshot('Manual admin snapshot', { action: 'manual-snapshot' });
+                            showToast('Batch snapshot saved.');
+                          } catch (error) {
+                            console.error(error);
+                            showToast('Could not save a batch snapshot.');
+                          }
+                          setIsBtnLoading(false);
+                        }}
+                        disabled={isBtnLoading}
+                        className="rounded-2xl border border-pink-200 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-[#D6006E] shadow-sm transition-colors hover:border-pink-300 disabled:opacity-50"
+                      >
+                        Save Snapshot Now
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+                      {renderCompactAdminStat('Undo Ready', safetySummary.undo, 'amber', 'Bulk cuts and bulk edits')}
+                      {renderCompactAdminStat('Recycle Bin', safetySummary.recycle, 'rose', 'Deleted orders and proof refs')}
+                      {renderCompactAdminStat('Snapshots', safetySummary.snapshots, 'blue', 'Saved before risky actions')}
+                      {renderCompactAdminStat('Proof Refs', safetySummary.proofs, 'violet', 'Can be restored')}
+                    </div>
+
+                    <section className="rounded-[24px] border-2 border-pink-50 bg-white p-4 shadow-sm space-y-4">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-pink-500">Undo Queue</p>
+                        <p className="mt-1 text-xs font-bold text-slate-500">Use this for recent bulk cuts or admin-side bulk edits that should roll back immediately.</p>
+                      </div>
+                      {availableUndoRecords.length === 0 ? (
+                        <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-4 text-sm font-black text-emerald-700">
+                          No undo actions are waiting right now.
+                        </div>
+                      ) : (
+                        <div className="grid gap-3 lg:grid-cols-2">
+                          {availableUndoRecords.map(record => (
+                            <div key={record.id} className="rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
+                              <p className="text-sm font-black text-[#4A042A]">{record.label}</p>
+                              <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-amber-700">{new Date(record.createdAt).toLocaleString()}</p>
+                              <p className="mt-2 text-xs font-bold text-slate-500">
+                                {(record.beforeOrders || []).length} order row{(record.beforeOrders || []).length === 1 ? '' : 's'} and {(record.beforeUsers || []).length} profile{(record.beforeUsers || []).length === 1 ? '' : 's'} saved.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => restoreSafetyRecord(record)}
+                                disabled={isBtnLoading}
+                                className="mt-3 inline-flex items-center gap-2 rounded-full border border-amber-200 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-amber-700 transition-colors hover:border-amber-300 disabled:opacity-50"
+                              >
+                                <RotateCcw size={13} /> Undo
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+
+                    <section className="rounded-[24px] border-2 border-pink-50 bg-white p-4 shadow-sm space-y-4">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-pink-500">Recycle Bin</p>
+                        <p className="mt-1 text-xs font-bold text-slate-500">Deleted orders and removed proof references land here first so they can be restored safely.</p>
+                      </div>
+                      {recycleBinRecords.length === 0 ? (
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-black text-slate-500">
+                          Nothing has been deleted yet in this batch.
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {recycleBinRecords.slice(0, 12).map(record => (
+                            <div key={record.id} className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+                              <div className="flex items-start justify-between gap-3 flex-wrap">
+                                <div>
+                                  <p className="text-sm font-black text-[#4A042A]">{record.label}</p>
+                                  <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                                    {new Date(record.createdAt).toLocaleString()} • {record.recycleType === 'proof' ? 'Proof Reference' : `${(record.ordersSnapshot || []).length} order row${(record.ordersSnapshot || []).length === 1 ? '' : 's'}`}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className={`rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-widest ${record.status === 'restored' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
+                                    {record.status === 'restored' ? 'Restored' : 'Available'}
+                                  </span>
+                                  {record.status !== 'restored' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => restoreSafetyRecord(record)}
+                                      disabled={isBtnLoading}
+                                      className="rounded-full border border-pink-200 bg-white px-3 py-1 text-[10px] font-black uppercase tracking-widest text-[#D6006E] transition-colors hover:border-pink-300 disabled:opacity-50"
+                                    >
+                                      Restore
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+
+                    <section className="rounded-[24px] border-2 border-pink-50 bg-white p-4 shadow-sm space-y-4">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-pink-500">Batch Snapshots</p>
+                        <p className="mt-1 text-xs font-bold text-slate-500">Automatic backups are created before major admin actions. Restore with care because it replaces the live batch.</p>
+                      </div>
+                      {snapshotRecords.length === 0 ? (
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-black text-slate-500">
+                          No snapshots saved yet.
+                        </div>
+                      ) : (
+                        <div className="grid gap-3 lg:grid-cols-2">
+                          {snapshotRecords.slice(0, 12).map(record => (
+                            <div key={record.id} className="rounded-2xl border border-sky-100 bg-sky-50/60 p-4">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-sm font-black text-[#4A042A]">{record.label}</p>
+                                  <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-sky-700">{new Date(record.createdAt).toLocaleString()}</p>
+                                </div>
+                                <span className={`rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-widest ${record.status === 'restored' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-sky-200 bg-white text-sky-700'}`}>
+                                  {record.status === 'restored' ? 'Restored' : 'Snapshot'}
+                                </span>
+                              </div>
+                              <p className="mt-2 text-xs font-bold text-slate-500">
+                                {(record.summary?.orders || 0)} orders, {(record.summary?.users || 0)} active profiles, {(record.summary?.products || 0)} products.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => restoreSafetyRecord(record)}
+                                disabled={isBtnLoading}
+                                className="mt-3 rounded-full border border-sky-200 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-sky-700 transition-colors hover:border-sky-300 disabled:opacity-50"
+                              >
+                                Restore Snapshot
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </section>
                   </div>
                 )}
 
@@ -6088,7 +7340,7 @@ export default function App() {
                                   <p className="text-[10px] text-slate-400">{u.id}</p>
                                   {u.handle && <p className="text-[10px] text-[#D6006E] font-bold">{u.handle}</p>}
                                 </td>
-                                <td className="text-[10px] text-slate-500">{u.address?.street ? `${u.address.street}, ${u.address.brgy ? u.address.brgy + ', ' : ''}${u.address.city} (${u.address.shipOpt})` : <span className="italic opacity-40">No address on file</span>}</td>
+                                <td className="text-[10px] text-slate-500">{u.address?.street ? `${u.address.street}, ${u.address.brgy ? u.address.brgy + ', ' : ''}${u.address.city} (${u.address.shipOpt})${getPartialShipPreferenceLabel(u.address?.partialShipPref) ? ` • ${getPartialShipPreferenceLabel(u.address?.partialShipPref)}` : ''}` : <span className="italic opacity-40">No address on file</span>}</td>
                                 <td className="text-center">
                                   <div className="flex items-center justify-center gap-2">
                                     {confirmAction.type === 'deleteCustomer' && confirmAction.id === u.id ? (
@@ -6129,6 +7381,18 @@ export default function App() {
                         )}
 
                         <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Batch Name</label><input type="text" className={lockedAdminInput} value={settings.batchName} onChange={e => updateSetting('batchName', e.target.value)} disabled={settings.paymentsOpen} /></div>
+                        <div>
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Discord Batch Code</label>
+                          <input
+                            type="text"
+                            className={lockedAdminInput}
+                            value={settings.shopAccessCode || ''}
+                            onChange={e => updateSetting('shopAccessCode', e.target.value)}
+                            placeholder="Leave blank to keep the shop public"
+                            disabled={settings.paymentsOpen}
+                          />
+                          <p className="mt-1 text-[10px] font-bold text-slate-400">If this is filled, buyers need the current Discord code before they can enter the shop.</p>
+                        </div>
 
                         <div className="grid grid-cols-2 gap-4">
                           <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Exchange Rate (1$ = ?)</label><input type="number" className={lockedAdminInput} value={settings.fxRate} onChange={e => updateSetting('fxRate', Number(e.target.value))} disabled={settings.paymentsOpen} /></div>
@@ -6172,6 +7436,25 @@ export default function App() {
                               panel: 'bg-rose-50 border-rose-200',
                               badge: 'bg-rose-100 text-rose-700',
                               track: 'border-rose-300 bg-rose-200'
+                            }
+                          })}
+
+                          {renderAdminToggle({
+                            label: 'Review Stage',
+                            description: 'Freezes buyer edits so everyone can double-check saved orders before payments.',
+                            active: settings.reviewStageOpen,
+                            activeText: 'Enabled',
+                            inactiveText: 'Disabled',
+                            onToggle: toggleReviewStageWindow,
+                            activeTone: {
+                              panel: 'bg-sky-50 border-sky-200',
+                              badge: 'bg-sky-100 text-sky-700',
+                              track: 'border-sky-400 bg-sky-500'
+                            },
+                            inactiveTone: {
+                              panel: 'bg-slate-50 border-slate-200',
+                              badge: 'bg-slate-100 text-slate-600',
+                              track: 'border-slate-300 bg-slate-200'
                             }
                           })}
 
@@ -6232,7 +7515,7 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="pt-4 border-t-2 border-pink-50">
+                      <div className="hidden lg:block pt-4 border-t-2 border-pink-50">
                         <button onClick={seedDemoData} disabled={isBtnLoading} className="w-full py-3 rounded-xl bg-slate-100 text-slate-600 font-black uppercase text-[10px] tracking-widest border border-slate-200 hover:bg-slate-200 transition-colors disabled:opacity-50">
                           {isBtnLoading ? "Seeding..." : "Seed Full Product List & Mock Orders"}
                         </button>
@@ -6531,7 +7814,13 @@ export default function App() {
                       </button>
                       <p className="text-[10px] font-black text-slate-800 truncate">{c.name}</p>
                       <p className="text-[9px] text-slate-400 truncate">{c.email}</p>
-                      <span className="mt-1 bg-emerald-50 text-emerald-600 border border-emerald-100 px-2 py-0.5 rounded text-[8px] font-black uppercase text-center">Paid</span>
+                      <span className="mt-1 bg-violet-50 text-violet-700 border border-violet-100 px-2 py-0.5 rounded text-[8px] font-black uppercase text-center">Proof On File</span>
+                      <button
+                        onClick={() => removeCustomerProof(c)}
+                        className="mt-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300"
+                      >
+                        Remove Proof
+                      </button>
                     </div>
                   ))
                 )}
@@ -6646,10 +7935,16 @@ export default function App() {
 
                     {isEditingAddress ? (
                       <div className="space-y-2 mt-2">
-                        <select value={editAddressForm.shipOpt} onChange={e => setEditAddressForm({ ...editAddressForm, shipOpt: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none">
-                          <option value="" disabled>Select Courier...</option>
-                          {settings.shippingOptions.map(o => <option key={o} value={o}>{o}</option>)}
-                        </select>
+                        <div className="grid grid-cols-2 gap-2">
+                          <select value={editAddressForm.shipOpt} onChange={e => setEditAddressForm({ ...editAddressForm, shipOpt: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none">
+                            <option value="" disabled>Select Courier...</option>
+                            {settings.shippingOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                          <select value={editAddressForm.partialShipPref} onChange={e => setEditAddressForm({ ...editAddressForm, partialShipPref: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none">
+                            <option value="" disabled>If may maunang dumating...</option>
+                            {PARTIAL_SHIP_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                          </select>
+                        </div>
                         <input type="text" value={editAddressForm.street} onChange={e => setEditAddressForm({ ...editAddressForm, street: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Street & Barangay" />
                         <div className="grid grid-cols-2 gap-2">
                           <input type="text" value={editAddressForm.city} onChange={e => setEditAddressForm({ ...editAddressForm, city: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="City" />
@@ -6669,6 +7964,7 @@ export default function App() {
                           {profile.address.brgy ? `${profile.address.brgy}, ` : ''}{profile.address.city}<br />
                           {profile.address.prov} {profile.address.zip}<br />
                           <span className="text-emerald-600 mt-1 inline-block">Courier: {profile.address.shipOpt}</span><br />
+                          {getPartialShipPreferenceLabel(profile.address.partialShipPref) ? <><span className="text-[#D6006E]">Shipping note: {getPartialShipPreferenceLabel(profile.address.partialShipPref)}</span><br /></> : null}
                           <span className="text-slate-500">Contact: {profile.address.contact}</span>
                         </p>
                       ) : <p className="text-xs text-slate-400 italic">No address on file</p>
