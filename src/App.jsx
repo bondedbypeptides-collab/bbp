@@ -1,16 +1,26 @@
-﻿﻿﻿﻿﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { initializeApp } from 'firebase/app';
+import { lazy, Suspense } from 'react';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, writeBatch } from 'firebase/firestore';
-import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import {
   ShieldCheck, Store, Settings, LayoutDashboard,
   BadgeDollarSign, Scissors, ClipboardList, Users,
   Lock, Package, Search, ArrowRight, CreditCard,
   Home, LogOut, Trash2, ChevronRight, BookOpen, Printer, ImageIcon,
-  Droplet, Repeat, ThermometerSnowflake, Sparkles, AlertTriangle, Calculator,
+  Sparkles, AlertTriangle, Calculator,
   MessageCircle, Send, ScrollText, Edit3, Trash, ShoppingCart, RotateCcw, Save
 } from 'lucide-react';
+import ShopWorkspaceMain from './components/ShopWorkspaceMain';
+
+const AdminOrderEditHost = lazy(() => import('./components/AdminOrderEditHost'));
+const ProfileViewerHost = lazy(() => import('./components/ProfileViewerHost'));
+const ProofModalHost = lazy(() => import('./components/ProofModalHost'));
+const ShopHitListHost = lazy(() => import('./components/ShopHitListHost'));
+const ShopChrome = lazy(() => import('./components/ShopChrome'));
+const ShopCheckoutHost = lazy(() => import('./components/ShopCheckoutHost'));
+const ShopDesktopCart = lazy(() => import('./components/ShopDesktopCart'));
+const ShopUtilityModalsHost = lazy(() => import('./components/ShopUtilityModalsHost'));
 
 // --- FIREBASE SETUP ---
 const userFirebaseConfig = {
@@ -29,9 +39,21 @@ const firebaseConfig = isCanvas ? JSON.parse(__firebase_config) : userFirebaseCo
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const storage = getStorage(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const colPath = (name) => isCanvas ? `artifacts/${appId}/public/data/${name}` : name;
+
+let storageServicesPromise;
+const getStorageServices = async () => {
+  if (!storageServicesPromise) {
+    storageServicesPromise = import('firebase/storage').then(({ getStorage, ref, uploadBytesResumable, getDownloadURL }) => ({
+      storage: getStorage(app),
+      storageRef: ref,
+      uploadBytesResumable,
+      getDownloadURL
+    }));
+  }
+  return storageServicesPromise;
+};
 
 const SLOTS_PER_BATCH = 10;
 const CHAT_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -70,17 +92,17 @@ const normalizePartialShipPreference = (value) => {
 };
 const getPartialShipPreferenceLabel = (value) => PARTIAL_SHIP_OPTIONS.find(option => option.value === normalizePartialShipPreference(value))?.label || '';
 
-// âœ¨ SUPERCHARGED KNOWLEDGE BASE
+// ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ SUPERCHARGED KNOWLEDGE BASE
 const WIKI_DATA = [
   { name: "5-amino-1mq", tags: ["Fat Loss", "Energy"], desc: "A small molecule that blocks the NNMT enzyme. Effectively reverses diet-induced obesity and enhances cellular energy metabolism without jitteriness.", dosage: "50mg to 150mg daily (Oral)", cycle: "4 to 8 weeks", storage: "Room Temperature / Refrigerate" },
   { name: "AA Water / Bacteriostatic Water", tags: ["Supplies", "Reconstitution"], desc: "Sterile water containing 0.9% benzyl alcohol. Essential for safely reconstituting and preserving lyophilized peptides.", dosage: "As required by peptide calculator", cycle: "Discard 28 days after first puncture", storage: "Room temperature (Dark place)" },
-  { name: "AHK-Cu", tags: ["Hair", "Skin"], desc: "A powerful copper peptide specifically favored for hair growth and combating alopecia by stimulating blood flow to hair follicles.", dosage: "200mg per 50ml serum (Topical)", cycle: "Daily", storage: "Refrigerate (2°C - 8°C)" },
+  { name: "AHK-Cu", tags: ["Hair", "Skin"], desc: "A powerful copper peptide specifically favored for hair growth and combating alopecia by stimulating blood flow to hair follicles.", dosage: "200mg per 50ml serum (Topical)", cycle: "Daily", storage: "Refrigerate (2\u00B0C - 8\u00B0C)" },
   { name: "AICAR", tags: ["Endurance", "Metabolism"], desc: "Activates AMPK pathways to dramatically increase endurance and fat burning, effectively simulating the metabolic effects of exercise.", dosage: "10mg to 20mg daily", cycle: "4 to 8 weeks", storage: "Refrigerate reconstituted vial" },
   { name: "AOD 9604", tags: ["Fat Loss"], desc: "Anti-Obesity Drug. A modified fragment of human growth hormone that specifically stimulates fat burning without affecting blood sugar or tissue growth.", dosage: "250mcg to 500mcg daily (Fasted)", cycle: "4 to 12 weeks", storage: "Refrigerate reconstituted vial" },
   { name: "ARA-290", tags: ["Neuropathy", "Pain", "Inflammation"], desc: "A powerful peptide that stimulates tissue repair, specifically targeting small fiber neuropathy and chronic neuropathic pain.", dosage: "4mg daily", cycle: "28 days", storage: "Refrigerate reconstituted vial" },
   { name: "BPC-157", tags: ["Healing", "Gut Health", "Recovery"], desc: "Body Protection Compound. Rapidly accelerates the healing of tendons, ligaments, muscles, and the nervous system. Highly protective of gastric organs.", dosage: "250mcg to 500mcg daily (1-2x per day)", cycle: "4 to 12 weeks", storage: "Refrigerate reconstituted vial" },
-  { name: "Cagri-Sema (Blend)", tags: ["Weight Loss", "Blend"], desc: "A highly potent synergistic blend of Cagrilintide and Semaglutide. Maximizes appetite suppression and heavily delays gastric emptying.", dosage: "0.25mg to 2.4mg weekly", cycle: "Ongoing / As needed", storage: "Refrigerate (2°C - 8°C)" },
-  { name: "Cagrilintide", tags: ["Weight Loss"], desc: "A long-acting amylin analog. Works synergistically with GLP-1s to significantly increase feelings of fullness and slow gastric emptying.", dosage: "0.25mg to 2.4mg weekly", cycle: "Ongoing / As needed", storage: "Refrigerate (2°C - 8°C)" },
+  { name: "Cagri-Sema (Blend)", tags: ["Weight Loss", "Blend"], desc: "A highly potent synergistic blend of Cagrilintide and Semaglutide. Maximizes appetite suppression and heavily delays gastric emptying.", dosage: "0.25mg to 2.4mg weekly", cycle: "Ongoing / As needed", storage: "Refrigerate (2\u00B0C - 8\u00B0C)" },
+  { name: "Cagrilintide", tags: ["Weight Loss"], desc: "A long-acting amylin analog. Works synergistically with GLP-1s to significantly increase feelings of fullness and slow gastric emptying.", dosage: "0.25mg to 2.4mg weekly", cycle: "Ongoing / As needed", storage: "Refrigerate (2\u00B0C - 8\u00B0C)" },
   { name: "Cerebrolysin", tags: ["Brain Health", "Nootropic"], desc: "A peptide blend that mimics neurotrophic factors. Used for cognitive enhancement, stroke recovery, and protecting against neurodegenerative diseases.", dosage: "5ml to 10ml daily (IM/IV)", cycle: "4 weeks", storage: "Room Temperature (Keep dark)" },
   { name: "CJC-1295 / Ipamorelin (Blend)", tags: ["Growth Hormone", "Blend", "Anti-Aging"], desc: "The ultimate synergistic GH stack. Blends a GHRH with a GHRP to pulse natural growth hormone without raising cortisol or prolactin.", dosage: "200mcg to 300mcg nightly", cycle: "8 to 12 weeks (5 days on, 2 days off)", storage: "Refrigerate reconstituted vial" },
   { name: "CJC-1295 with/without DAC", tags: ["Growth Hormone", "Recovery"], desc: "A synthetic GHRH analog that increases basal growth hormone levels and IGF-1, deeply improving sleep, recovery, and muscle growth. (DAC extends half-life significantly).", dosage: "100mcg to 300mcg daily (No DAC) / 1mg-2mg weekly (With DAC)", cycle: "8 to 12 weeks", storage: "Refrigerate reconstituted vial" },
@@ -105,9 +127,9 @@ const WIKI_DATA = [
   { name: "Oxytocin", tags: ["Mood", "Bonding", "Stress"], desc: "The 'love hormone'. Greatly reduces social anxiety, promotes deep psychological bonding, accelerates healing, and enhances intimate touch.", dosage: "10mcg to 50mcg as needed", cycle: "As needed", storage: "Refrigerate reconstituted vial" },
   { name: "Pinealon", tags: ["Brain Health", "Circadian Rhythm"], desc: "A short peptide that interacts directly with DNA to protect brain cells from hypoxia and regulate the circadian rhythm.", dosage: "5mg to 10mg daily", cycle: "10 to 20 days (Repeat 1-2x a year)", storage: "Refrigerate reconstituted vial" },
   { name: "PT-141 (Bremelanotide)", tags: ["Libido", "Sexual Health"], desc: "Works directly through the nervous system to significantly increase sexual desire and treat sexual dysfunction in both men and women.", dosage: "1mg to 2mg as needed (2-4 hrs prior)", cycle: "As needed (Avoid daily use)", storage: "Refrigerate reconstituted vial" },
-  { name: "Retatrutide", tags: ["Weight Loss", "Metabolism"], desc: "A triple-agonist (GLP-1, GIP, Glucagon). An advanced compound currently showing unprecedented weight loss and liver fat reduction in trials.", dosage: "2mg to 12mg weekly", cycle: "Ongoing / As needed", storage: "Refrigerate (2°C - 8°C)" },
+  { name: "Retatrutide", tags: ["Weight Loss", "Metabolism"], desc: "A triple-agonist (GLP-1, GIP, Glucagon). An advanced compound currently showing unprecedented weight loss and liver fat reduction in trials.", dosage: "2mg to 12mg weekly", cycle: "Ongoing / As needed", storage: "Refrigerate (2\u00B0C - 8\u00B0C)" },
   { name: "Selank", tags: ["Anxiety", "Nootropic", "Focus"], desc: "A synthetic peptide with anxiolytic (anti-anxiety) and nootropic properties. Improves learning and stabilizes mood without causing sedation.", dosage: "250mcg to 500mcg daily", cycle: "2 to 4 weeks", storage: "Refrigerate reconstituted vial" },
-  { name: "Semaglutide", tags: ["Weight Loss"], desc: "A GLP-1 receptor agonist. The active ingredient in popular weight loss medications, excellent for appetite suppression and steady weight management.", dosage: "0.25mg to 2.4mg weekly", cycle: "Ongoing / As needed", storage: "Refrigerate (2°C - 8°C)" },
+  { name: "Semaglutide", tags: ["Weight Loss"], desc: "A GLP-1 receptor agonist. The active ingredient in popular weight loss medications, excellent for appetite suppression and steady weight management.", dosage: "0.25mg to 2.4mg weekly", cycle: "Ongoing / As needed", storage: "Refrigerate (2\u00B0C - 8\u00B0C)" },
   { name: "Semax", tags: ["Cognition", "Nootropic", "Focus"], desc: "A neuroactive peptide that increases Brain-Derived Neurotrophic Factor (BDNF). Enhances focus, memory, and offers neuroprotection.", dosage: "250mcg to 1mg daily", cycle: "2 to 4 weeks", storage: "Refrigerate reconstituted vial" },
   { name: "Sermorelin", tags: ["Growth Hormone", "Sleep"], desc: "A well-tolerated GHRH that naturally encourages the pituitary gland to release more growth hormone. Excellent for sleep and anti-aging.", dosage: "200mcg to 500mcg nightly", cycle: "12 to 16 weeks", storage: "Refrigerate reconstituted vial" },
   { name: "SLU-PP-332", tags: ["Endurance", "Fat Loss", "Exercise Mimetic"], desc: "An advanced ERR agonist known as an 'exercise pill'. Increases skeletal muscle endurance and fat oxidation without physical exercise.", dosage: "1mg to 2mg daily", cycle: "4 to 8 weeks", storage: "Refrigerate reconstituted vial" },
@@ -119,12 +141,12 @@ const WIKI_DATA = [
   { name: "Thymalin", tags: ["Immune", "Longevity"], desc: "A bioregulator peptide that profoundly restores immune system function, normalizes circadian rhythms, and supports the endocrine system.", dosage: "10mg daily", cycle: "10 to 20 days (Repeat every 6-12 months)", storage: "Refrigerate reconstituted vial" },
   { name: "Thymosin Alpha-1", tags: ["Immune Support", "Healing"], desc: "A major component of the thymus gland. Restores immune function, helps fight chronic infections, and acts as a powerful immunomodulator.", dosage: "1.5mg twice weekly", cycle: "Ongoing or Acute use", storage: "Refrigerate reconstituted vial" },
   { name: "VIP (Vasoactive Intestinal Peptide)", tags: ["Immune", "Gut", "Mold Toxicity"], desc: "A potent neuroendocrine peptide. Highly effective for reducing chronic systemic inflammation, treating mold toxicity (CIRS), and regulating the immune system.", dosage: "50mcg 1-4x daily (Nasal Spray or SubQ)", cycle: "Ongoing as prescribed", storage: "Refrigerate reconstituted vial" },
-  { name: "Tirzepatide", tags: ["Weight Loss", "Metabolism"], desc: "A dual GIP and GLP-1 receptor agonist. Superior to Semaglutide in weight loss clinical trials by targeting two hormonal pathways instead of one.", dosage: "2.5mg to 15mg weekly", cycle: "Ongoing / As needed", storage: "Refrigerate (2°C - 8°C)" },
+  { name: "Tirzepatide", tags: ["Weight Loss", "Metabolism"], desc: "A dual GIP and GLP-1 receptor agonist. Superior to Semaglutide in weight loss clinical trials by targeting two hormonal pathways instead of one.", dosage: "2.5mg to 15mg weekly", cycle: "Ongoing / As needed", storage: "Refrigerate (2\u00B0C - 8\u00B0C)" },
   { name: "GKP-70 (Glow Plus)", tags: ["Skin", "Healing", "Blend"], desc: "An advanced version of the GLOW blend. Higher concentration of GHK-Cu, BPC-157, and TB-500 for maximum anti-aging and regenerative effects.", dosage: "2mg to 3mg daily", cycle: "4 to 8 weeks", storage: "Refrigerate reconstituted vial" },
   { name: "Pharma Bac", tags: ["Supplies"], desc: "Premium pharmaceutical-grade bacteriostatic water. Used for the safe reconstitution and preservation of sensitive peptide sequences.", dosage: "As needed", cycle: "Discard 28 days after use", storage: "Room Temperature" },
   { name: "Vasopressin (VP)", tags: ["Cognition", "Memory", "Focus"], desc: "A natural hormone that regulates water retention and blood pressure, used off-label for significant improvements in memory recall and mental alertness.", dosage: "10mcg to 20mcg (Nasal Spray)", cycle: "As needed", storage: "Refrigerate" },
   { name: "Tesofensine", tags: ["Weight Loss", "Appetite"], desc: "A monoamine reuptake inhibitor investigated for obesity support, mainly discussed for appetite reduction and meaningful body-weight loss in trials.", dosage: "Commonly sold in mcg or mg strengths depending on format", cycle: "Use only with a clear protocol", storage: "Room temperature / as labeled", benefits: ["appetite control", "weight-management support", "metabolic focus"] },
-  { name: "Mazdutide", tags: ["Weight Loss", "Metabolism"], desc: "A dual GLP-1 and glucagon receptor agonist being studied for obesity and metabolic support, with strong weight-loss signals in clinical trials.", dosage: "Usually weekly formats depending on product strength", cycle: "Protocol-dependent", storage: "Refrigerate (2°C - 8°C)", benefits: ["appetite support", "metabolic support", "weight-management focus"] },
+  { name: "Mazdutide", tags: ["Weight Loss", "Metabolism"], desc: "A dual GLP-1 and glucagon receptor agonist being studied for obesity and metabolic support, with strong weight-loss signals in clinical trials.", dosage: "Usually weekly formats depending on product strength", cycle: "Protocol-dependent", storage: "Refrigerate (2\u00B0C - 8\u00B0C)", benefits: ["appetite support", "metabolic support", "weight-management focus"] },
   { name: "Melanotan II", tags: ["Tanning", "Libido"], desc: "A melanocortin receptor agonist commonly discussed for pigmentation effects and libido-related interest, but it also carries notable safety concerns when used outside regulated settings.", dosage: "Protocol-dependent", cycle: "Use cautiously and only with clear guidance", storage: "Refrigerate reconstituted vial", benefits: ["pigmentation support", "melanocortin activity", "libido-related interest"] }
 ];
 
@@ -158,14 +180,249 @@ const TAG_BENEFIT_MAP = {
   "Supplies": ["mixing support", "workflow essential", "reconstitution utility"]
 };
 
+function ShopHeroSection({
+  currentBatchFillingLines,
+  currentBatchOpenLines,
+  currentBatchOpenSpots,
+  currentBatchProtectedKits,
+  customerEmail,
+  customerProfile,
+  handleLookup,
+  heroIntroCopy,
+  heroPrimaryCtaLabel,
+  heroSectionRef,
+  isStoreClosed,
+  nearlyFullCount,
+  originalInput,
+  selectedVialCount,
+  setCustomerEmail,
+  setSelectedProfileEmail,
+  setShowCalculatorModal,
+  setShowWikiModal,
+  settings,
+  showCatalogReference,
+  totalPHP,
+}) {
+  return (
+    <section ref={heroSectionRef} className="hero-panel rounded-[34px] p-4 sm:p-5 lg:px-6 lg:py-5 mb-5">
+      <div className={`relative z-10 grid gap-4 ${isStoreClosed ? 'lg:grid-cols-[minmax(0,1.18fr)_328px] xl:grid-cols-[minmax(0,1.12fr)_372px] lg:items-stretch' : 'lg:grid-cols-[minmax(0,1.12fr)_328px] xl:grid-cols-[minmax(0,1.08fr)_372px] lg:items-stretch'}`}>
+        <div className={`relative min-w-0 flex flex-col min-h-[300px] lg:min-h-[320px] ${isStoreClosed ? 'items-center text-center lg:items-start lg:text-left' : 'items-start text-left justify-between'}`}>
+          <div className={`hidden sm:flex flex-wrap items-center gap-3 w-full ${isStoreClosed ? 'justify-center lg:justify-start' : 'justify-start'}`}>
+            <span className="hero-chip inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[#8A1555] font-black text-[10px] uppercase tracking-[0.24em]">
+              {isStoreClosed ? 'Store Paused' : 'Live Group Buy'}
+            </span>
+            <span className="hero-chip inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[#8A1555] font-black text-[10px] uppercase tracking-[0.2em]">
+              {isStoreClosed ? 'History Still Open' : (settings.batchName || 'Current Batch')}
+            </span>
+          </div>
+
+          {isStoreClosed ? (
+            <>
+              <div className="w-full min-w-0 flex-1 flex flex-col justify-center items-center gap-2 text-center max-w-3xl mx-auto lg:max-w-[1100px] xl:max-w-[1180px] py-1 lg:mx-0 lg:items-start lg:text-left">
+                <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#D6006E]">BBP Group Buy</p>
+                <h1 className="brand-title mt-2 mb-0 pb-5 sm:pb-6 lg:pb-7 text-[2.95rem] sm:text-[4.1rem] lg:text-[5.75rem] xl:text-[6.2rem] lg:whitespace-nowrap lg:tracking-[-0.035em] leading-[1.06] text-[#D6006E]">
+                  Bonded by Peptides
+                </h1>
+                <p className="mt-4 max-w-[38rem] text-[15px] sm:text-[18px] font-bold leading-relaxed text-[#8F2C5D]">
+                  Ordering is paused right now, but your profile, order history, wiki, and calculator are still here while BBP gets the next batch ready.
+                </p>
+              </div>
+
+              <div className="hero-divider w-full mb-3" />
+
+              <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 w-full">
+                <div className="hero-stat rounded-[24px] px-4 py-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">Lookup</p>
+                  <p className="mt-1 text-sm font-black text-[#4A042A]">Check saved profile</p>
+                </div>
+                <div className="hero-stat rounded-[24px] px-4 py-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">History</p>
+                  <p className="mt-1 text-sm font-black text-[#4A042A]">See old orders by email</p>
+                </div>
+                <div className="hero-stat rounded-[24px] px-4 py-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">Wiki</p>
+                  <p className="mt-1 text-sm font-black text-[#4A042A]">Peptide guide stays live</p>
+                </div>
+                <div className="hero-stat rounded-[24px] px-4 py-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">Calculator</p>
+                  <p className="mt-1 text-sm font-black text-[#4A042A]">Dose and draw helper</p>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="w-full min-w-0 flex-1 flex flex-col justify-center items-center gap-2 text-center max-w-[760px] lg:max-w-[980px] xl:max-w-[1080px] py-2 lg:items-start lg:text-left">
+                <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#D6006E]">BBP Group Buy</p>
+                <h1 className="brand-title mt-2 mb-0 pb-5 sm:pb-6 lg:pb-7 text-[2.95rem] sm:text-[4.1rem] lg:text-[4.7rem] xl:text-[5.05rem] lg:whitespace-nowrap leading-[1.08] text-[#D6006E]">
+                  Bonded by Peptides
+                </h1>
+                <p className="mt-4 max-w-[38rem] text-[15px] sm:text-[18px] font-bold leading-relaxed text-[#8F2C5D]">
+                  {heroIntroCopy}
+                </p>
+                <div className="mt-6 flex flex-wrap justify-center gap-3 lg:justify-start">
+                  <button
+                    onClick={() => document.getElementById('top-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                    className="bg-gradient-to-r from-[#FF1493] to-[#FF69B4] text-white px-6 py-3 rounded-full text-[11px] font-black uppercase tracking-[0.2em] shadow-[0_16px_32px_rgba(255,20,147,0.2)] transition-transform hover:translate-y-[-1px]"
+                  >
+                    {heroPrimaryCtaLabel}
+                  </button>
+                  {showCatalogReference && (
+                    <button
+                      onClick={() => document.getElementById('catalog-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                      className="bg-white/90 text-[#D6006E] border-2 border-[#FFC0CB] px-6 py-3 rounded-full text-[11px] font-black uppercase tracking-[0.2em] shadow-[0_10px_24px_rgba(255,20,147,0.08)] transition-transform hover:translate-y-[-1px]"
+                    >
+                      Browse Catalog
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="hero-divider w-full my-4" />
+
+              <div className="grid grid-cols-2 gap-3 w-full lg:grid-cols-4">
+                <div className="hero-stat rounded-[24px] px-4 py-3">
+                  <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Order Minimum</p>
+                  <p className="mt-1 text-sm font-black text-[#4A042A]">{settings.minOrder} vials to save</p>
+                </div>
+                <div className="hero-stat rounded-[24px] px-4 py-3">
+                  <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Boxes Filling</p>
+                  <p className="mt-1 text-sm font-black text-[#4A042A]">{currentBatchFillingLines} active right now</p>
+                </div>
+                <div className="hero-stat rounded-[24px] px-4 py-3">
+                  <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Cart So Far</p>
+                  <p className="mt-1 text-sm font-black text-[#4A042A]">{selectedVialCount} vial{selectedVialCount === 1 ? '' : 's'} selected</p>
+                </div>
+                <div className="hero-stat rounded-[24px] px-4 py-3">
+                  <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Kit Protection</p>
+                  <p className="mt-1 text-sm font-black text-[#4A042A]">Every 10 vials makes 1 kit</p>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {isStoreClosed && (
+          <div className="soft-panel rounded-[28px] p-4 flex flex-col gap-3 text-center lg:text-left w-full min-w-0 overflow-hidden lg:self-center">
+            <div className="min-w-0">
+              <p className="text-[10px] font-black text-[#D6006E] uppercase tracking-[0.28em]">
+                Profile, History, Wiki & Calculator
+              </p>
+              <h2 className="mt-2 text-[1.8rem] sm:text-[2rem] font-black text-[#4A042A] leading-[1.02]">
+                Closed for ordering
+              </h2>
+              <p className="mt-2 text-sm font-bold text-[#9E2A5E] leading-relaxed">
+                Ordering is paused, but your saved profile, order history, peptide wiki, and dose calculator are still available while the next batch is being prepared.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2.5 min-w-0">
+              <div className="rounded-[22px] border border-[#FFB3D7] bg-gradient-to-r from-[#FFF1F8] via-[#FFE5F3] to-[#FFF7EF] px-4 py-3 text-left shadow-sm">
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#FF7A59] to-[#FF1493] text-white shadow-[0_8px_18px_rgba(255,20,147,0.22)]">
+                    <BookOpen size={18} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#D6006E]">Wiki Still Open</p>
+                    <p className="mt-1 text-xs font-bold text-[#7B1B53] leading-relaxed">Browse product notes, benefits, and handling guidance even while checkout is paused.</p>
+                  </div>
+                </div>
+              </div>
+              <input type="email" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)} onBlur={handleLookup} className={`${originalInput} py-2.5`} placeholder="Enter your email" />
+              <button onClick={() => customerProfile && setSelectedProfileEmail(customerEmail)} disabled={!customerProfile} className="w-full bg-gradient-to-r from-[#FF1493] to-[#FF69B4] text-white font-black py-3 text-xs rounded-2xl uppercase tracking-widest shadow-md transition-transform hover:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed">
+                View Profile & History
+              </button>
+              <button onClick={() => setShowWikiModal(true)} className="group w-full rounded-[24px] border border-white/35 bg-gradient-to-r from-[#FF7A59] via-[#FF4FA1] to-[#FF1493] px-4 py-4 text-white shadow-[0_16px_36px_rgba(255,20,147,0.24)] transition-transform hover:scale-[0.99]">
+                <span className="flex items-center justify-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/18 ring-1 ring-white/25">
+                    <BookOpen size={17} />
+                  </span>
+                  <span className="min-w-0 text-left">
+                    <span className="block text-[9px] font-black uppercase tracking-[0.24em] text-white/80">Browse Now</span>
+                    <span className="mt-0.5 flex items-center gap-1 text-sm font-black uppercase tracking-[0.2em] text-white">
+                      <span>Open Peptide Wiki</span>
+                      <ChevronRight size={16} className="transition-transform group-hover:translate-x-0.5" />
+                    </span>
+                  </span>
+                </span>
+              </button>
+              <button onClick={() => setShowCalculatorModal(true)} className="w-full rounded-[22px] border border-[#F5B9D6] bg-white/92 px-4 py-3.5 text-[#D6006E] shadow-sm transition-transform hover:scale-[0.99]">
+                <span className="flex items-center justify-center gap-3">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pink-50 ring-1 ring-pink-100">
+                    <Calculator size={16} />
+                  </span>
+                  <span className="min-w-0 text-left">
+                    <span className="block text-[9px] font-black uppercase tracking-[0.24em] text-pink-400">Dose Helper</span>
+                    <span className="mt-0.5 block text-sm font-black uppercase tracking-[0.18em]">Open Peptide Calculator</span>
+                  </span>
+                </span>
+              </button>
+              <div className="glass-note rounded-[20px] px-4 py-3 text-xs font-bold text-[#9E2A5E]">
+                {customerProfile ? 'Saved profile found. You can open your history now, or head straight into the wiki.' : 'No saved profile yet. You can still use the wiki now, or try the same email you used for your previous order.'}
+              </div>
+            </div>
+          </div>
+        )}
+        {!isStoreClosed && (
+          <div className="soft-panel hidden lg:flex rounded-[30px] p-5 flex-col gap-4 w-full min-w-0 overflow-hidden lg:self-stretch bg-[linear-gradient(180deg,rgba(255,249,252,0.94),rgba(255,241,246,0.88))] border-[#F3C9D7] shadow-[0_18px_38px_rgba(214,0,110,0.09)]">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black text-[#B30065] uppercase tracking-[0.28em]">Current Batch</p>
+                <h2 className="mt-2 text-[1.8rem] sm:text-[2.15rem] font-black text-[#352C30] leading-[0.94] tracking-[-0.04em]">
+                  {settings.batchName || 'Bonded Ledger'}
+                </h2>
+                <p className="mt-2 text-sm font-semibold text-[#63595D] leading-relaxed">
+                  One place to save your order, watch the box fill, and come back for payment when the window opens.
+                </p>
+              </div>
+              <div className="rounded-[22px] bg-gradient-to-br from-[#C41A76] to-[#E85A9D] px-4 py-3 text-right text-white shadow-[0_14px_26px_rgba(196,26,118,0.18)]">
+                <p className="text-[9px] font-black uppercase tracking-[0.24em] text-white/72">Cart Total</p>
+            <p className="mt-1 text-2xl font-black leading-none">{"\u20B1"}{totalPHP.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-[22px] border border-[#F1D8E2] bg-white/74 px-4 py-3 backdrop-blur-sm">
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-pink-500">Payment Status</p>
+                <p className="mt-1 text-sm font-black text-[#352C30]">{settings.paymentsOpen ? 'Payment window is open' : 'Payment window still closed'}</p>
+              </div>
+              <div className="rounded-[22px] border border-[#F1D8E2] bg-white/74 px-4 py-3 backdrop-blur-sm">
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-pink-500">Near Capacity</p>
+                <p className="mt-1 text-sm font-black text-[#352C30]">{nearlyFullCount} product{nearlyFullCount === 1 ? '' : 's'} almost full</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="rounded-[24px] border border-[#ECD8E0] bg-white/72 px-4 py-4 backdrop-blur-sm">
+                <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#9E8A93]">Available Lines</p>
+                <p className="mt-3 text-[1.9rem] font-black leading-none text-[#352C30]">{currentBatchOpenLines}</p>
+                <p className="mt-2 text-[11px] font-semibold leading-snug text-[#63595D]">currently open in the live catalog</p>
+              </div>
+              <div className="rounded-[24px] border border-[#ECD8E0] bg-white/72 px-4 py-4 backdrop-blur-sm">
+                <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#9E8A93]">Protected Kits</p>
+                <p className="mt-3 text-[1.9rem] font-black leading-none text-[#352C30]">{currentBatchProtectedKits}</p>
+                <p className="mt-2 text-[11px] font-semibold leading-snug text-[#63595D]">full 10-vial kits already locked in</p>
+              </div>
+              <div className="rounded-[24px] border border-[#ECD8E0] bg-white/72 px-4 py-4 backdrop-blur-sm">
+                <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#9E8A93]">Open Spots</p>
+                <p className="mt-3 text-[1.9rem] font-black leading-none text-[#352C30]">{currentBatchOpenSpots}</p>
+                <p className="mt-2 text-[11px] font-semibold leading-snug text-[#63595D]">slots still needed to close active boxes</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+const normalizeWikiLookupKey = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const wikiLookupEntries = WIKI_DATA.map(item => ({ item, cleanName: normalizeWikiLookupKey(item.name) }));
+const productInfoCache = new Map();
+
 const findWikiEntry = (pName) => {
   if (!pName) return null;
-  const clean = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const pClean = clean(pName);
-  return WIKI_DATA.find(w => {
-    const wClean = clean(w.name);
-    return pClean.includes(wClean) || wClean.includes(pClean);
-  });
+  const pClean = normalizeWikiLookupKey(pName);
+  return wikiLookupEntries.find(({ cleanName }) => pClean.includes(cleanName) || cleanName.includes(pClean))?.item || null;
 };
 
 const getStrengthLabel = (productName) => {
@@ -187,6 +444,9 @@ const getFallbackInfo = (productName) => {
 };
 
 const buildProductInfo = (productName) => {
+  const cacheKey = String(productName || '').trim().toLowerCase();
+  if (productInfoCache.has(cacheKey)) return productInfoCache.get(cacheKey);
+
   const direct = findWikiEntry(productName);
   const fallback = getFallbackInfo(productName);
   const base = direct || fallback;
@@ -197,7 +457,7 @@ const buildProductInfo = (productName) => {
   const shortDesc = base.desc.length > 120 ? `${base.desc.slice(0, 117)}...` : base.desc;
   const protectionNote = "10 vials = 1 protected kit. Extra loose vials can still be trimmed if a box stays incomplete.";
 
-  return {
+  const productInfo = {
     name: base.name || productName,
     displayName: productName,
     tags,
@@ -211,6 +471,9 @@ const buildProductInfo = (productName) => {
     protectionNote,
     isFallback: !direct
   };
+
+  productInfoCache.set(cacheKey, productInfo);
+  return productInfo;
 };
 
 const getProductImageSrc = (productInfo) => {
@@ -222,7 +485,7 @@ const getProductImageSrc = (productInfo) => {
     .replace(/'/g, '&apos;');
   const safeName = escapeXml((productInfo.displayName || productInfo.name || 'Product').slice(0, 28));
   const safeStrength = escapeXml(productInfo.strength || 'Research vial');
-  const safeBenefits = escapeXml((productInfo.benefits || []).slice(0, 2).join(' • ') || 'Reference support');
+  const safeBenefits = escapeXml((productInfo.benefits || []).slice(0, 2).join(" \u2022 ") || "Reference support");
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="220" height="280" viewBox="0 0 220 280">
       <defs>
@@ -345,6 +608,25 @@ export default function App() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [isChatSending, setIsChatSending] = useState(false);
+
+  const showHoveredProofPreview = (proofUrl, event) => {
+    if (!proofUrl) return;
+    const buttonRect = event?.currentTarget?.getBoundingClientRect?.();
+    const previewWidth = 360;
+    const previewHeight = 460;
+    const gap = 16;
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1440;
+    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 900;
+    const left = buttonRect
+      ? Math.min(Math.max(buttonRect.right + gap, 16), viewportWidth - previewWidth - 16)
+      : Math.max(viewportWidth - previewWidth - 40, 16);
+    const top = buttonRect
+      ? Math.min(Math.max(buttonRect.top - 12, 16), viewportHeight - previewHeight - 16)
+      : Math.max(viewportHeight - previewHeight - 40, 16);
+    setHoveredProof({ url: proofUrl, left, top });
+  };
+
+  const hideHoveredProofPreview = () => setHoveredProof(null);
   const [latestChatPreview, setLatestChatPreview] = useState(null);
   const chatEndRef = useRef(null);
   const chatPanelRef = useRef(null);
@@ -367,7 +649,7 @@ export default function App() {
   const [paymentViewFilter, setPaymentViewFilter] = useState('all');
   const [paymentSort, setPaymentSort] = useState('proof-first');
 
-  // âœ¨ NEW: Admin Inline Order Editing State
+  // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW: Admin Inline Order Editing State
   const [adminOrderEditTarget, setAdminOrderEditTarget] = useState(null);
   const [adminCart, setAdminCart] = useState({});
   const [adminModalSearchQuery, setAdminModalSearchQuery] = useState('');
@@ -388,6 +670,7 @@ export default function App() {
     storeOpen: true,
     reviewStageOpen: false,
     paymentsOpen: false,
+    paymentRoutesVisible: true,
     addOnly: false,
     gasWebAppUrl: '',
     googleSheetUrl: '',
@@ -430,7 +713,40 @@ export default function App() {
   const [adminSettingsProductSearch, setAdminSettingsProductSearch] = useState('');
   const [cartInputDrafts, setCartInputDrafts] = useState({});
 
-  // âœ¨ NEW: Customer UX States
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+  const deferredWikiSearchQuery = useDeferredValue(wikiSearchQuery);
+  const deferredAdminGlobalSearch = useDeferredValue(adminGlobalSearch);
+  const deferredAdminSettingsProductSearch = useDeferredValue(adminSettingsProductSearch);
+  const deferredAdminModalSearchQuery = useDeferredValue(adminModalSearchQuery);
+  const normalizedCustomerEmail = customerEmail.toLowerCase().trim();
+  const normalizedSelectedProfileEmail = String(selectedProfileEmail || '').toLowerCase().trim();
+  const normalizedShopSearchQuery = deferredSearchQuery.toLowerCase().trim();
+  const normalizedWikiSearchQuery = deferredWikiSearchQuery.toLowerCase().trim();
+  const normalizedAdminSearch = deferredAdminGlobalSearch.toLowerCase().trim();
+  const normalizedAdminSettingsProductSearch = deferredAdminSettingsProductSearch.toLowerCase().trim();
+  const normalizedAdminModalSearchQuery = deferredAdminModalSearchQuery.toLowerCase().trim();
+  const isShopView = view === 'shop';
+  const isAdminView = view === 'admin';
+  const adminOrdersTabs = ['overview', 'active-orders', 'payments', 'audit', 'packing', 'trimming', 'customers', 'settings-core'];
+  const adminProductsTabs = ['overview', 'packing', 'trimming', 'settings-products', 'settings-core'];
+  const adminUsersTabs = ['overview', 'active-orders', 'payments', 'audit', 'customers', 'settings-core'];
+  const adminNeedsOrders = isAdminAuthenticated && adminOrdersTabs.includes(adminTab);
+  const adminNeedsProducts = isAdminAuthenticated && adminProductsTabs.includes(adminTab);
+  const adminNeedsUsers = isAdminAuthenticated && adminUsersTabs.includes(adminTab);
+  const adminNeedsLogs = isAdminAuthenticated && ['overview', 'logs'].includes(adminTab);
+  const adminNeedsSafety = isAdminAuthenticated && adminTab === 'safety';
+  const needsInventoryData = isAdminAuthenticated && ['overview', 'settings-products'].includes(adminTab);
+  const needsActiveOrdersData = isAdminAuthenticated && ['overview', 'active-orders'].includes(adminTab);
+  const needsPaymentData = isAdminAuthenticated && ['overview', 'payments', 'audit'].includes(adminTab);
+  const needsCustomerDirectoryData = isAdminAuthenticated && ['overview', 'customers'].includes(adminTab);
+  const needsPackingData = isAdminAuthenticated && ['overview', 'packing'].includes(adminTab);
+  const needsAdminHitListData = isAdminAuthenticated && ['overview', 'trimming'].includes(adminTab);
+  const shouldSubscribeUsers = adminNeedsUsers || Boolean(normalizedCustomerEmail) || Boolean(normalizedSelectedProfileEmail && normalizedSelectedProfileEmail !== normalizedCustomerEmail);
+  const shouldSubscribeHistory = Boolean(normalizedSelectedProfileEmail);
+  const switchView = (nextView) => startTransition(() => setView(nextView));
+  const switchAdminTab = (nextTab) => startTransition(() => setAdminTab(nextTab));
+
+  // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW: Customer UX States
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [quickInfoProduct, setQuickInfoProduct] = useState(null);
   const POPULAR_CATEGORIES = ["All", "Weight Loss", "Healing", "Anti-Aging", "Muscle Growth", "Brain Health", "Skin"];
@@ -507,24 +823,46 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
-    const unsubSettings = onSnapshot(collection(db, colPath('settings')), (snap) => { snap.forEach(d => { if (d.id === 'main') setSettings(d.data()); }); });
-    const unsubProducts = onSnapshot(collection(db, colPath('products')), (snap) => { const arr = []; snap.forEach(d => arr.push({ id: d.id, ...d.data() })); setProducts(arr); });
-    const unsubOrders = onSnapshot(collection(db, colPath('orders')), (snap) => { const arr = []; snap.forEach(d => arr.push({ id: d.id, ...d.data() })); setOrders(arr); });
-    const unsubUsers = onSnapshot(collection(db, colPath('users')), (snap) => { const arr = []; snap.forEach(d => arr.push({ id: d.id, ...d.data() })); setUsers(arr); });
-    const unsubHistory = onSnapshot(collection(db, colPath('history')), (snap) => { const arr = []; snap.forEach(d => arr.push({ id: d.id, ...d.data() })); setHistory(arr); });
-    const unsubLogs = onSnapshot(collection(db, colPath('logs')), (snap) => {
-      const arr = [];
-      snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
-      arr.sort((a, b) => b.timestamp - a.timestamp);
-      setLogs(arr);
+    if (!user) return undefined;
+    const unsubSettings = onSnapshot(doc(db, colPath('settings'), 'main'), (snapshot) => {
+      if (snapshot.exists()) setSettings(prev => ({ ...prev, ...snapshot.data() }));
     });
-    const unsubSafety = onSnapshot(collection(db, colPath('safetyBackups')), (snap) => {
-      const arr = [];
-      snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
-      arr.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
-      setSafetyRecords(arr);
-    });
+    let unsubProducts = () => {};
+    let unsubOrders = () => {};
+
+    if (isShopView || adminNeedsProducts) {
+      unsubProducts = onSnapshot(collection(db, colPath('products')), (snap) => {
+        const arr = [];
+        snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
+        setProducts(arr);
+      });
+    } else {
+      setProducts([]);
+    }
+
+    if (isShopView || adminNeedsOrders) {
+      unsubOrders = onSnapshot(collection(db, colPath('orders')), (snap) => {
+        const arr = [];
+        snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
+        setOrders(arr);
+      });
+    } else {
+      setOrders([]);
+    }
+
+    return () => {
+      unsubSettings();
+      unsubProducts();
+      unsubOrders();
+    };
+  }, [user, isShopView, adminNeedsOrders, adminNeedsProducts]);
+
+  useEffect(() => {
+    if (!user || !isShopView) {
+      setChats([]);
+      return undefined;
+    }
+
     const unsubChats = onSnapshot(collection(db, colPath('chats')), (snap) => {
       const arr = [];
       snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
@@ -532,8 +870,75 @@ export default function App() {
       setChats(arr);
     });
 
-    return () => { unsubSettings(); unsubProducts(); unsubOrders(); unsubUsers(); unsubHistory(); unsubChats(); unsubLogs(); unsubSafety(); };
-  }, [user]);
+    return () => {
+      unsubChats();
+    };
+  }, [user, isShopView]);
+
+  useEffect(() => {
+    if (!user || !shouldSubscribeUsers) {
+      setUsers([]);
+      return undefined;
+    }
+
+    const unsubUsers = onSnapshot(collection(db, colPath('users')), (snap) => {
+      const arr = [];
+      snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
+      setUsers(arr);
+    });
+
+    return () => unsubUsers();
+  }, [user, shouldSubscribeUsers]);
+
+  useEffect(() => {
+    if (!user || !shouldSubscribeHistory) {
+      setHistory([]);
+      return undefined;
+    }
+
+    const unsubHistory = onSnapshot(collection(db, colPath('history')), (snap) => {
+      const arr = [];
+      snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
+      setHistory(arr);
+    });
+
+    return () => unsubHistory();
+  }, [user, shouldSubscribeHistory]);
+
+  useEffect(() => {
+    if (!user || !adminNeedsLogs) {
+      setLogs([]);
+      return undefined;
+    }
+
+    const unsubLogs = onSnapshot(collection(db, colPath('logs')), (snap) => {
+      const arr = [];
+      snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
+      arr.sort((a, b) => b.timestamp - a.timestamp);
+      setLogs(arr);
+    });
+    return () => {
+      unsubLogs();
+    };
+  }, [user, adminNeedsLogs]);
+
+  useEffect(() => {
+    if (!user || !adminNeedsSafety) {
+      setSafetyRecords([]);
+      return undefined;
+    }
+
+    const unsubSafety = onSnapshot(collection(db, colPath('safetyBackups')), (snap) => {
+      const arr = [];
+      snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
+      arr.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+      setSafetyRecords(arr);
+    });
+
+    return () => {
+      unsubSafety();
+    };
+  }, [user, adminNeedsSafety]);
 
   const currentChatIdentity = useMemo(() => (
     customerEmail.toLowerCase().trim() ||
@@ -541,6 +946,36 @@ export default function App() {
     customerName.toLowerCase().trim() ||
     'guest'
   ), [customerEmail, customerHandle, customerName]);
+
+  const productsByName = useMemo(() => Object.fromEntries(products.map((product) => [product.name, product])), [products]);
+
+  const usersById = useMemo(() => Object.fromEntries(users.map((profile) => [profile.id, profile])), [users]);
+
+  const ordersByEmail = useMemo(() => {
+    const grouped = {};
+    orders.forEach((order) => {
+      if (!grouped[order.email]) grouped[order.email] = [];
+      grouped[order.email].push(order);
+    });
+    return grouped;
+  }, [orders]);
+
+  const productTotals = useMemo(() => {
+    const totals = {};
+    orders.forEach((order) => {
+      totals[order.product] = (totals[order.product] || 0) + Number(order.qty || 0);
+    });
+    return totals;
+  }, [orders]);
+
+  const customerProductTotals = useMemo(() => {
+    const totals = {};
+    orders.forEach((order) => {
+      const key = `${order.email}||${order.product}`;
+      totals[key] = (totals[key] || 0) + Number(order.qty || 0);
+    });
+    return totals;
+  }, [orders]);
 
   const recentChats = useMemo(() => {
     const cutoff = Date.now() - CHAT_RETENTION_MS;
@@ -712,6 +1147,33 @@ export default function App() {
     };
   };
 
+  const calculateOrderTotals = (subtotalUSDValue, fxRateValue = Number(settings.fxRate || 0), adminFeePhpValue = Number(settings.adminFeePhp || 0)) => {
+    const safeSubtotalUSD = Number(subtotalUSDValue || 0);
+    const safeFxRate = Number(fxRateValue || 0);
+    const safeAdminFeePhp = Number(adminFeePhpValue || 0);
+
+    if (!(safeSubtotalUSD > 0) || !(safeFxRate > 0)) {
+      return {
+        subtotalUSD: safeSubtotalUSD,
+        totalUSD: 0,
+        totalPHP: 0,
+        fxRate: safeFxRate,
+        adminFeePhp: safeAdminFeePhp,
+      };
+    }
+
+    const totalPHP = Number(((safeSubtotalUSD * safeFxRate) + safeAdminFeePhp).toFixed(2));
+    const totalUSD = Number((totalPHP / safeFxRate).toFixed(4));
+
+    return {
+      subtotalUSD: safeSubtotalUSD,
+      totalUSD,
+      totalPHP,
+      fxRate: safeFxRate,
+      adminFeePhp: safeAdminFeePhp,
+    };
+  };
+
   const getSelectedAdminBankRoute = (adminName, email) => {
     const normalizedEmail = String(email || '').toLowerCase().trim();
     const resolvedAdminName = adminName || 'Unassigned';
@@ -741,20 +1203,18 @@ export default function App() {
   const buildPaymentSnapshot = (items, adminName, email, capturedAt = Date.now()) => {
     let subtotalUSD = 0;
     Object.entries(items || {}).forEach(([prod, qty]) => {
-      const product = products.find(p => p.name === prod);
+      const product = productsByName[prod];
       if (product && qty > 0) subtotalUSD += qty * Number(product.pricePerVialUSD || 0);
     });
 
-    const fxRate = Number(settings.fxRate || 0);
-    const adminFeePhp = Number(settings.adminFeePhp || 0);
-    const totalUSD = subtotalUSD > 0 && fxRate > 0 ? subtotalUSD + (adminFeePhp / fxRate) : 0;
+    const { totalUSD, totalPHP, fxRate, adminFeePhp } = calculateOrderTotals(subtotalUSD);
     const route = getSelectedAdminBankRoute(adminName, email);
 
     return {
       capturedAt,
       subtotalUSD,
       totalUSD,
-      totalPHP: totalUSD * fxRate,
+      totalPHP,
       fxRate,
       adminFeePhp,
       adminAssigned: route.adminAssigned,
@@ -765,14 +1225,8 @@ export default function App() {
   };
 
   const enrichedProducts = useMemo(() => {
-    const productStats = {};
-    orders.forEach(o => {
-      if (!productStats[o.product]) productStats[o.product] = 0;
-      productStats[o.product] += o.qty;
-    });
-
     return products.map(p => {
-      const totalVials = productStats[p.name] || 0;
+      const totalVials = productTotals[p.name] || 0;
       const boxes = Math.floor(totalVials / SLOTS_PER_BATCH);
       const slotsFilled = totalVials % SLOTS_PER_BATCH;
       const slotsLeft = totalVials === 0 ? SLOTS_PER_BATCH : (slotsFilled === 0 ? 0 : SLOTS_PER_BATCH - slotsFilled);
@@ -790,49 +1244,45 @@ export default function App() {
 
       return { ...p, totalVials, boxes, slotsLeft, isClosed, statusKey, statusText, openBatchLabel: (!isClosed) ? `Box ${boxes + 1}` : '' };
     }).sort((a, b) => a.name.localeCompare(b.name));
-  }, [products, orders, settings.paymentsOpen]);
+  }, [products, productTotals, settings.paymentsOpen]);
 
-  // âœ¨ NEW: Calculate exactly how many physical boxes will arrive from the supplier
+  const enrichedProductsByName = useMemo(
+    () => Object.fromEntries(enrichedProducts.map((product) => [product.name, product])),
+    [enrichedProducts]
+  );
+
+  // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW: Calculate exactly how many physical boxes will arrive from the supplier
   const totalPhysicalBoxesToReceive = useMemo(() => {
     return enrichedProducts.reduce((sum, p) => sum + Math.ceil(p.totalVials / SLOTS_PER_BATCH), 0);
   }, [enrichedProducts]);
 
   const trimmingHitList = useMemo(() => {
-    const productStats = {}; const customerTotals = {};
-    orders.forEach(o => {
-      if (!productStats[o.product]) productStats[o.product] = 0;
-      productStats[o.product] += o.qty;
-      const key = `${o.email}||${o.product}`;
-      if (!customerTotals[key]) customerTotals[key] = 0;
-      customerTotals[key] += o.qty;
-    });
-
     const toTrim = {}; const openBoxNumbers = {};
-    Object.keys(productStats).forEach(prod => {
-      if (productStats[prod] % 10 > 0) {
-        toTrim[prod] = productStats[prod] % 10;
-        openBoxNumbers[prod] = Math.floor(productStats[prod] / 10) + 1;
+    Object.keys(productTotals).forEach(prod => {
+      if (productTotals[prod] % 10 > 0) {
+        toTrim[prod] = productTotals[prod] % 10;
+        openBoxNumbers[prod] = Math.floor(productTotals[prod] / 10) + 1;
       }
     });
 
     const victims = [];
     [...orders].sort((a, b) => b.timestamp - a.timestamp).forEach(row => {
       if (!toTrim[row.product] || toTrim[row.product] <= 0) return;
-      const custTotal = customerTotals[`${row.email}||${row.product}`];
+      const custTotal = customerProductTotals[`${row.email}||${row.product}`];
       if (custTotal % 10 === 0 || row.qty % 10 === 0) return;
 
       const amountToRemove = Math.min(toTrim[row.product], row.qty % 10);
       if (amountToRemove > 0) {
         victims.push({
           id: row.id, prod: row.product, boxNum: openBoxNumbers[row.product],
-          missingSlots: 10 - (productStats[row.product] % 10),
+          missingSlots: 10 - (productTotals[row.product] % 10),
           name: row.name, email: row.email, handle: row.handle, qty: row.qty, amountToRemove
         });
         toTrim[row.product] -= amountToRemove;
       }
     });
     return victims.sort((a, b) => b.missingSlots - a.missingSlots);
-  }, [orders]);
+  }, [customerProductTotals, orders, productTotals]);
 
   const discordTrimListText = useMemo(() => {
     if (!trimmingHitList.length) {
@@ -875,6 +1325,7 @@ export default function App() {
   }, [trimmingHitList]);
 
   const customerList = useMemo(() => {
+    if (!adminNeedsUsers) return [];
     const map = {};
     orders.forEach(o => {
       if (!map[o.email]) {
@@ -895,14 +1346,12 @@ export default function App() {
       let sub = 0;
       const itemEntries = Object.entries(c.products).sort((a, b) => a[0].localeCompare(b[0]));
       itemEntries.forEach(([pName, qty]) => {
-        const pData = products.find(p => p.name === pName);
+        const pData = productsByName[pName];
         if (pData) sub += qty * pData.pricePerVialUSD;
       });
-      const profile = users.find(u => u.id === c.email) || {};
+      const profile = usersById[c.email] || {};
       const frozenPaymentSnapshot = getFrozenPaymentSnapshot(profile);
-      const fxRate = Number(settings.fxRate || 0);
-      const liveTotalUSD = sub > 0 && fxRate > 0 ? sub + (settings.adminFeePhp / fxRate) : 0;
-      const liveTotalPHP = liveTotalUSD * fxRate;
+      const { totalUSD: liveTotalUSD, totalPHP: liveTotalPHP } = calculateOrderTotals(sub);
       const address = profile.address || null;
       const adminAssigned = frozenPaymentSnapshot?.adminAssigned || profile.adminAssigned || "Unassigned";
       const hasAddress = Boolean(address?.street && address?.city && address?.contact);
@@ -939,11 +1388,17 @@ export default function App() {
         itemCount
       };
     });
-  }, [orders, products, settings, users]);
+  }, [adminNeedsUsers, orders, productsByName, settings, usersById]);
+
+  const customerListByEmail = useMemo(
+    () => Object.fromEntries(customerList.map((customer) => [customer.email, customer])),
+    [customerList]
+  );
 
   const filteredAdminProducts = useMemo(() => {
+    if (!needsInventoryData) return [];
     return [...enrichedProducts]
-      .filter(p => !adminGlobalSearch || p.name.toLowerCase().includes(adminGlobalSearch.toLowerCase()))
+      .filter(p => !normalizedAdminSearch || p.name.toLowerCase().includes(normalizedAdminSearch))
       .filter(p => {
         if (adminInventoryFilter === 'all') return true;
         if (adminInventoryFilter === 'open') return !p.locked && (p.maxBoxes || 0) === 0;
@@ -970,17 +1425,17 @@ export default function App() {
         }
         return a.name.localeCompare(b.name);
       });
-  }, [enrichedProducts, adminGlobalSearch, adminInventoryFilter, adminInventorySort]);
+  }, [needsInventoryData, enrichedProducts, normalizedAdminSearch, adminInventoryFilter, adminInventorySort]);
 
   const activeOrdersList = useMemo(() => {
+    if (!needsActiveOrdersData) return [];
     const searched = customerList.filter(c => {
-      if (!adminGlobalSearch) return true;
-      const lowerQuery = adminGlobalSearch.toLowerCase();
+      if (!normalizedAdminSearch) return true;
       return (
-        c.name.toLowerCase().includes(lowerQuery) ||
-        c.email.toLowerCase().includes(lowerQuery) ||
-        (c.handle || '').toLowerCase().includes(lowerQuery) ||
-        Object.keys(c.products).some(productName => productName.toLowerCase().includes(lowerQuery))
+        c.name.toLowerCase().includes(normalizedAdminSearch) ||
+        c.email.toLowerCase().includes(normalizedAdminSearch) ||
+        (c.handle || '').toLowerCase().includes(normalizedAdminSearch) ||
+        Object.keys(c.products).some(productName => productName.toLowerCase().includes(normalizedAdminSearch))
       );
     });
 
@@ -1050,28 +1505,33 @@ export default function App() {
       if (activeOrdersSort === 'most-items') return b.itemCount - a.itemCount || b.totalVials - a.totalVials || b.totalPHP - a.totalPHP;
       return b.totalPHP - a.totalPHP || (b.latestTimestamp || 0) - (a.latestTimestamp || 0);
     });
-  }, [customerList, adminGlobalSearch, activeOrdersFilter, activeOrdersSort, settings.reviewStageOpen, settings.paymentsOpen]);
+  }, [needsActiveOrdersData, customerList, normalizedAdminSearch, activeOrdersFilter, activeOrdersSort, settings.reviewStageOpen, settings.paymentsOpen]);
 
-  const activeOrdersSummary = useMemo(() => ({
-    total: customerList.length,
-    unpaid: customerList.filter(c => !c.isPaid).length,
-    missingAddress: customerList.filter(c => !c.hasAddress).length,
-    unassignedAdmin: customerList.filter(c => !c.hasAssignedAdmin).length,
-    ready: customerList.filter(c => c.isPaid && c.hasAddress && c.hasAssignedAdmin).length,
-    reviewPending: customerList.filter(c => settings.reviewStageOpen && !c.buyerReviewConfirmedAt).length,
-    buyerReview: customerList.filter(c => settings.reviewStageOpen && !c.buyerReviewConfirmedAt).length,
-    reviewReady: customerList.filter(c => c.reviewReady).length
-  }), [customerList, settings.reviewStageOpen]);
+  const activeOrdersSummary = useMemo(() => {
+    if (!needsActiveOrdersData) {
+      return { total: 0, unpaid: 0, missingAddress: 0, unassignedAdmin: 0, ready: 0, reviewPending: 0, buyerReview: 0, reviewReady: 0 };
+    }
+    return {
+      total: customerList.length,
+      unpaid: customerList.filter(c => !c.isPaid).length,
+      missingAddress: customerList.filter(c => !c.hasAddress).length,
+      unassignedAdmin: customerList.filter(c => !c.hasAssignedAdmin).length,
+      ready: customerList.filter(c => c.isPaid && c.hasAddress && c.hasAssignedAdmin).length,
+      reviewPending: customerList.filter(c => settings.reviewStageOpen && !c.buyerReviewConfirmedAt).length,
+      buyerReview: customerList.filter(c => settings.reviewStageOpen && !c.buyerReviewConfirmedAt).length,
+      reviewReady: customerList.filter(c => c.reviewReady).length
+    };
+  }, [needsActiveOrdersData, customerList, settings.reviewStageOpen]);
 
   const paymentCustomers = useMemo(() => {
+    if (!needsPaymentData) return [];
     const searched = customerList.filter(c => {
-      if (!adminGlobalSearch) return true;
-      const lowerQuery = adminGlobalSearch.toLowerCase();
+      if (!normalizedAdminSearch) return true;
       return (
-        c.name.toLowerCase().includes(lowerQuery) ||
-        c.email.toLowerCase().includes(lowerQuery) ||
-        (c.handle || '').toLowerCase().includes(lowerQuery) ||
-        (c.adminAssigned || '').toLowerCase().includes(lowerQuery)
+        c.name.toLowerCase().includes(normalizedAdminSearch) ||
+        c.email.toLowerCase().includes(normalizedAdminSearch) ||
+        (c.handle || '').toLowerCase().includes(normalizedAdminSearch) ||
+        (c.adminAssigned || '').toLowerCase().includes(normalizedAdminSearch)
       );
     });
 
@@ -1153,31 +1613,42 @@ export default function App() {
     });
 
     return normalized;
-  }, [customerList, adminGlobalSearch, paymentViewFilter, paymentSort, paymentFilterAdmin]);
+  }, [needsPaymentData, customerList, normalizedAdminSearch, paymentViewFilter, paymentSort, paymentFilterAdmin]);
 
-  const paymentSummary = useMemo(() => ({
-    totalExpectedPHP: customerList.reduce((acc, c) => acc + c.totalPHP, 0),
-    totalPaidPHP: customerList.filter(c => c.isPaid).reduce((acc, c) => acc + c.totalPHP, 0),
-    paidCount: customerList.filter(c => c.isPaid).length,
-    unpaidCount: customerList.filter(c => !c.isPaid).length,
-    proofSentCount: customerList.filter(c => !c.isPaid && c.hasProof).length,
-    noProofCount: customerList.filter(c => !c.hasProof).length,
-    missingAddressCount: customerList.filter(c => !c.hasAddress).length,
-    missingAdminCount: customerList.filter(c => !c.hasAssignedAdmin).length,
-    readyCount: customerList.filter(c => c.isPaid && c.hasAddress && c.hasAssignedAdmin).length,
-    recheckCount: customerList.filter(c => c.proofReview === 'needs-recheck').length
-  }), [customerList]);
+  const paymentSummary = useMemo(() => {
+    if (!needsPaymentData) {
+      return { totalExpectedPHP: 0, totalPaidPHP: 0, paidCount: 0, unpaidCount: 0, proofSentCount: 0, noProofCount: 0, missingAddressCount: 0, missingAdminCount: 0, readyCount: 0, recheckCount: 0 };
+    }
+    return {
+      totalExpectedPHP: customerList.reduce((acc, c) => acc + c.totalPHP, 0),
+      totalPaidPHP: customerList.filter(c => c.isPaid).reduce((acc, c) => acc + c.totalPHP, 0),
+      paidCount: customerList.filter(c => c.isPaid).length,
+      unpaidCount: customerList.filter(c => !c.isPaid).length,
+      proofSentCount: customerList.filter(c => !c.isPaid && c.hasProof).length,
+      noProofCount: customerList.filter(c => !c.hasProof).length,
+      missingAddressCount: customerList.filter(c => !c.hasAddress).length,
+      missingAdminCount: customerList.filter(c => !c.hasAssignedAdmin).length,
+      readyCount: customerList.filter(c => c.isPaid && c.hasAddress && c.hasAssignedAdmin).length,
+      recheckCount: customerList.filter(c => c.proofReview === 'needs-recheck').length
+    };
+  }, [needsPaymentData, customerList]);
 
-  const paymentAuditSummary = useMemo(() => ({
-    proofSubmittedPHP: customerList.filter(c => c.hasProof).reduce((acc, c) => acc + c.totalPHP, 0),
-    pendingReviewPHP: customerList.filter(c => c.hasProof && !c.isPaid).reduce((acc, c) => acc + c.totalPHP, 0),
-    noProofPHP: customerList.filter(c => !c.hasProof).reduce((acc, c) => acc + c.totalPHP, 0),
-    proofSubmittedCount: customerList.filter(c => c.hasProof).length,
-    pendingReviewCount: customerList.filter(c => c.hasProof && !c.isPaid).length,
-    noProofCount: customerList.filter(c => !c.hasProof).length
-  }), [customerList]);
+  const paymentAuditSummary = useMemo(() => {
+    if (!needsPaymentData) {
+      return { proofSubmittedPHP: 0, pendingReviewPHP: 0, noProofPHP: 0, proofSubmittedCount: 0, pendingReviewCount: 0, noProofCount: 0 };
+    }
+    return {
+      proofSubmittedPHP: customerList.filter(c => c.hasProof).reduce((acc, c) => acc + c.totalPHP, 0),
+      pendingReviewPHP: customerList.filter(c => c.hasProof && !c.isPaid).reduce((acc, c) => acc + c.totalPHP, 0),
+      noProofPHP: customerList.filter(c => !c.hasProof).reduce((acc, c) => acc + c.totalPHP, 0),
+      proofSubmittedCount: customerList.filter(c => c.hasProof).length,
+      pendingReviewCount: customerList.filter(c => c.hasProof && !c.isPaid).length,
+      noProofCount: customerList.filter(c => !c.hasProof).length
+    };
+  }, [needsPaymentData, customerList]);
 
   const paymentAdminBreakdown = useMemo(() => {
+    if (!needsPaymentData) return [];
     const map = {};
     customerList.forEach(c => {
       const admin = c.hasAssignedAdmin ? c.adminAssigned : 'Unassigned';
@@ -1195,9 +1666,10 @@ export default function App() {
     });
 
     return Object.values(map).sort((a, b) => b.expected - a.expected || a.admin.localeCompare(b.admin));
-  }, [customerList]);
+  }, [needsPaymentData, customerList]);
 
   const paymentAuditByAdmin = useMemo(() => {
+    if (!needsPaymentData) return [];
     const map = {};
     customerList.forEach((customer) => {
       const admin = customer.hasAssignedAdmin ? customer.adminAssigned : 'Unassigned';
@@ -1277,25 +1749,29 @@ export default function App() {
       });
       return next;
     });
-  }, [customerList]);
+  }, [needsPaymentData, customerList]);
 
   const filteredPackingOrders = useMemo(() => {
-    return orders.filter(o => !adminGlobalSearch || o.product.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || o.name.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || o.email.toLowerCase().includes(adminGlobalSearch.toLowerCase()));
-  }, [orders, adminGlobalSearch]);
+    if (!needsPackingData) return [];
+    return orders.filter(o => !normalizedAdminSearch || o.product.toLowerCase().includes(normalizedAdminSearch) || o.name.toLowerCase().includes(normalizedAdminSearch) || o.email.toLowerCase().includes(normalizedAdminSearch));
+  }, [needsPackingData, orders, normalizedAdminSearch]);
 
   const filteredHitList = useMemo(() => {
-    return trimmingHitList.filter(v => !adminGlobalSearch || v.prod.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || v.name.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || v.email.toLowerCase().includes(adminGlobalSearch.toLowerCase()));
-  }, [trimmingHitList, adminGlobalSearch]);
+    if (!needsAdminHitListData) return [];
+    return trimmingHitList.filter(v => !normalizedAdminSearch || v.prod.toLowerCase().includes(normalizedAdminSearch) || v.name.toLowerCase().includes(normalizedAdminSearch) || v.email.toLowerCase().includes(normalizedAdminSearch));
+  }, [needsAdminHitListData, trimmingHitList, normalizedAdminSearch]);
 
   const filteredUsers = useMemo(() => {
-    return users.filter(u => !adminGlobalSearch || u.name?.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || u.id?.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || u.handle?.toLowerCase().includes(adminGlobalSearch.toLowerCase()));
-  }, [users, adminGlobalSearch]);
+    if (!needsCustomerDirectoryData) return [];
+    return users.filter(u => !normalizedAdminSearch || u.name?.toLowerCase().includes(normalizedAdminSearch) || u.id?.toLowerCase().includes(normalizedAdminSearch) || u.handle?.toLowerCase().includes(normalizedAdminSearch));
+  }, [needsCustomerDirectoryData, users, normalizedAdminSearch]);
 
-  // âœ¨ IMPROVED: Added Category Filtering
+  // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ IMPROVED: Added Category Filtering
   const filteredShopProducts = useMemo(() => {
+    if (!isShopView) return [];
     let filtered = enrichedProducts;
-    if (searchQuery) {
-      filtered = filtered.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
+    if (normalizedShopSearchQuery) {
+      filtered = filtered.filter(p => p.name.toLowerCase().includes(normalizedShopSearchQuery));
     }
     if (selectedCategory !== 'All') {
       filtered = filtered.filter(p => {
@@ -1309,13 +1785,14 @@ export default function App() {
       if (aPriority !== bPriority) return aPriority - bPriority;
       return a.name.localeCompare(b.name);
     });
-  }, [enrichedProducts, searchQuery, selectedCategory]);
+  }, [isShopView, enrichedProducts, normalizedShopSearchQuery, selectedCategory]);
 
   const filteredSettingsProducts = useMemo(() => {
+    if (!needsInventoryData) return [];
     return products
-      .filter(p => !adminSettingsProductSearch || p.name.toLowerCase().includes(adminSettingsProductSearch.toLowerCase()))
+      .filter(p => !normalizedAdminSettingsProductSearch || p.name.toLowerCase().includes(normalizedAdminSettingsProductSearch))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [products, adminSettingsProductSearch]);
+  }, [needsInventoryData, products, normalizedAdminSettingsProductSearch]);
 
   const sortedAdminProducts = useMemo(() => {
     const list = [...filteredAdminProducts];
@@ -1355,16 +1832,18 @@ export default function App() {
   }, [paymentCustomers, paymentsTableSort]);
 
   const sortedLogs = useMemo(() => {
-    const filtered = logs.filter(log => !adminGlobalSearch || log.name?.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || log.email?.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || log.action?.toLowerCase().includes(adminGlobalSearch.toLowerCase()) || log.details?.toLowerCase().includes(adminGlobalSearch.toLowerCase()));
+    if (!adminNeedsLogs) return [];
+    const filtered = logs.filter(log => !normalizedAdminSearch || log.name?.toLowerCase().includes(normalizedAdminSearch) || log.email?.toLowerCase().includes(normalizedAdminSearch) || log.action?.toLowerCase().includes(normalizedAdminSearch) || log.details?.toLowerCase().includes(normalizedAdminSearch));
     return [...filtered].sort((a, b) => {
       if (logsTableSort.key === 'customer') return compareTableValues(a.name || a.email, b.name || b.email, logsTableSort.direction);
       if (logsTableSort.key === 'action') return compareTableValues(a.action, b.action, logsTableSort.direction);
       if (logsTableSort.key === 'details') return compareTableValues(a.details, b.details, logsTableSort.direction);
       return compareTableValues(a.timestamp, b.timestamp, logsTableSort.direction);
     });
-  }, [logs, adminGlobalSearch, logsTableSort]);
+  }, [adminNeedsLogs, logs, normalizedAdminSearch, logsTableSort]);
 
   const packingRows = useMemo(() => {
+    if (!needsPackingData) return [];
     const rows = [];
     Object.keys(filteredPackingOrders.reduce((acc, o) => {
       if (!acc[o.product]) acc[o.product] = [];
@@ -1396,9 +1875,10 @@ export default function App() {
       });
     });
     return rows;
-  }, [filteredPackingOrders]);
+  }, [needsPackingData, filteredPackingOrders]);
 
   const sortedPackingRows = useMemo(() => {
+    if (!needsPackingData) return [];
     const list = [...packingRows];
     return list.sort((a, b) => {
       if (packingTableSort.key === 'box') return compareTableValues(a.box, b.box, packingTableSort.direction);
@@ -1406,18 +1886,20 @@ export default function App() {
       if (packingTableSort.key === 'take') return compareTableValues(a.take, b.take, packingTableSort.direction);
       return compareTableValues(a.product, b.product, packingTableSort.direction);
     });
-  }, [packingRows, packingTableSort]);
+  }, [needsPackingData, packingRows, packingTableSort]);
 
   const sortedHitList = useMemo(() => {
+    if (!needsAdminHitListData) return [];
     const list = [...filteredHitList];
     return list.sort((a, b) => {
       if (trimmingTableSort.key === 'status') return compareTableValues(a.missingSlots, b.missingSlots, trimmingTableSort.direction);
       if (trimmingTableSort.key === 'customer') return compareTableValues(a.name || a.email, b.name || b.email, trimmingTableSort.direction);
       return compareTableValues(a.prod, b.prod, trimmingTableSort.direction);
     });
-  }, [filteredHitList, trimmingTableSort]);
+  }, [needsAdminHitListData, filteredHitList, trimmingTableSort]);
 
   const groupedHitList = useMemo(() => {
+    if (!needsAdminHitListData) return [];
     const groups = filteredHitList.reduce((acc, item) => {
       const key = `${item.prod}||${item.boxNum}||${item.missingSlots}`;
       if (!acc[key]) {
@@ -1452,25 +1934,30 @@ export default function App() {
         if (productDiff !== 0) return productDiff;
         return Number(a.boxNum || 0) - Number(b.boxNum || 0);
       });
-  }, [filteredHitList]);
+  }, [needsAdminHitListData, filteredHitList]);
 
   const sortedRegisteredUsers = useMemo(() => {
+    if (!needsCustomerDirectoryData) return [];
     const list = [...filteredUsers];
     return list.sort((a, b) => {
       if (customersTableSort.key === 'address') return compareTableValues(a.address?.street || '', b.address?.street || '', customersTableSort.direction);
       return compareTableValues(a.name || a.id, b.name || b.id, customersTableSort.direction);
     });
-  }, [filteredUsers, customersTableSort]);
+  }, [needsCustomerDirectoryData, filteredUsers, customersTableSort]);
 
   const sortedSettingsProducts = useMemo(() => {
+    if (!needsInventoryData) return [];
     const list = [...filteredSettingsProducts];
     return list.sort((a, b) => {
       if (productsTableSort.key === 'price') return compareTableValues(a.pricePerVialUSD, b.pricePerVialUSD, productsTableSort.direction);
       return compareTableValues(a.name, b.name, productsTableSort.direction);
     });
-  }, [filteredSettingsProducts, productsTableSort]);
+  }, [needsInventoryData, filteredSettingsProducts, productsTableSort]);
 
   const logsSummary = useMemo(() => {
+    if (!adminNeedsLogs) {
+      return { total: 0, today: 0, customers: 0, latest: 'No recent action' };
+    }
     const today = new Date();
     const todayCount = sortedLogs.filter(log => {
       const stamp = new Date(log.timestamp || 0);
@@ -1482,28 +1969,43 @@ export default function App() {
       customers: new Set(sortedLogs.map(log => log.email).filter(Boolean)).size,
       latest: sortedLogs[0]?.action || 'No recent action'
     };
-  }, [sortedLogs]);
+  }, [adminNeedsLogs, sortedLogs]);
 
-  const packingSummary = useMemo(() => ({
-    rows: sortedPackingRows.length,
-    products: new Set(sortedPackingRows.map(row => row.product)).size,
-    customers: new Set(sortedPackingRows.map(row => row.email)).size,
-    boxes: totalPhysicalBoxesToReceive
-  }), [sortedPackingRows, totalPhysicalBoxesToReceive]);
+  const packingSummary = useMemo(() => {
+    if (!needsPackingData) {
+      return { rows: 0, products: 0, customers: 0, boxes: 0 };
+    }
+    return {
+      rows: sortedPackingRows.length,
+      products: new Set(sortedPackingRows.map(row => row.product)).size,
+      customers: new Set(sortedPackingRows.map(row => row.email)).size,
+      boxes: totalPhysicalBoxesToReceive
+    };
+  }, [needsPackingData, sortedPackingRows, totalPhysicalBoxesToReceive]);
 
-  const hitListSummary = useMemo(() => ({
-    rows: filteredHitList.length,
-    products: new Set(filteredHitList.map(item => item.prod)).size,
-    customers: new Set(filteredHitList.map(item => item.email)).size,
-    riskyVials: filteredHitList.reduce((sum, item) => sum + Number(item.amountToRemove || 0), 0)
-  }), [filteredHitList]);
+  const hitListSummary = useMemo(() => {
+    if (!needsAdminHitListData) {
+      return { rows: 0, products: 0, customers: 0, riskyVials: 0 };
+    }
+    return {
+      rows: filteredHitList.length,
+      products: new Set(filteredHitList.map(item => item.prod)).size,
+      customers: new Set(filteredHitList.map(item => item.email)).size,
+      riskyVials: filteredHitList.reduce((sum, item) => sum + Number(item.amountToRemove || 0), 0)
+    };
+  }, [needsAdminHitListData, filteredHitList]);
 
-  const customerSummary = useMemo(() => ({
-    total: sortedRegisteredUsers.length,
-    withAddress: sortedRegisteredUsers.filter(user => user.address?.street).length,
-    noAddress: sortedRegisteredUsers.filter(user => !user.address?.street).length,
-    withHandle: sortedRegisteredUsers.filter(user => user.handle).length
-  }), [sortedRegisteredUsers]);
+  const customerSummary = useMemo(() => {
+    if (!needsCustomerDirectoryData) {
+      return { total: 0, withAddress: 0, noAddress: 0, withHandle: 0 };
+    }
+    return {
+      total: sortedRegisteredUsers.length,
+      withAddress: sortedRegisteredUsers.filter(user => user.address?.street).length,
+      noAddress: sortedRegisteredUsers.filter(user => !user.address?.street).length,
+      withHandle: sortedRegisteredUsers.filter(user => user.handle).length
+    };
+  }, [needsCustomerDirectoryData, sortedRegisteredUsers]);
 
   const adminProfilesSummary = useMemo(() => {
     const bankOptions = normalizedAdmins.reduce((sum, admin) => sum + (admin.banks?.length || 0), 0);
@@ -1518,6 +2020,9 @@ export default function App() {
   }, [normalizedAdmins]);
 
   const productCatalogSummary = useMemo(() => {
+    if (!needsInventoryData) {
+      return { total: 0, visible: 0, average: 0, highest: 0 };
+    }
     const prices = sortedSettingsProducts.map(product => Number(product.pricePerVialUSD || 0)).filter(price => !Number.isNaN(price));
     const average = prices.length ? prices.reduce((sum, price) => sum + price, 0) / prices.length : 0;
     const highest = prices.length ? Math.max(...prices) : 0;
@@ -1527,7 +2032,7 @@ export default function App() {
       average,
       highest
     };
-  }, [products.length, sortedSettingsProducts]);
+  }, [needsInventoryData, products.length, sortedSettingsProducts]);
 
   const wikiFilterOptions = useMemo(() => {
     const tagCounts = {};
@@ -1546,8 +2051,10 @@ export default function App() {
     ];
   }, []);
 
+  const currentWikiFocusLabel = wikiTagFilter === 'All' ? 'All Categories' : wikiTagFilter;
+
   const filteredWikiData = useMemo(() => {
-    const lowerQuery = wikiSearchQuery.trim().toLowerCase();
+    const lowerQuery = normalizedWikiSearchQuery;
 
     return WIKI_DATA
       .map((item) => ({
@@ -1567,7 +2074,7 @@ export default function App() {
         );
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [wikiSearchQuery, wikiTagFilter]);
+  }, [normalizedWikiSearchQuery, wikiTagFilter]);
 
   const peptideCalculator = useMemo(() => {
     const doseMg = Number(calculatorDoseMg);
@@ -1596,22 +2103,31 @@ export default function App() {
     };
   }, [calculatorDoseMg, calculatorStrengthMg, calculatorWaterMl]);
 
-  const customerProfile = useMemo(() => users.find(u => u.id === customerEmail.toLowerCase().trim()) || null, [users, customerEmail]);
+  const customerProfile = useMemo(() => usersById[normalizedCustomerEmail] || null, [usersById, normalizedCustomerEmail]);
 
   const existingOrderData = useMemo(() => {
-    const userOrders = orders.filter(o => o.email === customerEmail.toLowerCase().trim());
+    const userOrders = ordersByEmail[normalizedCustomerEmail] || [];
     const itemsMap = {};
     userOrders.forEach(o => {
       if (!itemsMap[o.product]) itemsMap[o.product] = 0;
       itemsMap[o.product] += o.qty;
     });
     return { items: itemsMap };
-  }, [orders, customerEmail]);
+  }, [normalizedCustomerEmail, ordersByEmail]);
 
   const isCurrentUserAtRisk = useMemo(() => {
     if (!customerEmail || !settings.addOnly) return false;
     return trimmingHitList.some(v => v.email === customerEmail.toLowerCase().trim());
   }, [trimmingHitList, customerEmail, settings.addOnly]);
+
+  const selectedProfile = useMemo(() => {
+    if (!normalizedSelectedProfileEmail) return null;
+    if (normalizedSelectedProfileEmail === normalizedCustomerEmail) {
+      return customerProfile || { id: selectedProfileEmail, name: 'Unknown Customer' };
+    }
+    return usersById[normalizedSelectedProfileEmail] || { id: selectedProfileEmail, name: 'Unknown Customer' };
+  }, [customerProfile, normalizedCustomerEmail, normalizedSelectedProfileEmail, selectedProfileEmail, usersById]);
+
 
   useEffect(() => {
     if (view !== 'shop') return undefined;
@@ -1868,7 +2384,7 @@ export default function App() {
   }
 
   function confirmHitListIncrease(productName, requestedAddQty = 1, hitListContext = {}) {
-    const product = products.find(p => p.name === productName);
+    const product = productsByName[productName];
     if (!product) {
       adjustCartItem(productName, 1);
       return;
@@ -1878,7 +2394,7 @@ export default function App() {
     const addQty = Math.max(1, parseInt(requestedAddQty, 10) || 1);
     const nextQty = currentQty + addQty;
     const nextSubtotalUSD = subtotalUSD + (Number(product.pricePerVialUSD || 0) * addQty);
-    const nextTotalPHP = lockedPaymentSnapshot?.totalPHP ?? ((nextSubtotalUSD > 0 && settings.fxRate > 0 ? nextSubtotalUSD + (settings.adminFeePhp / settings.fxRate) : 0) * settings.fxRate);
+    const nextTotalPHP = lockedPaymentSnapshot?.totalPHP ?? calculateOrderTotals(nextSubtotalUSD).totalPHP;
 
     setPendingHitListAdd({
       productName,
@@ -1893,12 +2409,27 @@ export default function App() {
     });
   }
 
+  function updatePendingHitListAddQuantity(addQty) {
+    setPendingHitListAdd(prev => {
+      if (!prev) return prev;
+      const safeQty = Math.max(1, parseInt(addQty, 10) || 1);
+      const nextQty = (prev.currentQty || 0) + safeQty;
+      const nextSubtotalUSD = (prev.baseSubtotalUSD || 0) + ((prev.pricePerVialUSD || 0) * safeQty);
+      return {
+        ...prev,
+        addQty: safeQty,
+        nextQty,
+        nextTotalPHP: lockedPaymentSnapshot?.totalPHP ?? calculateOrderTotals(nextSubtotalUSD).totalPHP
+      };
+    });
+  }
+
   async function removeCustomerProof(customer) {
     if (!customer?.email) return;
     if (!window.confirm(`Remove proof for ${customer.name || customer.email}?`)) return;
 
     try {
-      const customerProfile = users.find(userProfile => userProfile.id === customer.email) || null;
+      const customerProfile = usersById[customer.email] || null;
       await createRecycleRecord({
         label: `Deleted proof reference for ${customer.name || customer.email}`,
         recycleType: 'proof',
@@ -2037,7 +2568,7 @@ export default function App() {
       if (record.kind === 'recycle') {
         if (record.recycleType === 'orders') {
           if (record.userSnapshot?.id) {
-            const currentOrders = orders.filter(order => order.email === record.userSnapshot.id);
+            const currentOrders = ordersByEmail[record.userSnapshot.id] || [];
             for (const chunk of chunkArray(currentOrders, 250)) {
               const batch = writeBatch(db);
               chunk.forEach(order => batch.delete(doc(db, colPath('orders'), order.id)));
@@ -2079,7 +2610,7 @@ export default function App() {
       if (record.kind === 'undo') {
         if (record.replaceCustomerOrders && (record.targetEmails || []).length) {
           for (const emailChunk of chunkArray(record.targetEmails || [], 100)) {
-            const matchingOrders = orders.filter(order => emailChunk.includes(order.email));
+            const matchingOrders = emailChunk.flatMap((email) => ordersByEmail[email] || []);
             for (const deleteChunk of chunkArray(matchingOrders, 250)) {
               const batch = writeBatch(db);
               deleteChunk.forEach(order => batch.delete(doc(db, colPath('orders'), order.id)));
@@ -2288,7 +2819,7 @@ export default function App() {
   };
 
   const handleAddFromChat = (prodName) => {
-    const pData = enrichedProducts.find(p => p.name === prodName);
+    const pData = enrichedProductsByName[prodName];
     if (!pData || pData.isClosed) {
       showToast(getAvailabilityMessage(prodName, pData), 6000);
       return;
@@ -2323,9 +2854,13 @@ export default function App() {
   function handleLookup() {
     if (!customerEmail) return;
 
-    const cleanEmail = customerEmail.toLowerCase().trim();
-    const profile = users.find(u => u.id === cleanEmail) || null;
-    const userOrderRows = orders.filter(o => o.email === cleanEmail);
+    const keepLookupAnchored = settings.paymentsOpen || isReviewStageOpen;
+    const cleanEmail = normalizedCustomerEmail;
+    if ((settings.paymentsOpen || isReviewStageOpen) && cleanEmail !== customerEmailConfirm.toLowerCase().trim()) {
+      return;
+    }
+    const profile = usersById[cleanEmail] || null;
+    const userOrderRows = ordersByEmail[cleanEmail] || [];
     const hasActiveOrders = userOrderRows.length > 0;
     const currentItems = {};
     userOrderRows.forEach(o => { currentItems[o.product] = (currentItems[o.product] || 0) + o.qty; });
@@ -2353,8 +2888,8 @@ export default function App() {
       }
       showToast(
         hasActiveOrders
-          ? "Existing order found. You can edit it below."
-          : (settings.storeOpen !== false ? "No existing profile found. Welcome." : "No profile found for this email.")
+          ? (settings.paymentsOpen || isReviewStageOpen ? "Saved order found. It is loaded below." : "Existing order found. You can edit it below.")
+          : (settings.storeOpen !== false ? "No saved profile found for this email." : "No profile found for this email.")
       );
       if (!hasActiveOrders) {
         setCustomerName('');
@@ -2370,6 +2905,12 @@ export default function App() {
       if (hasActiveOrders) {
         showToast(settings.addOnly ? "Your order is loaded. You can add more vials only." : "Your current order is loaded for editing.");
       }
+    }
+
+    if (keepLookupAnchored) {
+      requestAnimationFrame(() => {
+        document.getElementById('top-form-card')?.scrollIntoView({ behavior: 'auto', block: 'start' });
+      });
     }
   }
 
@@ -2468,7 +3009,7 @@ export default function App() {
     if (!customerEmail) { triggerAmbulance(); showToast("Enter your email first."); return; }
 
     const emailLower = customerEmail.toLowerCase().trim();
-    const userOrderRows = orders.filter(o => o.email === emailLower);
+    const userOrderRows = ordersByEmail[emailLower] || [];
     if (userOrderRows.length === 0) {
       showToast("There is no saved order to cancel.");
       return;
@@ -2476,7 +3017,7 @@ export default function App() {
 
     setIsBtnLoading(true);
     try {
-      const customerProfile = users.find(profile => profile.id === emailLower) || { id: emailLower, name: customerName, handle: customerHandle };
+      const customerProfile = usersById[emailLower] || { id: emailLower, name: customerName, handle: customerHandle };
       await createBatchSnapshot('Before customer order cancel', { action: 'cancel-order', email: emailLower });
       await createRecycleRecord({
         label: `Cancelled order for ${customerName || emailLower}`,
@@ -2546,7 +3087,7 @@ export default function App() {
         }
 
         finalTotalQty += qty;
-        const pData = enrichedProducts.find(p => p.name === prodName);
+        const pData = enrichedProductsByName[prodName];
         if (!pData) {
           errors.push({ product: prodName, message: `${prodName}: product not found.` });
           return;
@@ -2589,7 +3130,7 @@ export default function App() {
         return;
       }
 
-      const toDelete = orders.filter(o => o.email === emailLower);
+      const toDelete = ordersByEmail[emailLower] || [];
       for (const chunk of chunkArray(toDelete, 250)) {
         const batch = writeBatch(db);
         chunk.forEach(o => batch.delete(doc(db, colPath('orders'), o.id)));
@@ -2605,7 +3146,7 @@ export default function App() {
         await safeAwait(batch.commit());
       }
 
-      const existingUser = users.find(u => u.id === emailLower);
+      const existingUser = usersById[emailLower];
       const userUpdatePayload = {
         name: customerName,
         handle: customerHandle,
@@ -2633,6 +3174,14 @@ export default function App() {
 
   async function submitPayment() {
     if (showShopAccessGate) { showToast("Enter the batch code from Discord first."); return; }
+    if (!hasValidPaymentRoute) {
+      showToast("Payment is blocked until a real admin with a bank or QR route is assigned to your order.");
+      return;
+    }
+    if (!arePaymentRoutesVisible) {
+      showToast("Payment instructions are temporarily hidden by admin. Please wait until routes are shown again.");
+      return;
+    }
     const errs = {};
     if (!addressForm.shipOpt) errs.shipOpt = true;
     if (!addressForm.partialShipPref) errs.partialShipPref = true;
@@ -2658,8 +3207,9 @@ export default function App() {
       const fileExt = proofFile.name.split('.').pop();
       const fileName = `${emailLower}_${Date.now()}.${fileExt}`;
       const sRefPath = isCanvas ? `artifacts/${appId}/public/proofs/${fileName}` : `proofs/${fileName}`;
+      const { storage, storageRef, uploadBytesResumable, getDownloadURL } = await getStorageServices();
       const sRef = storageRef(storage, sRefPath);
-      const currentProfile = users.find(u => u.id === emailLower) || {};
+      const currentProfile = emailLower === normalizedCustomerEmail ? (customerProfile || {}) : (usersById[emailLower] || {});
       const existingSnapshot = getFrozenPaymentSnapshot(currentProfile);
       const frozenSnapshot = existingSnapshot || buildPaymentSnapshot(existingOrderData.items, currentProfile.adminAssigned || currentCustomerRecord?.adminAssigned, emailLower);
 
@@ -2751,7 +3301,7 @@ export default function App() {
      <div class="label-container">`;
 
     usersToPrint.forEach(c => {
-      const userOrders = orders.filter(o => o.email === c.email);
+      const userOrders = ordersByEmail[c.email] || [];
       html += `<div class="label">
             <h2>${c.name}</h2>
             <div class="meta">Handle: <strong>${c.handle || 'N/A'}</strong><br/>Email: ${c.email}</div>
@@ -2936,8 +3486,8 @@ export default function App() {
 
     setIsBtnLoading(true);
     try {
-      const toDelete = orders.filter(order => order.email === customer.email);
-      const customerProfile = users.find(profile => profile.id === customer.email) || { id: customer.email, name: customer.name || '', handle: customer.handle || '' };
+      const toDelete = ordersByEmail[customer.email] || [];
+      const customerProfile = usersById[customer.email] || { id: customer.email, name: customer.name || '', handle: customer.handle || '' };
       await createBatchSnapshot('Before admin deleted all order rows', { action: 'delete-all-orders', email: customer.email });
       await createRecycleRecord({
         label: `Deleted all active orders for ${customer.name || customer.email}`,
@@ -3139,7 +3689,7 @@ export default function App() {
       for (const chunk of chunkArray(activeCustomers, 250)) {
         const batch = writeBatch(db);
         chunk.forEach((customer) => {
-          const userProfile = users.find(u => u.id === customer.email) || {};
+          const userProfile = usersById[customer.email] || {};
           const shouldPreserveExistingSnapshot = Boolean(userProfile.proofUrl || userProfile.isPaid);
           const paymentSnapshot = shouldPreserveExistingSnapshot && getFrozenPaymentSnapshot(userProfile)
             ? getFrozenPaymentSnapshot(userProfile)
@@ -3204,7 +3754,7 @@ export default function App() {
         actionType: 'bulk-cut-hit-list',
         label: `Undo bulk cut of ${sortedHitList.length} hit list row${sortedHitList.length === 1 ? '' : 's'}`,
         beforeOrders,
-        beforeUsers: users.filter(profile => affectedEmails.includes(profile.id)),
+        beforeUsers: affectedEmails.map((email) => usersById[email]).filter(Boolean),
         targetEmails: affectedEmails,
         meta: { rows: sortedHitList.length }
       });
@@ -3346,7 +3896,7 @@ export default function App() {
 
       for (const chunk of chunkArray(products, 400)) {
         const batch = writeBatch(db);
-        chunk.forEach(p => batch.set(doc(db, colPath('products'), p.id), { locked: false, maxBoxes: 0, syncCapped: false }, { merge: true }));
+        chunk.forEach(p => batch.set(doc(db, colPath('products'), p.id), { locked: false, maxBoxes: 0, syncCapped: false, inventoryTotalVials: 0, inventoryBoxes: 0, inventorySlotsLeft: SLOTS_PER_BATCH, inventoryUpdatedAt: Date.now() }, { merge: true }));
         await safeAwait(batch.commit());
       }
 
@@ -3375,7 +3925,7 @@ export default function App() {
         const batch = writeBatch(db);
         chunk.forEach(item => {
           const ref = doc(collection(db, colPath('products')));
-          batch.set(ref, { name: item.name, pricePerKitUSD: item.kit, pricePerVialUSD: item.vial, locked: false, maxBoxes: 0 });
+          batch.set(ref, { name: item.name, pricePerKitUSD: item.kit, pricePerVialUSD: item.vial, locked: false, maxBoxes: 0, inventoryTotalVials: 0, inventoryBoxes: 0, inventorySlotsLeft: SLOTS_PER_BATCH, inventoryUpdatedAt: Date.now() });
         });
         await safeAwait(batch.commit());
       }
@@ -3468,7 +4018,7 @@ export default function App() {
               if (kit === 0 && vial > 0) kit = vial * 10;
               if (vial === 0 && kit > 0) vial = kit / 10;
 
-              newProducts.push({ name, pricePerKitUSD: kit, pricePerVialUSD: vial, locked: false, maxBoxes: 0 });
+              newProducts.push({ name, pricePerKitUSD: kit, pricePerVialUSD: vial, locked: false, maxBoxes: 0, inventoryTotalVials: 0, inventoryBoxes: 0, inventorySlotsLeft: SLOTS_PER_BATCH, inventoryUpdatedAt: Date.now() });
             }
           }
 
@@ -3518,7 +4068,11 @@ export default function App() {
       pricePerKitUSD: Number(newProd.kit) || (Number(newProd.vial) * 10),
       pricePerVialUSD: Number(newProd.vial),
       locked: false,
-      maxBoxes: Number(newProd.max) || 0
+      maxBoxes: Number(newProd.max) || 0,
+      inventoryTotalVials: 0,
+      inventoryBoxes: 0,
+      inventorySlotsLeft: SLOTS_PER_BATCH,
+      inventoryUpdatedAt: Date.now()
     }));
     setNewProd({ name: '', kit: '', vial: '', max: '' });
     showToast('Product added.');
@@ -3537,6 +4091,7 @@ export default function App() {
           const fileExt = b.qrFile.name.split('.').pop();
           const fileName = `qr_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
           const sRefPath = isCanvas ? `artifacts/${appId}/public/qrs/${fileName}` : `qrs/${fileName}`;
+          const { storage, storageRef, uploadBytesResumable, getDownloadURL } = await getStorageServices();
           const sRef = storageRef(storage, sRefPath);
           await uploadBytesResumable(sRef, b.qrFile);
           qrUrl = await getDownloadURL(sRef);
@@ -3562,12 +4117,77 @@ export default function App() {
   };
 
   const reshuffleAdmins = async () => {
-    // ... Function body not provided in original, kept to suppress errors if called ...
+    if (settings.paymentsOpen) {
+      showToast("Admin routing is frozen while payments are live.");
+      return;
+    }
+
+    const activeCustomers = customerList.filter(customer => customer.itemCount > 0);
+    if (activeCustomers.length === 0) {
+      showToast("No active customers to reshuffle right now.");
+      return;
+    }
+
+    const eligibleAdmins = normalizedAdmins.filter((admin) =>
+      getSelectedAdminBankRoute(admin.name, `${admin.name}@routing.local`).hasRoute
+    );
+    if (eligibleAdmins.length === 0) {
+      showToast("Add at least one admin with a bank detail or QR before reshuffling.");
+      return;
+    }
+
+    const mutableCustomers = activeCustomers
+      .filter(customer => !customer.isPaid && !customer.hasProof)
+      .sort((a, b) => {
+        const totalDiff = b.totalPHP - a.totalPHP;
+        if (totalDiff !== 0) return totalDiff;
+        return a.email.localeCompare(b.email);
+      });
+
+    if (mutableCustomers.length === 0) {
+      showToast("All active customers are already payment-locked.");
+      return;
+    }
+
+    setIsBtnLoading(true);
+    try {
+      const beforeUsers = users.filter(profile => mutableCustomers.some(customer => customer.email === profile.id));
+      await createBatchSnapshot('Before admin reshuffle', {
+        action: 'reshuffle-admins',
+        customers: mutableCustomers.length,
+        admins: eligibleAdmins.map(admin => admin.name)
+      });
+      await createUndoRecord({
+        actionType: 'reshuffle-admins',
+        label: `Undo admin reshuffle for ${mutableCustomers.length} customer${mutableCustomers.length === 1 ? '' : 's'}`,
+        beforeUsers,
+        targetEmails: mutableCustomers.map(customer => customer.email),
+        meta: { admins: eligibleAdmins.map(admin => admin.name) }
+      });
+
+      for (const [index, chunk] of chunkArray(mutableCustomers, 250).entries()) {
+        const batch = writeBatch(db);
+        chunk.forEach((customer, chunkIndex) => {
+          const admin = eligibleAdmins[(index * 250 + chunkIndex) % eligibleAdmins.length];
+          batch.set(doc(db, colPath('users'), customer.email), {
+            adminAssigned: admin.name,
+            paymentSnapshot: null
+          }, { merge: true });
+        });
+        await safeAwait(batch.commit());
+      }
+
+      showToast(`${mutableCustomers.length} active customer${mutableCustomers.length === 1 ? '' : 's'} reassigned across ${eligibleAdmins.length} admin${eligibleAdmins.length === 1 ? '' : 's'}.`);
+    } catch (error) {
+      console.error(error);
+      showToast("Could not reshuffle admins right now.");
+    }
+    setIsBtnLoading(false);
   };
 
-  // âœ¨ NEW: Inline Admin Edit Logic
+  // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW: Inline Admin Edit Logic
   const openAdminEditModal = (email) => {
-    const userOrders = orders.filter(o => o.email === email);
+    const userOrders = ordersByEmail[email] || [];
     const initialCart = {};
     userOrders.forEach(o => {
       if (!initialCart[o.product]) initialCart[o.product] = 0;
@@ -3585,9 +4205,9 @@ export default function App() {
     setIsBtnLoading(true);
     try {
       const targetEmail = adminOrderEditTarget;
-      const targetProfile = users.find(u => u.id === targetEmail) || {};
+      const targetProfile = usersById[targetEmail] || {};
 
-      const oldOrders = orders.filter(o => o.email === targetEmail);
+      const oldOrders = ordersByEmail[targetEmail] || [];
       await createBatchSnapshot('Before admin cart edit', { action: 'admin-edit-cart', email: targetEmail });
       await createUndoRecord({
         actionType: 'admin-edit-cart',
@@ -3670,7 +4290,7 @@ export default function App() {
   const originalBtn = "bg-gradient-to-r from-[#FF1493] to-[#FF69B4] text-white font-black px-6 py-2.5 rounded-full shadow-[0_16px_34px_rgba(255,20,147,0.22)] uppercase tracking-[0.16em] hover:translate-y-[-1px] hover:shadow-[0_20px_38px_rgba(255,20,147,0.26)] transition-all text-sm";
 
   // --- PREPARE DATA ---
-  const userOrders = orders.filter(o => o.email === customerEmail.toLowerCase().trim());
+  const userOrders = ordersByEmail[normalizedCustomerEmail] || [];
   const existingMap = {};
   userOrders.forEach(o => { existingMap[o.product] = (existingMap[o.product] || 0) + o.qty; });
 
@@ -3688,15 +4308,15 @@ export default function App() {
   const cartList = [];
 
   Object.entries(finalItems).forEach(([prod, qty]) => {
-    const pData = products.find(p => p.name === prod);
+    const pData = productsByName[prod];
     if (pData && qty > 0) {
       subtotalUSD += qty * pData.pricePerVialUSD;
       cartList.push({ product: prod, qty, price: pData.pricePerVialUSD, total: qty * pData.pricePerVialUSD });
     }
   });
 
-  const currentCustomerRecord = customerList.find(c => c.email === customerEmail.toLowerCase().trim()) || null;
-  const currentProfile = users.find(u => u.id === customerEmail.toLowerCase().trim()) || null;
+  const currentCustomerRecord = customerListByEmail[normalizedCustomerEmail] || null;
+  const currentProfile = customerProfile;
   const currentBuyerReviewConfirmedAt = currentCustomerRecord?.buyerReviewConfirmedAt || null;
   const currentReviewReady = Boolean(currentCustomerRecord?.reviewReady);
   const lockedPaymentSnapshot = currentCustomerRecord?.paymentSnapshot || getFrozenPaymentSnapshot(currentProfile);
@@ -3708,7 +4328,15 @@ export default function App() {
       hasRoute: Boolean(lockedPaymentSnapshot.bankDetails || lockedPaymentSnapshot.bankQr)
     }
     : getSelectedAdminBankRoute(currentCustomerRecord?.adminAssigned || currentProfile?.adminAssigned, customerEmail);
-  const totalPHP = lockedPaymentSnapshot?.totalPHP ?? ((subtotalUSD > 0 && settings.fxRate > 0 ? subtotalUSD + (settings.adminFeePhp / settings.fxRate) : 0) * settings.fxRate);
+  const hasValidPaymentRoute = Boolean(
+    currentPaymentRoute?.hasRoute
+    && currentPaymentRoute?.adminAssigned
+    && currentPaymentRoute.adminAssigned !== 'Admin'
+    && currentPaymentRoute.adminAssigned !== 'Unassigned'
+  );
+  const arePaymentRoutesVisible = settings.paymentRoutesVisible !== false;
+  const canShowPaymentRoute = hasValidPaymentRoute && arePaymentRoutesVisible;
+  const totalPHP = lockedPaymentSnapshot?.totalPHP ?? calculateOrderTotals(subtotalUSD).totalPHP;
   const selectedVialCount = cartList.reduce((sum, item) => sum + item.qty, 0);
   const availableCatalogCount = filteredShopProducts.filter(p => !p.isClosed).length;
   const nearlyFullCount = filteredShopProducts.filter(p => !p.isClosed && p.slotsLeft > 0 && p.slotsLeft <= 3).length;
@@ -3771,10 +4399,14 @@ export default function App() {
     customerEmailConfirm.trim() &&
     customerEmail.toLowerCase().trim() === customerEmailConfirm.toLowerCase().trim()
   );
-  const isHeroCartCompact = !isStoreClosed && isHeroInView;
-  const shopDesktopLayoutClass = 'flex flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_252px] xl:grid-cols-[minmax(0,1fr)_284px] gap-4 xl:gap-5 items-start';
+  const isHeroCartCompact = !isStoreClosed && !isScrolled;
+  const shopDesktopLayoutClass = 'flex flex-col lg:grid gap-4 xl:gap-5 items-start lg:grid-cols-[minmax(0,1fr)_252px] xl:grid-cols-[minmax(0,1fr)_284px]';
   const desktopCartAsideClass = 'hidden lg:block sticky top-6 w-full self-start overflow-visible';
-  const desktopCartShellClass = `shop-surface rounded-[30px] shadow-xl transition-all duration-300 ease-out ${isHeroCartCompact ? 'w-full p-5' : 'w-full lg:w-[328px] xl:w-[372px] p-6'}`;
+  const desktopCartShellClass = `shop-surface rounded-[30px] shadow-xl transition-all duration-300 ease-out ${
+    isHeroCartCompact
+      ? 'w-full p-5'
+      : 'w-full lg:w-[328px] xl:w-[372px] p-6 mr-auto'
+  }`;
   const desktopCartTitleClass = isHeroCartCompact
     ? 'brand-title mt-2 text-[1.45rem] leading-[0.98] text-[#D6006E] transition-all duration-300'
     : 'brand-title mt-2 text-[1.65rem] leading-[0.95] text-[#D6006E] transition-all duration-300';
@@ -3784,7 +4416,7 @@ export default function App() {
       ? 'Review My Order'
       : 'Start Order';
   const heroIntroCopy = settings.paymentsOpen
-    ? 'Load your saved order with the same email, confirm the total, and upload payment proof here.'
+    ? 'Use the same email from your saved order, confirm the total, and upload payment proof here.'
     : isReviewStageOpen
       ? 'Review your saved order with the same email before payments open. Shopping is paused during this check window.'
       : 'Save your order, protect full kits, and come back with the same email when the payment window opens.';
@@ -3951,7 +4583,7 @@ export default function App() {
 
   const renderSortableHeader = (label, key, sortState, setSortState, className = '') => {
     const isActive = sortState.key === key;
-    const arrow = !isActive ? '↕' : sortState.direction === 'asc' ? '↑' : '↓';
+    const arrow = !isActive ? '<>' : sortState.direction === 'asc' ? '^' : 'v';
 
     return (
       <th className={className}>
@@ -3990,24 +4622,24 @@ export default function App() {
   const renderAuditDashboard = () => (
     <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="rounded-2xl border border-violet-100 bg-white px-4 py-3 text-left shadow-sm">
-          <p className="text-[10px] font-black uppercase tracking-widest text-violet-600">Proof Submitted</p>
-          <p className="mt-1 text-2xl font-black text-violet-700">₱{paymentAuditSummary.proofSubmittedPHP.toLocaleString()}</p>
+        <div className="admin-stat-card text-left">
+          <p className="admin-kicker text-violet-600">Proof Submitted</p>
+          <p className="mt-1 text-2xl font-black text-violet-700">{"\u20B1"}{paymentAuditSummary.proofSubmittedPHP.toLocaleString()}</p>
           <p className="mt-1 text-[10px] font-bold text-slate-500">{paymentAuditSummary.proofSubmittedCount} with proof</p>
         </div>
-        <div className="rounded-2xl border border-rose-100 bg-white px-4 py-3 text-left shadow-sm">
-          <p className="text-[10px] font-black uppercase tracking-widest text-rose-600">Pending Review</p>
-          <p className="mt-1 text-2xl font-black text-rose-700">₱{paymentAuditSummary.pendingReviewPHP.toLocaleString()}</p>
+        <div className="admin-stat-card text-left">
+          <p className="admin-kicker text-rose-600">Pending Review</p>
+          <p className="mt-1 text-2xl font-black text-rose-700">{"\u20B1"}{paymentAuditSummary.pendingReviewPHP.toLocaleString()}</p>
           <p className="mt-1 text-[10px] font-bold text-slate-500">{paymentAuditSummary.pendingReviewCount} awaiting admin action</p>
         </div>
-        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm">
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Still No Proof</p>
-          <p className="mt-1 text-2xl font-black text-slate-700">₱{paymentAuditSummary.noProofPHP.toLocaleString()}</p>
+        <div className="admin-stat-card text-left">
+          <p className="admin-kicker text-slate-500">Still No Proof</p>
+          <p className="mt-1 text-2xl font-black text-slate-700">{"\u20B1"}{paymentAuditSummary.noProofPHP.toLocaleString()}</p>
           <p className="mt-1 text-[10px] font-bold text-slate-500">{paymentAuditSummary.noProofCount} still unpaid</p>
         </div>
       </div>
 
-      <div className="bg-white rounded-[24px] border-2 border-pink-50 p-4 shadow-sm space-y-4">
+      <div className="admin-surface space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-pink-500">Audit Queue</p>
@@ -4032,7 +4664,7 @@ export default function App() {
               .slice(0, 6);
 
             return (
-              <div key={`audit-${admin.admin}`} className="rounded-[24px] border border-pink-100 bg-white p-4 shadow-sm">
+              <div key={`audit-${admin.admin}`} className="admin-breakdown-card p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-black text-[#4A042A]">{admin.admin}</p>
@@ -4040,23 +4672,23 @@ export default function App() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => { setPaymentFilterAdmin(admin.admin); setAdminTab('payments'); }}
-                    className="rounded-full border border-pink-200 bg-pink-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-pink-600 transition-colors hover:border-pink-300"
+                    onClick={() => { setPaymentFilterAdmin(admin.admin); switchAdminTab('payments'); }}
+                    className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-slate-600 transition-colors hover:border-pink-200 hover:text-pink-600"
                   >
                     Open in Payments
                   </button>
                 </div>
 
                 <div className="mt-4 grid grid-cols-2 gap-2">
-                  {renderCompactAdminStat('Expected', `₱${admin.expectedPHP.toLocaleString()}`, 'pink', 'Target for this admin')}
-                  {renderCompactAdminStat('Proofs In', `₱${admin.proofSubmittedPHP.toLocaleString()}`, 'violet', `${admin.buyers.filter(b => b.hasProof).length} submitted`)}
-                  {renderCompactAdminStat('Approved', `₱${admin.paidPHP.toLocaleString()}`, 'emerald', `${admin.buyers.filter(b => b.isPaid).length} marked paid`)}
-                  {renderCompactAdminStat('Gap', `₱${admin.proofGapPHP.toLocaleString()}`, admin.proofGapPHP > 0 ? 'amber' : 'emerald', admin.proofGapPHP > 0 ? 'Still missing proof' : 'All expected proof submitted')}
+                  {renderCompactAdminStat('Expected', `?${admin.expectedPHP.toLocaleString()}`, 'pink', 'Target for this admin')}
+                  {renderCompactAdminStat('Proofs In', `?${admin.proofSubmittedPHP.toLocaleString()}`, 'violet', `${admin.buyers.filter(b => b.hasProof).length} submitted`)}
+                  {renderCompactAdminStat('Approved', `?${admin.paidPHP.toLocaleString()}`, 'emerald', `${admin.buyers.filter(b => b.isPaid).length} marked paid`)}
+                  {renderCompactAdminStat('Gap', `?${admin.proofGapPHP.toLocaleString()}`, admin.proofGapPHP > 0 ? 'amber' : 'emerald', admin.proofGapPHP > 0 ? 'Still missing proof' : 'All expected proof submitted')}
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-1.5">
                   <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-violet-700">
-                    ₱{admin.approvalGapPHP.toLocaleString()} awaiting approval
+                    {"\u20B1"}{admin.approvalGapPHP.toLocaleString()} awaiting approval
                   </span>
                   <span className={`rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-widest ${admin.flaggedCount > 0 ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
                     {admin.flaggedCount} flagged buyer{admin.flaggedCount === 1 ? '' : 's'}
@@ -4076,7 +4708,7 @@ export default function App() {
                             <p className="text-sm font-black text-slate-800">{buyer.name}</p>
                             <p className="mt-0.5 text-[10px] font-bold text-slate-400">{buyer.email}</p>
                           </div>
-                          <p className="text-sm font-black text-pink-600">₱{buyer.totalPHP.toLocaleString()}</p>
+                          <p className="text-sm font-black text-pink-600">{"\u20B1"}{buyer.totalPHP.toLocaleString()}</p>
                         </div>
                         <div className="mt-2 flex flex-wrap gap-1.5">
                           {buyer.flags.map((flag) => (
@@ -4115,24 +4747,24 @@ export default function App() {
   const renderPaymentsDashboard = () => (
     <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <button onClick={() => setPaymentViewFilter('all')} className={`rounded-2xl border px-4 py-3 text-left shadow-sm transition-all ${paymentViewFilter === 'all' ? 'border-pink-300 bg-white ring-2 ring-pink-100' : 'border-pink-100 bg-white hover:border-pink-200'}`}>
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Amount</p>
-          <p className="mt-1 text-2xl font-black text-[#D6006E]">₱{paymentSummary.totalExpectedPHP.toLocaleString()}</p>
+        <button onClick={() => setPaymentViewFilter('all')} className={`admin-stat-card text-left ${paymentViewFilter === 'all' ? 'admin-stat-card-active' : ''}`}>
+          <p className="admin-kicker text-slate-400">Total Amount</p>
+                    <p className="mt-1 text-2xl font-black text-[#4A042A]">{"\u20B1"}{paymentSummary.totalExpectedPHP.toLocaleString()}</p>
           <p className="mt-1 text-[10px] font-bold text-slate-500">{customerList.length} customers</p>
         </button>
-        <button onClick={() => setPaymentViewFilter('paid')} className={`rounded-2xl border px-4 py-3 text-left shadow-sm transition-all ${paymentViewFilter === 'paid' ? 'border-emerald-300 bg-emerald-50 ring-2 ring-emerald-100' : 'border-emerald-100 bg-white hover:border-emerald-200'}`}>
-          <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Paid Amount</p>
-          <p className="mt-1 text-2xl font-black text-emerald-700">₱{paymentSummary.totalPaidPHP.toLocaleString()}</p>
+        <button onClick={() => setPaymentViewFilter('paid')} className={`admin-stat-card text-left ${paymentViewFilter === 'paid' ? 'admin-stat-card-active admin-stat-card-emerald' : ''}`}>
+          <p className="admin-kicker text-emerald-600">Paid Amount</p>
+                    <p className="mt-1 text-2xl font-black text-emerald-700">{"\u20B1"}{paymentSummary.totalPaidPHP.toLocaleString()}</p>
           <p className="mt-1 text-[10px] font-bold text-slate-500">{paymentSummary.paidCount} paid</p>
         </button>
-        <button onClick={() => setPaymentViewFilter('unpaid')} className={`rounded-2xl border px-4 py-3 text-left shadow-sm transition-all ${paymentViewFilter === 'unpaid' ? 'border-amber-300 bg-amber-50 ring-2 ring-amber-100' : 'border-amber-100 bg-white hover:border-amber-200'}`}>
-          <p className="text-[10px] font-black uppercase tracking-widest text-amber-600">Unpaid Amount</p>
-          <p className="mt-1 text-2xl font-black text-amber-700">₱{(paymentSummary.totalExpectedPHP - paymentSummary.totalPaidPHP).toLocaleString()}</p>
+        <button onClick={() => setPaymentViewFilter('unpaid')} className={`admin-stat-card text-left ${paymentViewFilter === 'unpaid' ? 'admin-stat-card-active admin-stat-card-amber' : ''}`}>
+          <p className="admin-kicker text-amber-600">Unpaid Amount</p>
+                    <p className="mt-1 text-2xl font-black text-amber-700">{"\u20B1"}{(paymentSummary.totalExpectedPHP - paymentSummary.totalPaidPHP).toLocaleString()}</p>
           <p className="mt-1 text-[10px] font-bold text-slate-500">{paymentSummary.unpaidCount} unpaid</p>
         </button>
       </div>
 
-      <div className="bg-white rounded-[24px] border-2 border-pink-50 p-4 shadow-sm space-y-4">
+      <div className="admin-surface space-y-4">
         <div>
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
@@ -4143,14 +4775,14 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setPaymentFilterAdmin('All')}
-                className="rounded-full border border-pink-200 bg-pink-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-pink-600 transition-colors hover:border-pink-300"
+                className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-slate-600 transition-colors hover:border-pink-200 hover:text-pink-600"
               >
                 Clear Admin Filter
               </button>
             )}
           </div>
 
-          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3">
             {paymentAdminBreakdown.map(admin => {
               const isActive = paymentFilterAdmin === admin.admin;
               return (
@@ -4158,7 +4790,7 @@ export default function App() {
                   key={admin.admin}
                   type="button"
                   onClick={() => setPaymentFilterAdmin(isActive ? 'All' : admin.admin)}
-                  className={`rounded-2xl border p-4 text-left shadow-sm transition-all ${isActive ? 'border-pink-300 bg-pink-50 ring-2 ring-pink-100' : 'border-pink-100 bg-white hover:border-pink-200'}`}
+                  className={`admin-breakdown-card p-4 text-left ${isActive ? 'admin-stat-card-active' : ''}`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-black text-[#4A042A]">{admin.admin}</p>
@@ -4169,15 +4801,15 @@ export default function App() {
                   <div className="mt-3 space-y-1.5 text-[11px] font-bold">
                     <div className="flex items-center justify-between gap-3 text-slate-600">
                       <span>Total</span>
-                      <span>₱{admin.expected.toLocaleString()}</span>
+                        <span>{"\u20B1"}{admin.expected.toLocaleString()}</span>
                     </div>
                     <div className="flex items-center justify-between gap-3 text-emerald-600">
                       <span>Paid</span>
-                      <span>₱{admin.paid.toLocaleString()}</span>
+                        <span>{"\u20B1"}{admin.paid.toLocaleString()}</span>
                     </div>
                     <div className="flex items-center justify-between gap-3 text-amber-600">
                       <span>Unpaid</span>
-                      <span>₱{(admin.expected - admin.paid).toLocaleString()}</span>
+                        <span>{"\u20B1"}{(admin.expected - admin.paid).toLocaleString()}</span>
                     </div>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-1.5">
@@ -4195,10 +4827,12 @@ export default function App() {
         </div>
 
         <div className="bg-white rounded-[24px] shadow-sm border-2 border-pink-50 overflow-hidden relative">
-          {hoveredProof && (
-            <div className="fixed z-[1000] pointer-events-none bg-white p-2 rounded-xl shadow-2xl border-4 border-pink-200"
-              style={{ bottom: '40px', right: '40px' }}>
-              <img src={hoveredProof} alt="Proof Preview" className="max-w-[350px] max-h-[450px] object-contain rounded-lg" />
+          {hoveredProof?.url && (
+            <div
+              className="fixed z-[1000] pointer-events-none bg-white p-2 rounded-xl shadow-2xl border-4 border-pink-200"
+              style={{ left: `${hoveredProof.left}px`, top: `${hoveredProof.top}px` }}
+            >
+              <img src={hoveredProof.url} alt="Proof Preview" className="w-[340px] max-h-[420px] object-contain rounded-lg bg-white" />
               <p className="text-center text-xs font-bold text-pink-500 mt-2">Click to View Full Screen</p>
             </div>
           )}
@@ -4230,15 +4864,19 @@ export default function App() {
                     </div>
                   </td>
                   <td className="text-right">
-                    <p className="font-black text-pink-600">₱{c.totalPHP.toLocaleString()}</p>
+                          <p className="font-black text-pink-600">{"\u20B1"}{c.totalPHP.toLocaleString()}</p>
                     <p className="mt-1 text-[10px] font-bold text-slate-400">{c.itemCount} item{c.itemCount === 1 ? '' : 's'}</p>
                   </td>
                   <td className="text-center">
                     {c.proofUrl ? (
                       <div className="flex flex-col items-center gap-1">
                         <button onClick={() => setFullScreenProof(c.proofUrl)}
-                          onMouseEnter={() => setHoveredProof(c.proofUrl)}
-                          onMouseLeave={() => setHoveredProof(null)}
+                          onMouseEnter={(event) => showHoveredProofPreview(c.proofUrl, event)}
+                          onMouseLeave={hideHoveredProofPreview}
+                          onPointerEnter={(event) => showHoveredProofPreview(c.proofUrl, event)}
+                          onPointerLeave={hideHoveredProofPreview}
+                          onFocus={(event) => showHoveredProofPreview(c.proofUrl, event)}
+                          onBlur={hideHoveredProofPreview}
                           className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-violet-700 transition-colors hover:border-violet-300">
                           View
                         </button>
@@ -4312,7 +4950,7 @@ export default function App() {
         __html: `
         @import url('https://fonts.googleapis.com/css2?family=Pacifico&family=Quicksand:wght@500;600;700;800&display=swap');
         
-        /* ðŸš€ SCROLL PERFORMANCE FIXES ðŸš€ */
+        /* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ SCROLL PERFORMANCE FIXES ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ */
         html { scroll-behavior: smooth; }
         body { 
           -webkit-overflow-scrolling: touch; 
@@ -4354,7 +4992,7 @@ export default function App() {
 
         @media screen and (max-width: 768px) { input, select, textarea { font-size: 16px !important; } }
 
-        /* âœ¨ NEW: Ambulance Shake & Flash Animation */
+        /* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW: Ambulance Shake & Flash Animation */
         @keyframes ambulanceFlash {
           0% { box-shadow: 0 0 0 0 rgba(255, 20, 147, 0.7); border-color: #FF1493; transform: translateX(0); }
           15% { box-shadow: 0 0 30px 10px rgba(255, 0, 0, 0.8); border-color: #FF0000; transform: translateX(-8px); }
@@ -4366,7 +5004,7 @@ export default function App() {
         }
         .animate-ambulance { animation: ambulanceFlash 0.8s cubic-bezier(.36,.07,.19,.97) both; background-color: #FFF0F5 !important; }
         
-        /* âœ¨ NEW: Epic Unicorn Animation */
+        /* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW: Epic Unicorn Animation */
         @keyframes flyUnicorn {
           0% { transform: translate(-50vw, 80vh) rotate(-20deg) scale(0.8); }
           25% { transform: translate(10vw, 40vh) rotate(10deg) scale(1); }
@@ -4620,12 +5258,69 @@ export default function App() {
         .hide-scroll { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
         .hide-scroll::-webkit-scrollbar { display: none; }
         
-        .admin-sidebar { width: 280px; background: #4A042A; flex-shrink: 0; }
-        .nav-item.active { background: white; color: #D6006E; border-radius: 1rem 0 0 1rem; margin-right: -1.5rem; padding-right: 1.5rem; }
-        .custom-table th { background: #FFF0F5; color: #D6006E; font-weight: 800; font-size: 10px; text-transform: uppercase; padding: 1rem; border-bottom: 2px solid #FFC0CB; }
-        .custom-table td { padding: 1rem; border-bottom: 1px solid #FFE4E1; font-weight: 600; font-size: 13px; }
+        .admin-sidebar { width: 280px; background: linear-gradient(180deg, #4A042A 0%, #5a0935 100%); flex-shrink: 0; }
+        .nav-item.active { background: rgba(255,255,255,0.98); color: #D6006E; border-radius: 1rem 0 0 1rem; margin-right: -1.5rem; padding-right: 1.5rem; box-shadow: 0 10px 24px rgba(74,4,42,0.18); }
+        .custom-table th { background: #FFF8FB; color: #7A104C; font-weight: 800; font-size: 10px; text-transform: uppercase; padding: 0.95rem 1rem; border-bottom: 1px solid #F7D9E8; letter-spacing: 0.14em; }
+        .custom-table td { padding: 0.95rem 1rem; border-bottom: 1px solid #F8E8F0; font-weight: 600; font-size: 13px; color: #3e3140; }
         .compact-table th { padding: 0.72rem 0.85rem; font-size: 9px; }
         .compact-table td { padding: 0.72rem 0.85rem; font-size: 12px; }
+        .admin-surface {
+          background: rgba(255,255,255,0.96);
+          border: 1px solid #F7DCE9;
+          border-radius: 1.5rem;
+          box-shadow: 0 16px 36px rgba(74, 4, 42, 0.06);
+          padding: 1rem;
+        }
+        .admin-stat-card {
+          border: 1px solid #F5DCE8;
+          background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,249,252,0.96));
+          border-radius: 1rem;
+          padding: 0.85rem 1rem;
+          box-shadow: 0 8px 18px rgba(74, 4, 42, 0.04);
+          transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+        }
+        .admin-stat-card:hover {
+          border-color: #F0C4DB;
+          box-shadow: 0 12px 24px rgba(74, 4, 42, 0.06);
+        }
+        .admin-stat-card-active {
+          border-color: #E9B7D1;
+          background: linear-gradient(180deg, #ffffff, #FFF6FA);
+          box-shadow: 0 0 0 2px rgba(214,0,110,0.08);
+        }
+        .admin-stat-card-emerald.admin-stat-card-active {
+          border-color: #B8E7D0;
+          box-shadow: 0 0 0 2px rgba(16,185,129,0.08);
+        }
+        .admin-stat-card-amber.admin-stat-card-active {
+          border-color: #F7D48A;
+          box-shadow: 0 0 0 2px rgba(245,158,11,0.08);
+        }
+        .admin-breakdown-card {
+          border: 1px solid #F5DCE8;
+          background: rgba(255,255,255,0.98);
+          border-radius: 1.25rem;
+          box-shadow: 0 10px 24px rgba(74, 4, 42, 0.05);
+          transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+        }
+        .admin-breakdown-card:hover {
+          border-color: #F0C4DB;
+          box-shadow: 0 14px 28px rgba(74, 4, 42, 0.07);
+        }
+        .admin-kicker {
+          font-size: 10px;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 0.18em;
+        }
+        .defer-render {
+          content-visibility: auto;
+          contain-intrinsic-size: 900px;
+        }
+        .defer-render-xl {
+          content-visibility: auto;
+          contain-intrinsic-size: 1400px;
+        }
       `}} />
 
       {view === 'shop' && (
@@ -4661,7 +5356,7 @@ export default function App() {
         </div>
       )}
 
-      {/* âœ¨ NEW: Floating Live Chat Button & Panel */}
+      {/* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW: Floating Live Chat Button & Panel */}
       {view === 'shop' && hasShopAccess && (
         <div className="fixed bottom-24 lg:bottom-8 right-4 lg:right-8 z-[70] flex flex-col items-end">
 
@@ -4673,7 +5368,7 @@ export default function App() {
               className="absolute bottom-16 right-0 bg-white/85 backdrop-blur-xl p-3 rounded-2xl rounded-br-none shadow-[0_8px_24px_rgba(255,20,147,0.18)] border border-pink-200 text-left text-xs w-60 animate-fadeIn z-0"
             >
               <span className="font-black text-[#D6006E] block mb-0.5">
-                {latestChatPreview.sender || 'Box Buddy'} • {formatChatTimestamp(latestChatPreview.timestamp)}
+                {latestChatPreview.sender || 'Box Buddy'} {"\u2022"} {formatChatTimestamp(latestChatPreview.timestamp)}
               </span>
               <span className="text-slate-700 font-bold leading-tight line-clamp-3">{latestChatPreview.text}</span>
             </button>
@@ -4749,12 +5444,20 @@ export default function App() {
       )}
 
       {view === 'shop' ? (
-        <div className="min-h-screen w-full text-[#4A042A] pb-24 lg:pb-8 selection:bg-pink-300 relative">
-
-          <button onClick={() => setView('admin')} className="absolute top-4 right-4 sm:top-6 sm:right-6 bg-white/30 backdrop-blur-sm text-[#4A042A] border border-[#4A042A]/20 w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/60 transition-all hover:scale-105 z-[40]" title="Admin Access">
-            <Lock size={16} />
-          </button>
-
+        <Suspense fallback={null}>
+          <ShopChrome
+            cartItemCount={cartList.length}
+            isBtnLoading={isBtnLoading}
+            isReviewStageOpen={isReviewStageOpen}
+            isStoreClosed={isStoreClosed}
+            onOpenPayment={() => setShowPayModal(true)}
+            onOpenPreview={() => setShowPreviewModal(true)}
+            onSubmitOrder={submitOrder}
+            settings={settings}
+            showShopAccessGate={showShopAccessGate}
+            switchView={switchView}
+            totalPHP={totalPHP}
+          >
           <div className={`relative z-10 w-full mx-auto p-4 pt-16 sm:pt-10 ${isStoreClosed ? 'max-w-[1380px] xl:max-w-[1440px]' : 'max-w-[1280px]'}`}>
             <div className="pointer-events-none absolute inset-0 overflow-hidden">
               <div className="absolute -top-16 left-[-8%] h-52 w-52 rounded-full bg-white/30 blur-3xl" />
@@ -4762,218 +5465,33 @@ export default function App() {
               <div className="absolute bottom-20 left-1/3 h-56 w-56 rounded-full bg-[#FFC4DD]/35 blur-3xl" />
             </div>
 
-            <section ref={heroSectionRef} className="hero-panel rounded-[34px] p-4 sm:p-5 lg:px-6 lg:py-5 mb-5">
-              <div className={`relative z-10 grid gap-4 ${isStoreClosed ? 'lg:grid-cols-[minmax(0,1.18fr)_360px] xl:grid-cols-[minmax(0,1.12fr)_400px] lg:items-stretch' : 'lg:grid-cols-[minmax(0,1.12fr)_360px] xl:grid-cols-[minmax(0,1.08fr)_400px] lg:items-stretch'}`}>
-                <div className={`relative min-w-0 flex flex-col min-h-[300px] lg:min-h-[320px] ${isStoreClosed ? 'items-center text-center lg:items-start lg:text-left' : 'items-start text-left justify-between'}`}>
-                  <div className={`hidden sm:flex flex-wrap items-center gap-3 w-full ${isStoreClosed ? 'justify-center lg:justify-start' : 'justify-start'}`}>
-                    <span className="hero-chip inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[#8A1555] font-black text-[10px] uppercase tracking-[0.24em]">
-                      {isStoreClosed ? 'Store Paused' : 'Live Group Buy'}
-                    </span>
-                    <span className="hero-chip inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[#8A1555] font-black text-[10px] uppercase tracking-[0.2em]">
-                      {isStoreClosed ? 'History Still Open' : (settings.batchName || 'Current Batch')}
-                    </span>
-                  </div>
-
-                  {isStoreClosed ? (
-                    <>
-                      <div className="w-full min-w-0 flex-1 flex flex-col justify-center items-center gap-2 text-center max-w-3xl mx-auto lg:max-w-[1100px] xl:max-w-[1180px] py-1 lg:mx-0 lg:items-start lg:text-left">
-                        <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#D6006E]">BBP Group Buy</p>
-                        <h1 className="brand-title mt-2 mb-0 pb-5 sm:pb-6 lg:pb-7 text-[2.95rem] sm:text-[4.1rem] lg:text-[5.75rem] xl:text-[6.2rem] lg:whitespace-nowrap lg:tracking-[-0.035em] leading-[1.06] text-[#D6006E]">
-                          Bonded by Peptides
-                        </h1>
-                        <p className="mt-4 max-w-[38rem] text-[15px] sm:text-[18px] font-bold leading-relaxed text-[#8F2C5D]">
-                          Ordering is paused right now, but your profile, order history, wiki, and calculator are still here while BBP gets the next batch ready.
-                        </p>
-                      </div>
-
-                      <div className="hero-divider w-full mb-3" />
-
-                      <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 w-full">
-                        <div className="hero-stat rounded-[24px] px-4 py-3">
-                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">Lookup</p>
-                          <p className="mt-1 text-sm font-black text-[#4A042A]">Check saved profile</p>
-                        </div>
-                        <div className="hero-stat rounded-[24px] px-4 py-3">
-                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">History</p>
-                          <p className="mt-1 text-sm font-black text-[#4A042A]">See old orders by email</p>
-                        </div>
-                        <div className="hero-stat rounded-[24px] px-4 py-3">
-                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">Wiki</p>
-                          <p className="mt-1 text-sm font-black text-[#4A042A]">Peptide guide stays live</p>
-                        </div>
-                        <div className="hero-stat rounded-[24px] px-4 py-3">
-                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">Calculator</p>
-                          <p className="mt-1 text-sm font-black text-[#4A042A]">Dose and draw helper</p>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="w-full min-w-0 flex-1 flex flex-col justify-center items-center gap-2 text-center max-w-[760px] lg:max-w-[980px] xl:max-w-[1080px] py-2 lg:items-start lg:text-left">
-                        <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#D6006E]">BBP Group Buy</p>
-                        <h1 className="brand-title mt-2 mb-0 pb-5 sm:pb-6 lg:pb-7 text-[2.95rem] sm:text-[4.1rem] lg:text-[4.7rem] xl:text-[5.05rem] lg:whitespace-nowrap leading-[1.08] text-[#D6006E]">
-                          Bonded by Peptides
-                        </h1>
-                        <p className="mt-4 max-w-[38rem] text-[15px] sm:text-[18px] font-bold leading-relaxed text-[#8F2C5D]">
-                          {heroIntroCopy}
-                        </p>
-                        <div className="mt-6 flex flex-wrap justify-center gap-3 lg:justify-start">
-                          <button
-                            onClick={() => document.getElementById('top-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                            className="bg-gradient-to-r from-[#FF1493] to-[#FF69B4] text-white px-6 py-3 rounded-full text-[11px] font-black uppercase tracking-[0.2em] shadow-[0_16px_32px_rgba(255,20,147,0.2)] transition-transform hover:translate-y-[-1px]"
-                          >
-                            {heroPrimaryCtaLabel}
-                          </button>
-                          {showCatalogReference && (
-                            <button
-                              onClick={() => document.getElementById('catalog-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                              className="bg-white/90 text-[#D6006E] border-2 border-[#FFC0CB] px-6 py-3 rounded-full text-[11px] font-black uppercase tracking-[0.2em] shadow-[0_10px_24px_rgba(255,20,147,0.08)] transition-transform hover:translate-y-[-1px]"
-                            >
-                              Browse Catalog
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="hero-divider w-full my-4" />
-
-                      <div className="grid grid-cols-2 gap-3 w-full lg:grid-cols-4">
-                        <div className="hero-stat rounded-[24px] px-4 py-3">
-                          <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Order Minimum</p>
-                          <p className="mt-1 text-sm font-black text-[#4A042A]">{settings.minOrder} vials to save</p>
-                        </div>
-                        <div className="hero-stat rounded-[24px] px-4 py-3">
-                          <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Boxes Filling</p>
-                          <p className="mt-1 text-sm font-black text-[#4A042A]">{currentBatchFillingLines} active right now</p>
-                        </div>
-                        <div className="hero-stat rounded-[24px] px-4 py-3">
-                          <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Cart So Far</p>
-                          <p className="mt-1 text-sm font-black text-[#4A042A]">{selectedVialCount} vial{selectedVialCount === 1 ? '' : 's'} selected</p>
-                        </div>
-                        <div className="hero-stat rounded-[24px] px-4 py-3">
-                          <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Kit Protection</p>
-                          <p className="mt-1 text-sm font-black text-[#4A042A]">Every 10 vials makes 1 kit</p>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {isStoreClosed && (
-                <div className="soft-panel rounded-[28px] p-4 flex flex-col gap-3 text-center lg:text-left w-full min-w-0 overflow-hidden lg:self-center">
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-black text-[#D6006E] uppercase tracking-[0.28em]">
-                      Profile, History, Wiki & Calculator
-                    </p>
-                    <h2 className="mt-2 text-[1.8rem] sm:text-[2rem] font-black text-[#4A042A] leading-[1.02]">
-                      Closed for ordering
-                    </h2>
-                    <p className="mt-2 text-sm font-bold text-[#9E2A5E] leading-relaxed">
-                      Ordering is paused, but your saved profile, order history, peptide wiki, and dose calculator are still available while the next batch is being prepared.
-                    </p>
-                  </div>
-
-                    <div className="flex flex-col gap-2.5 min-w-0">
-                      <div className="rounded-[22px] border border-[#FFB3D7] bg-gradient-to-r from-[#FFF1F8] via-[#FFE5F3] to-[#FFF7EF] px-4 py-3 text-left shadow-sm">
-                        <div className="flex min-w-0 items-start gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#FF7A59] to-[#FF1493] text-white shadow-[0_8px_18px_rgba(255,20,147,0.22)]">
-                            <BookOpen size={18} />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#D6006E]">Wiki Still Open</p>
-                            <p className="mt-1 text-xs font-bold text-[#7B1B53] leading-relaxed">Browse product notes, benefits, and handling guidance even while checkout is paused.</p>
-                          </div>
-                        </div>
-                      </div>
-                      <input type="email" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)} onBlur={handleLookup} className={`${originalInput} py-2.5`} placeholder="Enter your email" />
-                      <button onClick={() => customerProfile && setSelectedProfileEmail(customerEmail)} disabled={!customerProfile} className="w-full bg-gradient-to-r from-[#FF1493] to-[#FF69B4] text-white font-black py-3 text-xs rounded-2xl uppercase tracking-widest shadow-md transition-transform hover:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed">
-                        View Profile & History
-                      </button>
-                      <button onClick={() => setShowWikiModal(true)} className="group w-full rounded-[24px] border border-white/35 bg-gradient-to-r from-[#FF7A59] via-[#FF4FA1] to-[#FF1493] px-4 py-4 text-white shadow-[0_16px_36px_rgba(255,20,147,0.24)] transition-transform hover:scale-[0.99]">
-                        <span className="flex items-center justify-center gap-3">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/18 ring-1 ring-white/25">
-                            <BookOpen size={17} />
-                          </span>
-                          <span className="min-w-0 text-left">
-                            <span className="block text-[9px] font-black uppercase tracking-[0.24em] text-white/80">Browse Now</span>
-                            <span className="mt-0.5 flex items-center gap-1 text-sm font-black uppercase tracking-[0.2em] text-white">
-                              <span>Open Peptide Wiki</span>
-                              <ChevronRight size={16} className="transition-transform group-hover:translate-x-0.5" />
-                            </span>
-                          </span>
-                        </span>
-                      </button>
-                      <button onClick={() => setShowCalculatorModal(true)} className="w-full rounded-[22px] border border-[#F5B9D6] bg-white/92 px-4 py-3.5 text-[#D6006E] shadow-sm transition-transform hover:scale-[0.99]">
-                        <span className="flex items-center justify-center gap-3">
-                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pink-50 ring-1 ring-pink-100">
-                            <Calculator size={16} />
-                          </span>
-                          <span className="min-w-0 text-left">
-                            <span className="block text-[9px] font-black uppercase tracking-[0.24em] text-pink-400">Dose Helper</span>
-                            <span className="mt-0.5 block text-sm font-black uppercase tracking-[0.18em]">Open Peptide Calculator</span>
-                          </span>
-                        </span>
-                      </button>
-                      <div className="glass-note rounded-[20px] px-4 py-3 text-xs font-bold text-[#9E2A5E]">
-                        {customerProfile ? 'Saved profile found. You can open your history now, or head straight into the wiki.' : 'No saved profile yet. You can still use the wiki now, or try the same email you used for your previous order.'}
-                      </div>
-                    </div>
-                </div>
-                )}
-                {!isStoreClosed && (
-                  <div className="soft-panel hidden lg:flex rounded-[30px] p-5 flex-col gap-4 w-full min-w-0 overflow-hidden lg:self-stretch bg-[linear-gradient(180deg,rgba(255,249,252,0.94),rgba(255,241,246,0.88))] border-[#F3C9D7] shadow-[0_18px_38px_rgba(214,0,110,0.09)]">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-black text-[#B30065] uppercase tracking-[0.28em]">Current Batch</p>
-                        <h2 className="mt-2 text-[1.8rem] sm:text-[2.15rem] font-black text-[#352C30] leading-[0.94] tracking-[-0.04em]">
-                          {settings.batchName || 'Bonded Ledger'}
-                        </h2>
-                        <p className="mt-2 text-sm font-semibold text-[#63595D] leading-relaxed">
-                          One place to save your order, watch the box fill, and come back for payment when the window opens.
-                        </p>
-                      </div>
-                      <div className="rounded-[22px] bg-gradient-to-br from-[#C41A76] to-[#E85A9D] px-4 py-3 text-right text-white shadow-[0_14px_26px_rgba(196,26,118,0.18)]">
-                        <p className="text-[9px] font-black uppercase tracking-[0.24em] text-white/72">Cart Total</p>
-                        <p className="mt-1 text-2xl font-black leading-none">₱{totalPHP.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-[22px] border border-[#F1D8E2] bg-white/74 px-4 py-3 backdrop-blur-sm">
-                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-pink-500">Payment Status</p>
-                        <p className="mt-1 text-sm font-black text-[#352C30]">{settings.paymentsOpen ? 'Payment window is open' : 'Payment window still closed'}</p>
-                      </div>
-                      <div className="rounded-[22px] border border-[#F1D8E2] bg-white/74 px-4 py-3 backdrop-blur-sm">
-                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-pink-500">Near Capacity</p>
-                        <p className="mt-1 text-sm font-black text-[#352C30]">{nearlyFullCount} product{nearlyFullCount === 1 ? '' : 's'} almost full</p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                      <div className="rounded-[24px] border border-[#ECD8E0] bg-white/72 px-4 py-4 backdrop-blur-sm">
-                        <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#9E8A93]">Available Lines</p>
-                        <p className="mt-3 text-[1.9rem] font-black leading-none text-[#352C30]">{currentBatchOpenLines}</p>
-                        <p className="mt-2 text-[11px] font-semibold leading-snug text-[#63595D]">currently open in the live catalog</p>
-                      </div>
-                      <div className="rounded-[24px] border border-[#ECD8E0] bg-white/72 px-4 py-4 backdrop-blur-sm">
-                        <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#9E8A93]">Protected Kits</p>
-                        <p className="mt-3 text-[1.9rem] font-black leading-none text-[#352C30]">{currentBatchProtectedKits}</p>
-                        <p className="mt-2 text-[11px] font-semibold leading-snug text-[#63595D]">full 10-vial kits already locked in</p>
-                      </div>
-                      <div className="rounded-[24px] border border-[#ECD8E0] bg-white/72 px-4 py-4 backdrop-blur-sm">
-                        <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#9E8A93]">Open Spots</p>
-                        <p className="mt-3 text-[1.9rem] font-black leading-none text-[#352C30]">{currentBatchOpenSpots}</p>
-                        <p className="mt-2 text-[11px] font-semibold leading-snug text-[#63595D]">slots still needed to close active boxes</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </section>
+            <ShopHeroSection
+              currentBatchFillingLines={currentBatchFillingLines}
+              currentBatchOpenLines={currentBatchOpenLines}
+              currentBatchOpenSpots={currentBatchOpenSpots}
+              currentBatchProtectedKits={currentBatchProtectedKits}
+              customerEmail={customerEmail}
+              customerProfile={customerProfile}
+              handleLookup={handleLookup}
+              heroIntroCopy={heroIntroCopy}
+              heroPrimaryCtaLabel={heroPrimaryCtaLabel}
+              heroSectionRef={heroSectionRef}
+              isStoreClosed={isStoreClosed}
+              nearlyFullCount={nearlyFullCount}
+              originalInput={originalInput}
+              selectedVialCount={selectedVialCount}
+              setCustomerEmail={setCustomerEmail}
+              setSelectedProfileEmail={setSelectedProfileEmail}
+              setShowCalculatorModal={setShowCalculatorModal}
+              setShowWikiModal={setShowWikiModal}
+              settings={settings}
+              showCatalogReference={showCatalogReference}
+              totalPHP={totalPHP}
+            />
             <h1 className="hidden brand-title text-2xl sm:text-4xl text-center text-white mb-2 flex items-center justify-center gap-3 mt-4 sm:mt-0">
-              <span className="text-white/80">✨</span>
+              <span className="text-white/80">•</span>
               <span>Bonded by Peptides</span>
-              <span className="text-white/80">✨</span>
+              <span className="text-white/80">•</span>
             </h1>
             <div className="hidden text-center mb-8">
               <span className="bg-white text-[#D6006E] px-4 py-1.5 rounded-full font-black text-xs uppercase tracking-wider border-2 border-[#FF69B4] shadow-sm inline-block">
@@ -5028,7 +5546,7 @@ export default function App() {
             ) : (
               <>
                 {settings.paymentsOpen && (
-                  <div className="glass-note border-l-4 border-[#FF1493] p-3 rounded-[22px] mb-4 text-sm font-bold shadow-sm">Payments open: check your email below to pay.</div>
+                  <div className="glass-note border-l-4 border-[#FF1493] p-3 rounded-[22px] mb-4 text-sm font-bold shadow-sm">Payments are open. Enter your email below to load your saved order.</div>
                 )}
                 {settings.addOnly && !settings.paymentsOpen && (
                   <div className="glass-note border-l-4 border-amber-500 p-4 rounded-[22px] mb-6 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -5070,7 +5588,7 @@ export default function App() {
                         disabled={currentReviewReady}
                         className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition-colors hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {currentReviewReady ? 'Already Marked' : 'Looks Good To Me'}
+                        {currentReviewReady ? 'Already Marked' : 'Looks Good to Me'}
                       </button>
                     ) : (
                       <span className="rounded-full border border-sky-200 bg-sky-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-sky-700">
@@ -5080,1365 +5598,209 @@ export default function App() {
                   </div>
                 )}
 
-                {/* âœ¨ FIXED: Tighter Desktop Sidebars */}
+                {/* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ FIXED: Tighter Desktop Sidebars */}
                 <div className={shopDesktopLayoutClass}>
-                  <div className="space-y-4 w-full">
-
-                    {isCurrentUserAtRisk && (
-                      <div className="glass-note border border-rose-300 p-4 rounded-[22px] shadow-sm animate-pulse flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                        <div>
-                          <h3 className="text-rose-700 font-black text-sm mb-1">Your vials are at risk</h3>
-                          <p className="text-xs text-rose-600 font-bold">You have loose vials on the hit list. If the box does not fill, those loose vials may be cut. Try to help fill the box first.</p>
-                        </div>
-                        <button onClick={() => setShowHitListModal(true)} className="bg-rose-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md hover:bg-rose-700 whitespace-nowrap transition-transform hover:scale-105">
-                          View hit list
-                        </button>
-                      </div>
-                    )}
-
-                    {/* âœ¨ IMPROVED: Order card with Ambulance Flash ID */}
-                    <div id="top-form-card" className={`glass-card order-form-shell p-4 sm:p-5 shadow-xl ${showAmbulance ? 'animate-ambulance z-[100]' : ''}`}>
-                      <div className="relative z-[1] flex flex-col gap-4">
-                        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
-                          <div className="space-y-3">
-                            <div className="flex flex-wrap gap-2">
-                              <span className="order-form-chip inline-flex items-center rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">
-                                {orderCardEyebrow}
-                              </span>
-                              <span className="order-form-chip inline-flex items-center rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-[#7A104C]">
-                                {orderCardStatus}
-                              </span>
-                            </div>
-
-                            <div className="max-w-2xl">
-                              <h2 className="section-title text-[1.65rem] leading-[1.05] sm:text-[2.1rem] text-[#4A042A]">
-                                {orderCardTitle}
-                              </h2>
-                              <p className="mt-2 max-w-[40rem] text-xs sm:text-sm font-bold leading-relaxed text-[#8F2C5D]">
-                                {orderCardDescription}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-2 xl:max-w-[320px] xl:justify-end">
-                            <button onClick={() => setShowHowTo(!showHowTo)} className="order-form-chip inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E] transition-colors hover:bg-white/90">
-                              <BookOpen size={13} />
-                              {showHowTo ? 'Hide Steps' : 'How It Works'}
-                            </button>
-                            {customerProfile && (
-                              <button onClick={() => setSelectedProfileEmail(customerEmail)} className="order-form-chip inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E] transition-colors hover:bg-white/90">
-                                <Users size={13} />
-                                View Profile & History
-                              </button>
-                            )}
-                            {hasExistingOrder && !settings.paymentsOpen && !settings.addOnly && !settings.reviewStageOpen && (
-                              confirmAction.type === 'cancelOrder' && confirmAction.id === customerEmail.toLowerCase().trim() ? (
-                                <>
-                                  <button onClick={cancelEntireOrder} className="inline-flex items-center rounded-full bg-rose-500 px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-white shadow-sm transition-colors hover:bg-rose-600">
-                                    Confirm Cancel
-                                  </button>
-                                  <button onClick={() => setConfirmAction({ type: null, id: null })} className="order-form-chip inline-flex items-center rounded-full px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-slate-600 transition-colors hover:bg-white/90">
-                                    Keep Order
-                                  </button>
-                                </>
-                              ) : (
-                                <button onClick={() => setConfirmAction({ type: 'cancelOrder', id: customerEmail.toLowerCase().trim() })} className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50/90 px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-rose-600 transition-colors hover:bg-rose-100">
-                                  Cancel Entire Order
-                                </button>
-                              )
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="grid gap-3">
-                          <div className="order-input-panel rounded-[26px] p-4">
-                            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                              <div className="max-w-xl">
-                                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#D6006E]">Your details</p>
-                                <p className="mt-1.5 text-xs font-bold leading-relaxed text-[#8F2C5D]">
-                                  Use the same email as past orders so your profile can load.
-                                </p>
-                              </div>
-                              <div className="inline-flex items-center gap-2 self-start rounded-full bg-[#4A042A] px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-white shadow-sm">
-                                <Lock size={12} />
-                                Secure lookup
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                              <div className="sm:col-span-1">
-                                <label className="mb-1 block pl-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">Email address</label>
-                                <input type="email" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)} onBlur={handleLookup} className={getCustomerFormInputClass('email')} placeholder="Enter email to lookup profile..." />
-                              </div>
-                              <div className="sm:col-span-1">
-                                <label className="mb-1 block pl-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">Confirm email</label>
-                                <input type="email" value={customerEmailConfirm} onChange={e => setCustomerEmailConfirm(e.target.value)} className={getCustomerFormInputClass('emailConfirm')} placeholder="Type your email again..." />
-                              </div>
-
-                              <div className="sm:col-span-1">
-                                <label className="mb-1 block pl-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">Name</label>
-                                <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} className={getCustomerFormInputClass('name')} placeholder="Full name" disabled={settings.paymentsOpen || settings.reviewStageOpen} />
-                              </div>
-                              <div className="sm:col-span-1">
-                                <label className="mb-1 block pl-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">Handle</label>
-                                <input type="text" value={customerHandle} onChange={e => setCustomerHandle(e.target.value)} className={customerFormInput} placeholder="@username" disabled={settings.paymentsOpen || settings.reviewStageOpen} />
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-                            <div className="order-summary-card rounded-[22px] p-3.5">
-                              <div className="flex items-start gap-3">
-                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FFE7F3] text-[#D6006E] shadow-inner">
-                                  <ClipboardList size={16} />
-                                </div>
-                                <div>
-                                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">{orderCardFlowLabel}</p>
-                                  <p className="mt-1.5 text-xs font-black leading-snug text-[#4A042A]">{orderCardFlowCopy}</p>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="order-summary-card rounded-[22px] p-3.5">
-                              <div className="flex items-start gap-3">
-                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FDE8F4] text-[#B21764] shadow-inner">
-                                  <Users size={16} />
-                                </div>
-                                <div>
-                                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Profile status</p>
-                                  <p className="mt-1.5 text-xs font-black leading-snug text-[#4A042A]">{orderCardProfileCopy}</p>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="order-summary-card rounded-[22px] p-3.5 sm:col-span-2 lg:col-span-1">
-                              <div className="flex items-start gap-3">
-                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FFF2DE] text-amber-600 shadow-inner">
-                                  <ShieldCheck size={16} />
-                                </div>
-                                <div>
-                                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Protection rule</p>
-                                  <p className="mt-1.5 text-xs font-black leading-snug text-[#4A042A]">{orderCardProtectionCopy}</p>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {showHowTo && (
-                        <div className="relative z-[1] mt-3 order-input-panel rounded-[24px] p-4 animate-fadeIn">
-                          <div className="mb-3 flex flex-col gap-1.5 sm:flex-row sm:items-end sm:justify-between">
-                            <div>
-                              <h4 className="text-[10px] font-black uppercase tracking-[0.24em] text-[#D6006E]">Ordering steps</h4>
-                              <p className="mt-1.5 text-xs font-bold leading-relaxed text-[#8F2C5D]">
-                                Quick path from details to checkout.
-                              </p>
-                            </div>
-                            <div className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-[#B21764]">
-                              <ArrowRight size={12} />
-                              Details to checkout
-                            </div>
-                          </div>
-
-                          <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-5">
-                            {[
-                              ['01', 'Enter details', 'Use your regular email so your profile can load.'],
-                              ['02', 'Choose vials', 'Every 10 vials makes 1 protected kit.'],
-                              ['03', 'Save order', 'Submit your cart to lock in your spot.'],
-                              ['04', 'Watch for payments', 'Wait for the payment announcement.'],
-                              ['05', 'Return to pay', 'Use the same email and upload proof.'],
-                            ].map(([step, title, copy]) => (
-                              <div key={step} className="order-step-card rounded-[20px] p-3">
-                                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#D6006E]">{step}</p>
-                                <h5 className="mt-1.5 text-xs sm:text-sm font-black text-[#4A042A]">{title}</h5>
-                                <p className="mt-1 text-[11px] font-bold leading-relaxed text-[#8F2C5D]">{copy}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div id="catalog-panel" className={`shop-surface rounded-[30px] shadow-sm relative z-10 transition-all duration-300 ${shakingField === 'products' ? 'animate-shake border-red-500 ring-4 ring-red-100' : ''}`}>
-                      {isOrderOnlyMode ? (
-                        <>
-                          <div className="sticky top-0 z-30 px-3 py-3 sm:p-5 border-b border-white/60 flex flex-col gap-2 bg-white/45 backdrop-blur-2xl rounded-t-[30px] shadow-sm">
-                            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                              <div className={`w-full sm:w-auto transition-all duration-300 ${isScrolled ? 'hidden sm:block' : 'block'}`}>
-                                <h2 className="font-black text-[#D6006E] uppercase tracking-widest text-sm sm:text-base flex items-center gap-2 whitespace-nowrap">
-                                  {settings.paymentsOpen ? <ShieldCheck size={22} className="text-emerald-500" /> : <ClipboardList size={22} className="text-sky-600" />}
-                                  {settings.paymentsOpen ? 'Payment Window Live' : 'Review Window Live'}
-                                </h2>
-                                <p className="text-[10px] sm:text-xs font-bold text-slate-400 mt-1">
-                                  {settings.paymentsOpen
-                                    ? 'Catalog is hidden now so buyers stay focused on saved orders and payment.'
-                                    : 'Catalog stays private unless the batch code was entered, but buyers can still review saved orders here.'}
-                                </p>
-                              </div>
-                              <div className={`rounded-[22px] px-4 py-3 text-left sm:max-w-[260px] ${settings.paymentsOpen ? 'border border-emerald-200 bg-emerald-50' : 'border border-sky-200 bg-sky-50'}`}>
-                                <p className={`text-[10px] font-black uppercase tracking-[0.22em] ${settings.paymentsOpen ? 'text-emerald-700' : 'text-sky-700'}`}>Next step</p>
-                                <p className={`mt-1.5 text-xs font-black leading-relaxed ${settings.paymentsOpen ? 'text-emerald-900' : 'text-sky-900'}`}>
-                                  {settings.paymentsOpen
-                                    ? 'Use Review to confirm your saved order, then continue to Pay Now when you are ready.'
-                                    : 'Load your saved order, check that everything looks right, and mark it if you are good before payments open.'}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="rounded-b-[30px] bg-white/10 p-3 sm:p-4">
-                            {cartList.length === 0 ? (
-                              <div className="rounded-[24px] border border-dashed border-pink-200 bg-white/80 px-5 py-10 text-center">
-                                <p className="text-sm font-black text-[#4A042A]">Load your saved order first</p>
-                                <p className="mt-2 text-xs font-bold leading-relaxed text-slate-500">
-                                  Enter the same email you used for your order so the saved items, total, and payment details can appear here.
-                                </p>
-                              </div>
-                            ) : (
-                              <div className="space-y-3">
-                                <div className="grid gap-3 sm:grid-cols-3">
-                                  <div className="rounded-[22px] border border-pink-100 bg-white/80 p-4 shadow-sm">
-                                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Saved items</p>
-                                    <p className="mt-2 text-2xl font-black text-[#4A042A]">{cartList.length}</p>
-                                    <p className="mt-1 text-xs font-bold text-slate-500">products in your locked order</p>
-                                  </div>
-                                  <div className="rounded-[22px] border border-pink-100 bg-white/80 p-4 shadow-sm">
-                                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Total vials</p>
-                                    <p className="mt-2 text-2xl font-black text-[#4A042A]">{selectedVialCount}</p>
-                                    <p className="mt-1 text-xs font-bold text-slate-500">{settings.paymentsOpen ? 'already frozen for this payment window' : 'currently saved in your review copy'}</p>
-                                  </div>
-                                  <div className="rounded-[22px] border border-pink-100 bg-white/80 p-4 shadow-sm">
-                                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">{settings.paymentsOpen ? 'Amount due' : 'Current total'}</p>
-                                    <p className="mt-2 text-2xl font-black text-[#4A042A]">₱{totalPHP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                                    <p className="mt-1 text-xs font-bold text-slate-500">{settings.paymentsOpen ? 'includes admin fee' : 'review this total before payments open'}</p>
-                                  </div>
-                                </div>
-
-                                <div className="rounded-[24px] border border-pink-100 bg-white/85 p-4 shadow-sm">
-                                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                    <div>
-                                      <h3 className="text-sm font-black uppercase tracking-[0.2em] text-[#D6006E]">Saved Order Snapshot</h3>
-                                      <p className="mt-1 text-xs font-bold text-slate-500">
-                                        {settings.paymentsOpen ? 'This is the order that will be used for payment.' : 'This is the saved order you are reviewing before payments open.'}
-                                      </p>
-                                    </div>
-                                    <div className="flex flex-wrap gap-2">
-                                      <button onClick={() => setShowPreviewModal(true)} className="rounded-full border-2 border-pink-200 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-[#D6006E] shadow-sm hover:bg-pink-50">
-                                        Review Saved Order
-                                      </button>
-                                      {settings.paymentsOpen ? (
-                                        <button onClick={() => setShowPayModal(true)} className="rounded-full bg-[#008040] px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-md hover:scale-[0.98] transition-transform active:scale-95">
-                                          Pay Now
-                                        </button>
-                                      ) : (
-                                        <button
-                                          onClick={confirmBuyerReview}
-                                          disabled={currentReviewReady}
-                                          className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition-colors hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                          {currentReviewReady ? 'Already Marked' : 'Looks Good To Me'}
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  <div className="mt-4 grid gap-2">
-                                    {cartList.map((item, idx) => (
-                                      <div key={`${item.product}-${idx}`} className="flex items-center justify-between gap-3 rounded-[18px] border border-pink-50 bg-[#FFF8FC] px-3 py-2.5">
-                                        <div className="min-w-0">
-                                          <p className="truncate text-sm font-black text-[#4A042A]">{item.product}</p>
-                                          <p className="mt-1 text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">x{item.qty} locked in</p>
-                                        </div>
-                                        <div className="shrink-0 text-right">
-                                          <p className="text-sm font-black text-[#D6006E]">${item.total.toFixed(2)}</p>
-                                          <p className="mt-1 text-[10px] font-bold text-slate-400">${item.price.toFixed(2)} / vial</p>
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="sticky top-0 z-30 px-3 py-1.5 sm:p-5 border-b border-white/60 flex flex-col sm:flex-row justify-between items-center gap-1.5 sm:gap-4 bg-white/45 backdrop-blur-2xl rounded-t-[30px] shadow-sm">
-                            <div className={`w-full sm:w-auto transition-all duration-300 ${isScrolled ? 'hidden sm:block' : 'block'}`}>
-                              <h2 className="font-black text-[#D6006E] uppercase tracking-widest text-sm sm:text-base flex items-center gap-2 whitespace-nowrap">
-                                <Package size={22} className="text-[#FF1493]" /> Shop Catalog
-                              </h2>
-                              <p className="text-[10px] sm:text-xs font-bold text-slate-400 mt-1">
-                                {liveResultsLabel} shown, {selectedVialCount} vials selected
-                              </p>
-                            </div>
-
-                            <div className="flex-1 w-full flex flex-col gap-1 sm:gap-2">
-                              <div className="flex gap-2 overflow-x-auto hide-scroll pb-1 pl-[106px] sm:pl-0">
-                                {POPULAR_CATEGORIES.map(cat => (
-                                  <button
-                                    key={cat}
-                                    onClick={() => setSelectedCategory(cat)}
-                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest whitespace-nowrap transition-colors border shadow-sm ${selectedCategory === cat ? 'bg-[#D6006E] text-white border-[#D6006E]' : 'bg-white text-slate-500 border-pink-100 hover:border-pink-300 hover:text-pink-600'}`}
-                                  >
-                                    {cat}
-                                  </button>
-                                ))}
-                              </div>
-                              <div className="relative w-full">
-                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-400" size={18} />
-                                <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search products..." className="w-full pl-11 pr-4 py-1.5 sm:py-3 rounded-xl sm:rounded-2xl text-sm sm:text-base font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-[#FFF0F5] placeholder:text-pink-300 text-[#4A042A] shadow-inner" />
-                              </div>
-                              {(searchQuery || selectedCategory !== 'All') && (
-                                <div className="flex items-center justify-between gap-3 px-1">
-                                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                                    Viewing {liveResultsLabel}
-                                  </p>
-                                  <button onClick={() => { setSearchQuery(''); setSelectedCategory('All'); }} className="text-[10px] font-black text-[#D6006E] uppercase tracking-widest hover:underline">
-                                    Clear Filters
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {isReviewStageOpen && (
-                            <div className="mx-2 mt-2 rounded-[22px] border border-sky-200 bg-sky-50 px-4 py-3 text-left shadow-sm sm:mx-3 sm:mt-3">
-                              <div className="flex items-start gap-3">
-                                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-sky-600 shadow-inner">
-                                  <ClipboardList size={15} />
-                                </div>
-                                <div>
-                                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-sky-700">Reference only</p>
-                                  <p className="mt-1.5 text-xs font-black leading-relaxed text-sky-900">
-                                    Catalog stays visible during review so buyers can compare products and prices, but quantities are locked until payments open.
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {products.length === 0 ? (
-                            <div className="p-12 text-center text-pink-400 font-bold italic">No products available yet.</div>
-                          ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-3 p-2 sm:p-3 bg-white/10 rounded-b-[30px]">
-                              {filteredShopProducts.map(p => {
-                                const cart = cartItems[p.name] || { v: 0 };
-                                const active = cart.v > 0;
-                                const exist = existingMap[p.name] || 0;
-                                const productInfo = buildProductInfo(p.name);
-                                const productImage = getProductImageSrc(productInfo);
-                                const productImageSrc = getRealProductImageSrc(p.name, p.imageUrl || '');
-                                const protectedKits = Math.floor((cart.v || 0) / 10);
-                                const looseVials = (cart.v || 0) % 10;
-                                const compactStatusText = p.statusKey === 'locked'
-                                  ? 'locked'
-                                  : p.statusKey === 'full'
-                                    ? 'full'
-                                    : p.totalVials === 0
-                                      ? 'new'
-                                      : p.slotsLeft === 0
-                                        ? 'open'
-                                        : `${p.slotsLeft} left`;
-
-                                const bgClass = shakingProd === p.name ? 'animate-shake border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)] z-20 bg-red-50'
-                                  : (active ? 'bg-[#FFF0F5] border-[#D6006E] shadow-md scale-[1.01] z-10'
-                                    : (exist > 0 ? 'bg-[#F0FDF4] border-[#4ADE80] shadow-sm'
-                                      : 'bg-white border-[#FFE4E1] hover:border-pink-300'));
-
-                                return (
-                                  <div
-                                    key={p.id}
-                                    data-name={p.name}
-                                    onClick={!isCartEditable ? () => showToast(isReviewStageOpen ? 'Review stage is live. Buyers cannot change quantities right now.' : 'This order is locked right now.', 5000) : (p.isClosed ? () => showToast(getAvailabilityMessage(p.name, p), 6000) : undefined)}
-                                    className={`relative p-2 sm:p-2.5 rounded-2xl border-2 transition-all duration-300 overflow-hidden ${bgClass} ${(!isCartEditable || p.isClosed) ? 'cursor-not-allowed' : ''}`}
-                                  >
-
-                                    {exist > 0 && (
-                                      <div className="bg-[#22C55E] text-white text-[9px] font-black uppercase px-2.5 py-1 -mx-2.5 sm:-mx-3 -mt-2.5 sm:-mt-3 mb-2 flex justify-between items-center shadow-sm">
-                                        <span className="flex items-center gap-1">{active && cart.v !== exist ? 'You Have' : 'In Your Order'}</span>
-                                        <div className="flex items-center gap-1">
-                                          <span className="bg-white/25 px-2 py-0.5 rounded-md">{exist} Vials</span>
-                                          {active && cart.v !== exist && (
-                                            <span className="bg-[#FFE066] text-[#7A4B00] px-2 py-0.5 rounded-md">Now {cart.v}</span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    )}
-
-                                    <div className="grid grid-cols-[40px_1fr_62px] gap-2 items-center">
-                                      <img src={productImageSrc} alt={`${p.name} vial`} onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = productImage; }} className="w-[40px] h-[52px] shrink-0 rounded-lg border border-pink-100 bg-white object-cover shadow-sm" />
-
-                                      <div className={`min-w-0 ${(!isCartEditable || p.isClosed) ? 'opacity-40 pointer-events-none' : ''}`}>
-                                        <div className="flex items-start gap-1 min-w-0">
-                                          <h3 className="font-black text-[16px] sm:text-[17px] text-[#4A042A] leading-[1.05] line-clamp-2 flex-1 min-w-0">{p.name}</h3>
-                                          <button onClick={() => setQuickInfoProduct(productInfo)} className="shrink-0 rounded-full border border-pink-200 bg-pink-50 text-pink-600 w-4 h-4 flex items-center justify-center text-[9px] font-black leading-none hover:bg-pink-100 transition-colors" title="Learn more">
-                                            ?
-                                          </button>
-                                        </div>
-
-                                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                                          <span className="bg-[#FF1493] text-white px-2 py-0.5 rounded-full text-[11px] font-black shadow-sm">${p.pricePerVialUSD.toFixed(2)} / vial</span>
-                                          {productInfo.strength && (
-                                            <span className="text-[10px] font-bold text-slate-500 uppercase">{productInfo.strength}</span>
-                                          )}
-                                        </div>
-
-                                        <div className="hidden sm:block text-[10px] font-bold text-slate-600 leading-snug truncate mt-1">{productInfo.shortDesc}</div>
-
-                                        <div className="flex items-center gap-2 mt-1 text-[8px] font-black uppercase tracking-widest">
-                                          <span className={`${p.statusKey === 'available' ? 'text-emerald-600' : p.statusKey === 'full' ? 'text-rose-500' : p.statusKey === 'locked' ? 'text-slate-400' : 'text-violet-500'}`}>
-                                            {compactStatusText}
-                                          </span>
-                                          <span className="text-pink-500">{protectedKits} kit</span>
-                                          <span className="text-pink-400">{looseVials} loose</span>
-                                        </div>
-                                      </div>
-
-                                      <div className={`flex flex-col items-end gap-1 ${(!isCartEditable || p.isClosed) ? 'opacity-40 pointer-events-none' : ''}`}>
-                                        <span className="text-[7px] font-black uppercase tracking-widest text-slate-400">Vials</span>
-                                        <label className="bg-slate-50 border border-pink-100 rounded-lg px-1.5 py-1 flex items-center justify-end shadow-inner w-full">
-                                          <input
-                                            type="number"
-                                            min="0"
-                                            value={cartInputDrafts[p.name] ?? (cart.v || '')}
-                                            onFocus={e => handleCartFocus(p.name, e)}
-                                            onChange={e => handleCartChange(p.name, e.target.value)}
-                                            onBlur={() => handleCartBlur(p.name)}
-                                            className={`w-full text-right font-black text-[16px] outline-none bg-transparent placeholder:text-pink-200 ${shakingProd === p.name ? 'text-red-600' : 'text-[#D6006E]'}`}
-                                            placeholder="0"
-                                            disabled={!isCartEditable || p.isClosed}
-                                          />
-                                        </label>
-                                        <span className="text-[7px] font-bold text-slate-400 whitespace-nowrap">10 = 1 kit</span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  <aside className={desktopCartAsideClass}>
-                    <div className={desktopCartShellClass}>
-                      <div className="border-b border-[#ECD8E0] pb-3 mb-4 text-center">
-                        <h3 className={desktopCartTitleClass}>Your Cart</h3>
-                      </div>
-                      {settings.addOnly && hasExistingOrder && cartList.length > 0 && (
-                        <div className="mb-3 rounded-xl bg-pink-50 border border-pink-100 px-3 py-2 text-[10px] font-bold text-[#9E2A5E] text-center">
-                          Add-only mode is on. You can only add more.
-                        </div>
-                      )}
-                      <div className="max-h-[350px] overflow-y-auto mb-4 space-y-2 pr-2 hide-scroll">
-                        {cartList.length === 0 ? <div className="text-center text-pink-300 font-bold italic py-8">No items selected yet!</div> : cartList.map((i, idx) => (
-                          <div key={idx} className="flex justify-between items-center gap-3 text-sm xl:text-base border-b border-pink-50 border-dashed pb-2">
-                            <div className="min-w-0">
-                              <div className="font-bold truncate">{i.product}</div>
-                              {(existingMap[i.product] || 0) > 0 && (
-                                <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] font-black uppercase tracking-wide">
-                                  <span className="rounded-full bg-sky-50 text-sky-700 border border-sky-100 px-2 py-0.5">
-                                    You have {existingMap[i.product]}
-                                  </span>
-                                  {i.qty !== existingMap[i.product] && (
-                                    <span className="rounded-full bg-pink-50 text-pink-700 border border-pink-100 px-2 py-0.5">
-                                      Now {i.qty}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                            <div className="text-right shrink-0">
-                              {isCartEditable ? (
-                                <div className={`flex items-center gap-1 justify-end mb-1 rounded-full px-1 py-0.5 transition-all ${shakingProd === i.product ? 'animate-shake bg-red-50 ring-2 ring-red-200' : ''}`}>
-                                  <button onClick={() => adjustCartItem(i.product, -1)} className={`w-6 h-6 rounded-full border font-black leading-none transition-colors ${shakingProd === i.product ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100' : 'border-pink-200 bg-white text-[#D6006E] hover:bg-pink-50'}`}>
-                                    -
-                                  </button>
-                                  <span className={`min-w-[34px] text-center font-black ${shakingProd === i.product ? 'text-red-600' : 'text-[#D6006E]'}`}>
-                                    {i.qty}
-                                  </span>
-                                  <button onClick={() => adjustCartItem(i.product, 1)} className={`w-6 h-6 rounded-full border font-black leading-none transition-colors ${shakingProd === i.product ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100' : 'border-pink-200 bg-white text-[#D6006E] hover:bg-pink-50'}`}>
-                                    +
-                                  </button>
-                                </div>
-                              ) : (
-                                <span className="text-[#D6006E] font-black">x{i.qty}</span>
-                              )}
-                              <div className="mt-1 inline-flex items-center rounded-full bg-[#FFF0F5] border border-pink-100 px-2 py-0.5 text-[10px] text-[#D6006E] font-black">
-                                Now x{i.qty} • ${(i.price * i.qty).toFixed(2)}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="pt-4 border-t-2 border-pink-100 space-y-1 text-sm xl:text-base">
-                        <div className="flex justify-between text-xs font-bold text-gray-500 uppercase"><span>Subtotal</span><span>${subtotalUSD.toFixed(2)}</span></div>
-                        <div className="flex justify-between text-xs font-bold text-gray-500 uppercase"><span>Admin Fee</span><span>₱{settings.adminFeePhp}</span></div>
-                        <div className="flex flex-col items-end pt-2">
-                          <span className="text-3xl xl:text-4xl font-black text-[#D6006E]">₱{totalPHP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col gap-2 mt-6">
-                        <button onClick={() => setShowPreviewModal(true)} disabled={cartList.length === 0} className="w-full bg-white text-[#D6006E] border-2 border-pink-200 font-bold py-4 rounded-full uppercase tracking-widest text-sm shadow-sm hover:bg-pink-50 disabled:opacity-50 transition-transform hover:scale-[0.98] active:scale-95">Review</button>
-                        {!settings.paymentsOpen ? (
-                          isReviewStageOpen ? (
-                            <div className="rounded-[22px] border border-sky-200 bg-sky-50 px-4 py-3 text-center text-[10px] font-black uppercase tracking-widest text-sky-700">
-                              Buyer edits paused during review
-                            </div>
-                          ) : (
-                          <button onClick={submitOrder} disabled={isBtnLoading} className={`${originalBtn} w-full py-4`}>
-                            {isBtnLoading ? "Saving..." : "Save Order"}
-                          </button>
-                          )
-                        ) : (
-                          <button onClick={() => setShowPayModal(true)} disabled={cartList.length === 0} className="w-full bg-[#008040] text-white font-bold py-4 rounded-full uppercase tracking-widest text-sm shadow-md hover:scale-[0.98] transition-transform active:scale-95 disabled:opacity-50">Pay Now</button>
-                        )}
-                      </div>
-                    </div>
-                  </aside>
+                <div className="min-w-0 w-full">
+                <ShopWorkspaceMain
+                  buildProductInfo={buildProductInfo}
+                  cancelEntireOrder={cancelEntireOrder}
+                  cartInputDrafts={cartInputDrafts}
+                  cartItems={cartItems}
+                  cartList={cartList}
+                  confirmAction={confirmAction}
+                  currentReviewReady={currentReviewReady}
+                  customerEmail={customerEmail}
+                  customerEmailConfirm={customerEmailConfirm}
+                  customerFormInput={customerFormInput}
+                  customerHandle={customerHandle}
+                  customerName={customerName}
+                  customerProfile={customerProfile}
+                  existingMap={existingMap}
+                  filteredShopProducts={filteredShopProducts}
+                  getAvailabilityMessage={getAvailabilityMessage}
+                  getCustomerFormInputClass={getCustomerFormInputClass}
+                  getProductImageSrc={getProductImageSrc}
+                  getRealProductImageSrc={getRealProductImageSrc}
+                  handleCartBlur={handleCartBlur}
+                  handleCartChange={handleCartChange}
+                  handleCartFocus={handleCartFocus}
+                  handleLookup={handleLookup}
+                  hasExistingOrder={hasExistingOrder}
+                  isCartEditable={isCartEditable}
+                  isCurrentUserAtRisk={isCurrentUserAtRisk}
+                  isOrderOnlyMode={isOrderOnlyMode}
+                  isReviewStageOpen={isReviewStageOpen}
+                  isScrolled={isScrolled}
+                  liveResultsLabel={liveResultsLabel}
+                  onClearCancelOrder={() => setConfirmAction({ type: null, id: null })}
+                  onClearFilters={(resetAll, nextSearchValue = '') => {
+                    if (resetAll) {
+                      setSearchQuery('');
+                      setSelectedCategory('All');
+                      return;
+                    }
+                    setSearchQuery(nextSearchValue);
+                  }}
+                  onConfirmBuyerReview={confirmBuyerReview}
+                  onCustomerEmailChange={(e) => setCustomerEmail(e.target.value)}
+                  onCustomerEmailConfirmChange={(e) => setCustomerEmailConfirm(e.target.value)}
+                  onCustomerHandleChange={(e) => setCustomerHandle(e.target.value)}
+                  onCustomerNameChange={(e) => setCustomerName(e.target.value)}
+                  onOpenHitList={() => setShowHitListModal(true)}
+                  onOpenPayModal={() => setShowPayModal(true)}
+                  onOpenPreview={() => setShowPreviewModal(true)}
+                  onOpenProfileHistory={() => setSelectedProfileEmail(customerEmail)}
+                  onQuickInfo={setQuickInfoProduct}
+                  onRequestCancelOrder={() => setConfirmAction({ type: 'cancelOrder', id: customerEmail.toLowerCase().trim() })}
+                  onSelectedCategoryChange={setSelectedCategory}
+                  onToggleHowTo={() => setShowHowTo(!showHowTo)}
+                  orderCardDescription={orderCardDescription}
+                  orderCardEyebrow={orderCardEyebrow}
+                  orderCardFlowCopy={orderCardFlowCopy}
+                  orderCardFlowLabel={orderCardFlowLabel}
+                  orderCardProfileCopy={orderCardProfileCopy}
+                  orderCardProtectionCopy={orderCardProtectionCopy}
+                  orderCardStatus={orderCardStatus}
+                  orderCardTitle={orderCardTitle}
+                  popularCategories={POPULAR_CATEGORIES}
+                  products={products}
+                  searchQuery={searchQuery}
+                  selectedCategory={selectedCategory}
+                  selectedVialCount={selectedVialCount}
+                  settings={settings}
+                  shakingField={shakingField}
+                  shakingProd={shakingProd}
+                  showAmbulance={showAmbulance}
+                  showHowTo={showHowTo}
+                  showToast={showToast}
+                  totalPHP={totalPHP}
+                />
+                </div>
+                  <Suspense fallback={null}>
+                    <ShopDesktopCart
+                      cartList={cartList}
+                      desktopCartAsideClass={desktopCartAsideClass}
+                      desktopCartShellClass={desktopCartShellClass}
+                      desktopCartTitleClass={desktopCartTitleClass}
+                      existingMap={existingMap}
+                      isBtnLoading={isBtnLoading}
+                      isCartEditable={isCartEditable}
+                      isReviewStageOpen={isReviewStageOpen}
+                      onAdjustCartItem={adjustCartItem}
+                      onOpenPayModal={() => setShowPayModal(true)}
+                      onOpenPreview={() => setShowPreviewModal(true)}
+                      onSubmitOrder={submitOrder}
+                      originalBtn={originalBtn}
+                      settings={settings}
+                      shakingProd={shakingProd}
+                    subtotalUSD={subtotalUSD}
+                    totalPHP={totalPHP}
+                  />
+                </Suspense>
                 </div>
               </>
             )}
           </div>
 
-          {/* Sticky Mobile Footer ONLY when Store is Open */}
-          {settings.storeOpen !== false && !showShopAccessGate && (
-            <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t-2 border-[#FF1493] p-4 rounded-t-3xl shadow-[0_-10px_20px_rgba(0,0,0,0.1)] z-50 flex justify-between items-center gap-2">
-              <div className="shrink-0">
-                <div className="text-[10px] font-black text-[#D6006E] uppercase">Total Estimate</div>
-                <div className="text-xl sm:text-2xl font-black text-[#D6006E]">₱{totalPHP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-              </div>
+          {/* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ MODALS FOR SHOP */}
+          <Suspense fallback={null}>
+            <ShopCheckoutHost
+              addressErrors={addressErrors}
+              addressForm={addressForm}
+              canShowPaymentRoute={canShowPaymentRoute}
+              cartList={cartList}
+              currentPaymentRoute={currentPaymentRoute}
+              existingMap={existingMap}
+              hasValidPaymentRoute={hasValidPaymentRoute}
+              isBtnLoading={isBtnLoading}
+              isCartEditable={isCartEditable}
+              isReviewStageOpen={isReviewStageOpen}
+              lockedPaymentSnapshot={lockedPaymentSnapshot}
+              onAddressChange={setAddressForm}
+              onAdjustCartItem={adjustCartItem}
+              onClosePay={() => setShowPayModal(false)}
+              onClosePreview={() => setShowPreviewModal(false)}
+              onOpenPayFromPreview={() => {
+                setShowPreviewModal(false);
+                setShowPayModal(true);
+              }}
+              onProofChange={setProofFile}
+              onSubmitOrder={submitOrder}
+              onSubmitPayment={submitPayment}
+              originalBtn={originalBtn}
+              partialShipOptions={PARTIAL_SHIP_OPTIONS}
+              settings={settings}
+              shakingProd={shakingProd}
+              showPayModal={showPayModal}
+              showPreviewModal={showPreviewModal}
+              totalPHP={totalPHP}
+              totalUSDSubtotal={subtotalUSD}
+            />
+          </Suspense>
 
-              <div className="flex gap-2 w-full justify-end">
-                <button onClick={() => setShowPreviewModal(true)} disabled={cartList.length === 0} className="bg-white text-[#D6006E] border-2 border-pink-200 px-3 sm:px-4 py-2 sm:py-3 rounded-full font-bold uppercase text-[10px] sm:text-sm shadow-sm disabled:opacity-50 whitespace-nowrap active:scale-95 transition-transform">Review</button>
-
-                {settings.paymentsOpen ? (
-                  <button onClick={() => setShowPayModal(true)} disabled={cartList.length === 0} className="bg-[#008040] text-white px-4 sm:px-6 py-2 sm:py-3 rounded-full font-bold uppercase text-[10px] sm:text-sm shadow-md disabled:opacity-50 whitespace-nowrap active:scale-95 transition-transform">Pay Now</button>
-                ) : isReviewStageOpen ? (
-                  <button disabled className="bg-sky-100 text-sky-700 px-4 sm:px-6 py-2 sm:py-3 rounded-full font-black uppercase text-[10px] sm:text-sm shadow-md opacity-70 whitespace-nowrap">
-                    Review Freeze
-                  </button>
-                ) : (
-                  <button onClick={submitOrder} disabled={isBtnLoading} className="bg-[#D6006E] text-white px-4 sm:px-6 py-2 sm:py-3 rounded-full font-black uppercase text-[10px] sm:text-sm shadow-md disabled:opacity-50 whitespace-nowrap active:scale-95 transition-transform">
-                    {isBtnLoading ? 'Saving' : 'Save'}
-                  </button>
-                )}
-              </div>
-            </div>
+          {showHitListModal && (
+            <Suspense fallback={null}>
+              <ShopHitListHost
+                adjustCartItem={adjustCartItem}
+                cartItems={cartItems}
+                closeHitList={() => setShowHitListModal(false)}
+                confirmHitListIncrease={confirmHitListIncrease}
+                customerEmail={customerEmail}
+                existingOrderItems={existingOrderData.items}
+                isBtnLoading={isBtnLoading}
+                isCartEditable={isCartEditable}
+                isHitListSaveReady={isHitListSaveReady}
+                isReviewStageOpen={isReviewStageOpen}
+                onClosePendingAdd={() => setPendingHitListAdd(null)}
+                onPendingAddChange={updatePendingHitListAddQuantity}
+                onPendingAddConfirm={() => {
+                  setCartItems(prev => ({ ...prev, [pendingHitListAdd.productName]: { v: pendingHitListAdd.nextQty } }));
+                  setCartInputDrafts(prev => {
+                    const updated = { ...prev };
+                    delete updated[pendingHitListAdd.productName];
+                    return updated;
+                  });
+                  setPendingHitListAdd(null);
+                }}
+                originalBtn={originalBtn}
+                pendingHitListAdd={pendingHitListAdd}
+                productsByName={productsByName}
+                settings={settings}
+                submitOrder={submitOrder}
+                trimmingHitList={trimmingHitList}
+              />
+            </Suspense>
           )}
 
-          {/* âœ¨ MODALS FOR SHOP */}
-
-          {/* âœ¨ IMPROVED: Sleek & compact Payment Modal */}
-          {showPayModal && (
-            <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-              <div className="bg-white rounded-[24px] w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-2 border-pink-200">
-                <div className="bg-[#FFF0F5] p-4 flex justify-between items-center border-b border-[#FFC0CB]">
-                  <h2 className="brand-title text-xl text-pink-600">Checkout</h2>
-                  <button onClick={() => setShowPayModal(false)} className="text-pink-600 font-black text-2xl hover:scale-110 transition-transform">&times;</button>
-                </div>
-                <div className="p-4 sm:p-5 overflow-y-auto space-y-4 hide-scroll bg-white">
-
-                  <div className="bg-pink-100 p-6 rounded-[24px] border-4 border-pink-200 text-center shadow-inner relative overflow-hidden">
-                    <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/40 to-transparent"></div>
-                    <p className="text-[10px] font-black text-pink-500 uppercase tracking-widest mb-1 relative z-10">Total Amount to Pay</p>
-                    <h3 className="text-3xl sm:text-4xl font-black text-[#D6006E] drop-shadow-sm relative z-10">₱{totalPHP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
-                  </div>
-
-                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                    <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
-                      <p className="text-[10px] font-black text-slate-500 uppercase">Send Payment To</p>
-                      <p className="font-black text-[#D6006E] text-xs">{currentPaymentRoute.adminAssigned || 'Admin'}</p>
-                    </div>
-
-                    {currentPaymentRoute.hasRoute ? (
-                      <div className="flex flex-col gap-2">
-                        {currentPaymentRoute.bankQr ? (
-                          <img src={currentPaymentRoute.bankQr} alt="QR Code" className="w-full max-w-[160px] mx-auto rounded-lg border border-slate-100" />
-                        ) : null}
-                        {currentPaymentRoute.bankDetails ? (
-                          <div className="bg-slate-50 p-2 rounded border border-slate-100 text-center">
-                            <pre className="font-mono text-xs text-slate-700 whitespace-pre-wrap font-bold m-0">{currentPaymentRoute.bankDetails}</pre>
-                          </div>
-                        ) : null}
-                        {lockedPaymentSnapshot ? (
-                          <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 text-center">Frozen for this payment window</p>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <p className="text-xs font-bold text-rose-500 text-center py-2">No payment options configured.</p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2.5">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <select value={addressForm.shipOpt} onChange={e => setAddressForm({ ...addressForm, shipOpt: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-xs sm:text-sm font-bold text-[#4A042A] outline-none transition-all ${addressErrors.shipOpt ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200 focus:border-[#D6006E]'}`}>
-                        <option value="" disabled>Select Courier...</option>
-                        {settings.shippingOptions.map(o => <option key={o} value={o}>{o}</option>)}
-                      </select>
-                      <select value={addressForm.partialShipPref} onChange={e => setAddressForm({ ...addressForm, partialShipPref: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-xs sm:text-sm font-bold text-[#4A042A] outline-none transition-all ${addressErrors.partialShipPref ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200 focus:border-[#D6006E]'}`}>
-                        <option value="" disabled>If may maunang dumating...</option>
-                        {PARTIAL_SHIP_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                      </select>
-                    </div>
-                    <p className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-[11px] font-bold leading-relaxed text-amber-700">
-                      Minsan hiwa-hiwalay dumadating ang kits. Pili ka dito kung gusto mo i-ship agad yung ready na, or okay lang sayo maghintay hanggang kumpleto lahat.
-                    </p>
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <input type="text" value={addressForm.street} onChange={e => setAddressForm({ ...addressForm, street: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 transition-all ${addressErrors.street ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Street / Lot / Bldg *" />
-                      <input type="text" value={addressForm.brgy} onChange={e => setAddressForm({ ...addressForm, brgy: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 sm:col-span-1 transition-all ${addressErrors.brgy ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Barangay *" />
-                      <input type="text" value={addressForm.city} onChange={e => setAddressForm({ ...addressForm, city: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 sm:col-span-1 transition-all ${addressErrors.city ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="City *" />
-                      <input type="text" value={addressForm.prov} onChange={e => setAddressForm({ ...addressForm, prov: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 sm:col-span-1 transition-all ${addressErrors.prov ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Province *" />
-                      <input type="text" value={addressForm.zip} onChange={e => setAddressForm({ ...addressForm, zip: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 sm:col-span-1 transition-all ${addressErrors.zip ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Zip Code *" />
-                      <input type="text" value={addressForm.contact} onChange={e => setAddressForm({ ...addressForm, contact: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 transition-all ${addressErrors.contact ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Contact # *" />
-                    </div>
-                  </div>
-
-                  <div className={`bg-slate-50 p-2.5 rounded-xl border flex items-center justify-between transition-all duration-300 ${addressErrors.proofFile ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200'}`}>
-                    <input type="file" accept="image/*" onChange={(e) => setProofFile(e.target?.files?.[0] || null)} className={`w-full text-xs font-bold file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[10px] file:font-black file:text-white cursor-pointer ${addressErrors.proofFile ? 'text-red-600 file:bg-red-500' : 'text-[#D6006E] file:bg-[#FF1493] hover:file:bg-[#D6006E]'}`} />
-                  </div>
-
-                  <div className="bg-slate-50 p-4 sm:p-5 rounded-2xl border border-slate-200">
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 border-b border-slate-200 pb-2">Your Order Summary</p>
-                    {cartList.map((i, idx) => (
-                      <div key={idx} className="flex justify-between items-center text-sm font-bold text-[#4A042A] mb-1.5">
-                        <span><span className="text-[#D6006E]">x{i.qty}</span> {i.product}</span>
-                        <span className="text-slate-500">${(i.price * i.qty).toFixed(2)}</span>
-                      </div>
-                    ))}
-                    <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 pt-2 border-t border-slate-200 mt-2">
-                      <span>Admin Fee</span>
-                      <span>₱{settings.adminFeePhp}</span>
-                    </div>
-                  </div>
-
-                </div>
-                <div className="p-4 border-t border-pink-100 bg-white">
-                  <button onClick={submitPayment} disabled={isBtnLoading} className={`${originalBtn} w-full py-3`}>
-                    {isBtnLoading ? 'Uploading...' : 'Complete Payment'}
-                  </button>
-                </div>
-              </div>
-            </div>
+          {(showCalculatorModal || showWikiModal) && (
+            <Suspense fallback={null}>
+              <ShopUtilityModalsHost
+                calculatorDoseMg={calculatorDoseMg}
+                calculatorStrengthMg={calculatorStrengthMg}
+                calculatorWaterMl={calculatorWaterMl}
+                closeCalculator={() => setShowCalculatorModal(false)}
+                closeWiki={() => setShowWikiModal(false)}
+                dosePresets={CALCULATOR_DOSE_PRESETS}
+                filteredWikiData={filteredWikiData}
+                normalizedWikiTag={currentWikiFocusLabel}
+                peptideCalculator={peptideCalculator}
+                setCalculatorDoseMg={setCalculatorDoseMg}
+                setCalculatorStrengthMg={setCalculatorStrengthMg}
+                setCalculatorWaterMl={setCalculatorWaterMl}
+                setWikiSearchQuery={setWikiSearchQuery}
+                setWikiTagFilter={setWikiTagFilter}
+                showCalculatorModal={showCalculatorModal}
+                showWikiModal={showWikiModal}
+                strengthPresets={CALCULATOR_STRENGTH_PRESETS}
+                waterPresets={CALCULATOR_WATER_PRESETS}
+                wikiFilterOptions={wikiFilterOptions}
+                wikiSearchQuery={wikiSearchQuery}
+                wikiTagFilter={wikiTagFilter}
+              />
+            </Suspense>
           )}
-
-          {showPreviewModal && (
-            <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-              <div className="bg-white rounded-[32px] w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
-                <div className="bg-[#FFF0F5] p-5 flex justify-between items-center border-b-2 border-[#FFC0CB]">
-                  <div>
-                    <h2 className="brand-title text-2xl text-pink-600">Order Confirmation</h2>
-                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-pink-400 mt-1">
-                      {settings.paymentsOpen
-                        ? 'Check your saved order before payment'
-                        : isReviewStageOpen
-                          ? 'Review your saved order before payments open'
-                          : 'Adjust quantities before you save'}
-                    </p>
-                  </div>
-                  <button onClick={() => setShowPreviewModal(false)} className="text-pink-600 font-black text-2xl hover:scale-110 transition-transform">&times;</button>
-                </div>
-                <div className="p-6 overflow-y-auto space-y-4 hide-scroll">
-                  {cartList.length === 0 ? (
-                    <p className="text-center text-pink-400 font-bold italic py-8">Your cart is empty!</p>
-                  ) : (
-                    cartList.map((i, idx) => (
-                      <div key={idx} className="flex justify-between items-center gap-3 text-sm border-b border-pink-50 border-dashed pb-3">
-                        <div className="min-w-0 pr-2">
-                          <div className="font-bold text-[#4A042A]">{i.product}</div>
-                          {(existingMap[i.product] || 0) > 0 && (
-                            <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] font-black uppercase tracking-wide">
-                              <span className="rounded-full bg-sky-50 text-sky-700 border border-sky-100 px-2 py-0.5">
-                                You have {existingMap[i.product]}
-                              </span>
-                              {i.qty !== existingMap[i.product] && (
-                                <span className="rounded-full bg-pink-50 text-pink-700 border border-pink-100 px-2 py-0.5">
-                                  Now {i.qty}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        <div className="text-right shrink-0">
-                          {isCartEditable ? (
-                            <div className={`flex items-center gap-1 justify-end mb-1 rounded-full px-1 py-0.5 transition-all ${shakingProd === i.product ? 'animate-shake bg-red-50 ring-2 ring-red-200' : ''}`}>
-                              <button onClick={() => adjustCartItem(i.product, -1)} className={`w-7 h-7 rounded-full border font-black leading-none transition-colors ${shakingProd === i.product ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100' : 'border-pink-200 bg-white text-[#D6006E] hover:bg-pink-50'}`}>
-                                -
-                              </button>
-                              <span className={`min-w-[36px] text-center font-black ${shakingProd === i.product ? 'text-red-600' : 'text-[#D6006E]'}`}>
-                                {i.qty}
-                              </span>
-                              <button onClick={() => adjustCartItem(i.product, 1)} className={`w-7 h-7 rounded-full border font-black leading-none transition-colors ${shakingProd === i.product ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100' : 'border-pink-200 bg-white text-[#D6006E] hover:bg-pink-50'}`}>
-                                +
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="text-[#D6006E] font-black">x{i.qty}</span>
-                          )}
-                          <div className="text-[11px] text-gray-500 font-bold">${(i.price * i.qty).toFixed(2)}</div>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                  <div className="pt-4 space-y-2 text-sm border-t-2 border-pink-100">
-                    <div className="flex justify-between font-bold text-gray-500 uppercase"><span>Subtotal</span><span>${subtotalUSD.toFixed(2)}</span></div>
-                    <div className="flex justify-between font-bold text-gray-500 uppercase"><span>Admin Fee</span><span>₱{settings.adminFeePhp}</span></div>
-                  </div>
-                </div>
-                <div className="p-6 border-t-2 border-pink-50 bg-[#FFF0F5]">
-                  <div className="flex justify-between items-center mb-4">
-                    <span className="font-bold text-pink-400">TOTAL PHP</span>
-                    <span className="text-2xl font-black text-pink-600">₱{totalPHP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    {!settings.paymentsOpen ? (
-                      isReviewStageOpen ? (
-                        <div className="w-full rounded-full border-2 border-sky-200 bg-sky-50 py-3 text-center text-sm font-black uppercase tracking-widest text-sky-700">
-                          Review Only - Edits Paused
-                        </div>
-                      ) : (
-                      <button onClick={submitOrder} disabled={isBtnLoading} className={originalBtn + " w-full"}>
-                        {isBtnLoading ? 'Saving...' : 'Save Order'}
-                      </button>
-                      )
-                    ) : (
-                      <button onClick={() => { setShowPreviewModal(false); setShowPayModal(true); }} disabled={cartList.length === 0} className="w-full bg-[#008040] text-white font-bold py-3 rounded-full uppercase tracking-widest text-sm shadow-md disabled:opacity-50">
-                        Pay Now
-                      </button>
-                    )}
-                    <button onClick={() => setShowPreviewModal(false)} className="w-full rounded-full border-2 border-pink-200 bg-white py-3 text-sm font-black uppercase tracking-widest text-[#D6006E] hover:bg-pink-50">
-                      {settings.paymentsOpen ? 'Close Review' : isReviewStageOpen ? 'Back to Review' : 'Continue Shopping'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* âœ¨ IMPROVED: Compact Hit List Modal */}
-          {showHitListModal && (() => {
-            const userEmailTrimmed = customerEmail.toLowerCase().trim();
-            const modalHitGroups = Object.values(trimmingHitList.reduce((acc, item) => {
-              const key = `${item.prod}||${item.boxNum}||${item.missingSlots}`;
-              if (!acc[key]) {
-                acc[key] = {
-                  key,
-                  prod: item.prod,
-                  boxNum: item.boxNum,
-                  missingSlots: item.missingSlots,
-                  riskyVials: 0,
-                  myRisk: false,
-                  rows: []
-                };
-              }
-              acc[key].rows.push(item);
-              acc[key].riskyVials += Number(item.amountToRemove || 0);
-              if (item.email === userEmailTrimmed) acc[key].myRisk = true;
-              return acc;
-            }, {})).map(group => ({
-              ...group,
-              customers: new Set(group.rows.map(row => row.email)).size,
-              rows: [...group.rows].sort((a, b) => {
-                const aIsMe = a.email === userEmailTrimmed;
-                const bIsMe = b.email === userEmailTrimmed;
-                if (aIsMe && !bIsMe) return -1;
-                if (!aIsMe && bIsMe) return 1;
-                const riskDiff = Number(b.amountToRemove || 0) - Number(a.amountToRemove || 0);
-                if (riskDiff !== 0) return riskDiff;
-                return (a.name || a.email).localeCompare(b.name || b.email);
-              })
-            })).sort((a, b) => {
-              if (a.myRisk && !b.myRisk) return -1;
-              if (!a.myRisk && b.myRisk) return 1;
-              const urgencyDiff = Number(a.missingSlots || 0) - Number(b.missingSlots || 0);
-              if (urgencyDiff !== 0) return urgencyDiff;
-              const customerDiff = Number(b.customers || 0) - Number(a.customers || 0);
-              if (customerDiff !== 0) return customerDiff;
-              const productDiff = a.prod.localeCompare(b.prod);
-              if (productDiff !== 0) return productDiff;
-              return Number(a.boxNum || 0) - Number(b.boxNum || 0);
-            });
-
-            return (
-              <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-                <div className="bg-white rounded-[24px] w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[85vh] border-2 border-pink-200">
-                  <div className="bg-[#FFF0F5] p-4 flex justify-between items-center border-b border-[#FFC0CB]">
-                    <h2 className="brand-title text-xl text-rose-600 flex items-center gap-2"><AlertTriangle size={20} /> Boxes To Save</h2>
-                    <button onClick={() => setShowHitListModal(false)} className="text-pink-600 font-black text-2xl hover:scale-110 transition-transform">&times;</button>
-                  </div>
-                  <div className="p-4 sm:p-5 overflow-y-auto bg-slate-50 hide-scroll">
-                    <p className="mb-2 text-center text-[10px] font-bold text-slate-500">
-                      Small view: use `+` or `-` here.
-                    </p>
-                    {modalHitGroups.length === 0 ? (
-                      <div className="bg-emerald-50 p-6 rounded-xl text-center font-bold text-emerald-600 border border-emerald-200 uppercase tracking-widest text-[10px]">
-                        All boxes are full. Nothing needs help right now.
-                      </div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {modalHitGroups.map((group) => {
-                          const myCurrentQty = cartItems[group.prod]?.v || existingOrderData.items[group.prod] || 0;
-                          const myExistingQty = existingOrderData.items[group.prod] || 0;
-                          const canDecrease = isCartEditable && (!settings.addOnly ? myCurrentQty > 0 : myCurrentQty > myExistingQty);
-                          const canIncrease = isCartEditable;
-                          const pricePerVialUSD = Number(products.find(p => p.name === group.prod)?.pricePerVialUSD || 0);
-                          return (
-                            <details key={group.key} className={`rounded-lg border px-2.5 py-1.5 shadow-sm ${group.myRisk ? 'bg-rose-100 border-rose-400' : 'bg-white border-rose-100'}`}>
-                              <summary className="list-none cursor-pointer">
-                                <div className="min-w-0 text-[#4A042A]">
-                                  <div className="min-w-0">
-                                    <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[12px] font-black">
-                                      <span className="min-w-0 flex-1 truncate">{group.prod}</span>
-                                      <span className="shrink-0 rounded-full border border-pink-200 bg-pink-50 px-2 py-0.5 text-[9px] uppercase tracking-widest text-[#D6006E]">
-                                        ${pricePerVialUSD.toFixed(2)} / vial • you {myCurrentQty}
-                                      </span>
-                                      {group.myRisk && (
-                                        <span className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[9px] uppercase tracking-widest text-rose-600">
-                                          yours at risk
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  <div className="mt-1 flex items-center gap-1 overflow-x-auto hide-scroll whitespace-nowrap text-[10px] font-black uppercase tracking-widest">
-                                    <span className="rounded-full border border-pink-200 bg-white px-2 py-1 text-rose-500">B{group.boxNum}</span>
-                                    <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700">Need {group.missingSlots}</span>
-                                    <span className="rounded-full border border-slate-200 bg-white px-2 py-1 text-slate-500">Buyers {group.rows.length}</span>
-                                    <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-sky-700">Saved {myExistingQty}</span>
-                                    <div className="ml-auto flex items-center gap-1 pl-1">
-                                      <button
-                                        onClick={(e) => { e.preventDefault(); adjustCartItem(group.prod, -1); }}
-                                        disabled={!canDecrease}
-                                        className="h-7 min-w-7 rounded-full border border-pink-200 bg-white px-1.5 text-[12px] font-black text-[#D6006E] transition-colors hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-40"
-                                      >
-                                        -
-                                      </button>
-                                      <button
-                                        onClick={(e) => { e.preventDefault(); confirmHitListIncrease(group.prod, 1, { missingSlots: group.missingSlots, boxNum: group.boxNum }); }}
-                                        disabled={!canIncrease}
-                                        className="h-7 min-w-7 rounded-full bg-[#FF1493] px-1.5 text-[12px] font-black text-white transition-colors hover:bg-[#D6006E] disabled:cursor-not-allowed disabled:opacity-40"
-                                      >
-                                        Add
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-                              </summary>
-                                <div className="mt-1.5 border-t border-rose-100 pt-1.5 space-y-1.5">
-                                  <p className="text-[10px] font-bold leading-relaxed text-slate-500">
-                                    If this box does not fill, the loose vials below may be cut. Try filling the box first. Admins should message buyers before removing loose vials.
-                                  </p>
-                                  {group.rows.map((row) => {
-                                    const isMyItem = row.email === userEmailTrimmed;
-                                    return (
-                                    <div key={row.id} className={`flex items-center justify-between gap-2 rounded-md px-2 py-1 text-[11px] ${isMyItem ? 'bg-rose-50 border border-rose-200' : 'bg-white border border-slate-200'}`}>
-                                      <div className="min-w-0 truncate font-bold text-[#4A042A]">
-                                        {row.handle || row.name || row.email}
-                                        {isMyItem ? ' | yours' : ''}
-                                      </div>
-                                      <div className="shrink-0 font-black text-slate-500">
-                                        at risk {row.amountToRemove}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </details>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                  <div className="p-3 border-t border-pink-100 bg-white space-y-2">
-                    <p className="text-center text-[10px] font-bold text-slate-500">
-                      Name + matching email are required before save will work.
-                    </p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={submitOrder}
-                        disabled={isBtnLoading || !isHitListSaveReady || !isCartEditable}
-                        className={`${originalBtn} w-full py-3 text-sm disabled:opacity-50 disabled:cursor-not-allowed`}
-                      >
-                        {isReviewStageOpen ? 'Review Freeze' : isBtnLoading ? 'Saving...' : 'Save Changes'}
-                      </button>
-                      <button onClick={() => setShowHitListModal(false)} className="w-full py-3 text-sm rounded-full border-2 border-pink-200 bg-white text-[#D6006E] font-bold uppercase tracking-widest shadow-sm hover:bg-pink-50 transition-colors">
-                        Close
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-
-          {pendingHitListAdd && (
-            <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[120] flex items-center justify-center p-4">
-              <div className="w-full max-w-sm rounded-[28px] border-2 border-pink-200 bg-white p-5 shadow-2xl">
-                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#D6006E]">Add More From Hit List</p>
-                <h3 className="mt-2 text-xl font-black leading-tight text-[#4A042A]">{pendingHitListAdd.productName}</h3>
-                <div className="mt-4 space-y-2 rounded-[22px] border border-pink-100 bg-[#FFF7FA] p-4 text-sm font-bold text-[#7B1B53]">
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Price per vial • your qty now</span>
-                    <span>${pendingHitListAdd.pricePerVialUSD.toFixed(2)} • {pendingHitListAdd.currentQty}</span>
-                  </div>
-                  {pendingHitListAdd.missingSlots > 0 && (
-                    <div className="flex items-center justify-between gap-3">
-                      <span>{pendingHitListAdd.boxNum ? `Box ${pendingHitListAdd.boxNum}` : 'Current box'} still needs</span>
-                      <span>{pendingHitListAdd.missingSlots} vial{pendingHitListAdd.missingSlots === 1 ? '' : 's'}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Add this many</span>
-                    <div className="flex items-center gap-1 rounded-full border border-pink-200 bg-white px-1 py-1">
-                      <button
-                        onClick={() => setPendingHitListAdd(prev => {
-                          const addQty = Math.max(1, (prev?.addQty || 1) - 1);
-                          const nextQty = (prev?.currentQty || 0) + addQty;
-                          const nextSubtotalUSD = (prev?.baseSubtotalUSD || 0) + ((prev?.pricePerVialUSD || 0) * addQty);
-                          return {
-                            ...prev,
-                            addQty,
-                            nextQty,
-                            nextTotalPHP: lockedPaymentSnapshot?.totalPHP ?? ((nextSubtotalUSD > 0 && settings.fxRate > 0 ? nextSubtotalUSD + (settings.adminFeePhp / settings.fxRate) : 0) * settings.fxRate)
-                          };
-                        })}
-                        className="h-8 w-8 rounded-full border border-pink-200 bg-white text-sm font-black text-[#D6006E] hover:bg-pink-50"
-                      >
-                        -
-                      </button>
-                      <input
-                        type="number"
-                        min="1"
-                        value={pendingHitListAdd.addQty}
-                        onChange={(e) => {
-                          const addQty = Math.max(1, parseInt(e.target.value, 10) || 1);
-                          const nextQty = pendingHitListAdd.currentQty + addQty;
-                          const nextSubtotalUSD = pendingHitListAdd.baseSubtotalUSD + (pendingHitListAdd.pricePerVialUSD * addQty);
-                          setPendingHitListAdd(prev => ({
-                            ...prev,
-                            addQty,
-                            nextQty,
-                            nextTotalPHP: lockedPaymentSnapshot?.totalPHP ?? ((nextSubtotalUSD > 0 && settings.fxRate > 0 ? nextSubtotalUSD + (settings.adminFeePhp / settings.fxRate) : 0) * settings.fxRate)
-                          }));
-                        }}
-                        className="w-14 bg-transparent text-center text-sm font-black text-[#D6006E] outline-none"
-                      />
-                      <button
-                        onClick={() => setPendingHitListAdd(prev => {
-                          const addQty = Math.max(1, (prev?.addQty || 1) + 1);
-                          const nextQty = (prev?.currentQty || 0) + addQty;
-                          const nextSubtotalUSD = (prev?.baseSubtotalUSD || 0) + ((prev?.pricePerVialUSD || 0) * addQty);
-                          return {
-                            ...prev,
-                            addQty,
-                            nextQty,
-                            nextTotalPHP: lockedPaymentSnapshot?.totalPHP ?? ((nextSubtotalUSD > 0 && settings.fxRate > 0 ? nextSubtotalUSD + (settings.adminFeePhp / settings.fxRate) : 0) * settings.fxRate)
-                          };
-                        })}
-                        className="h-8 w-8 rounded-full border border-pink-200 bg-white text-sm font-black text-[#D6006E] hover:bg-pink-50"
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Your qty after this</span>
-                    <span>{pendingHitListAdd.nextQty}</span>
-                  </div>
-                  {pendingHitListAdd.missingSlots > 0 && (
-                    <div className="flex items-center justify-between gap-3">
-                      <span>Needed left after this</span>
-                      <span>
-                        {Math.max(0, pendingHitListAdd.missingSlots - pendingHitListAdd.addQty)}
-                        {pendingHitListAdd.addQty > pendingHitListAdd.missingSlots ? ` • +${pendingHitListAdd.addQty - pendingHitListAdd.missingSlots} extra` : ''}
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Estimated total</span>
-                    <span>₱{pendingHitListAdd.nextTotalPHP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
-                </div>
-                <p className="mt-3 text-xs font-bold leading-relaxed text-slate-500">
-                  Pick how many vials you want to add, then save the updated total in one step.
-                </p>
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => {
-                      setCartItems(prev => ({ ...prev, [pendingHitListAdd.productName]: { v: pendingHitListAdd.nextQty } }));
-                      setCartInputDrafts(prev => {
-                        const updated = { ...prev };
-                        delete updated[pendingHitListAdd.productName];
-                        return updated;
-                      });
-                      setPendingHitListAdd(null);
-                    }}
-                    className={`${originalBtn} w-full justify-center py-3 text-sm`}
-                  >
-                    Add To Cart
-                  </button>
-                  <button
-                    onClick={() => setPendingHitListAdd(null)}
-                    className="w-full rounded-full border-2 border-pink-200 bg-white py-3 text-sm font-black uppercase tracking-widest text-[#D6006E] hover:bg-pink-50"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {showCalculatorModal && (
-            <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[390] flex items-center justify-center p-4">
-              <div className="bg-white rounded-[32px] w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
-                <div className="bg-gradient-to-r from-[#FF7A59] via-[#FF4FA1] to-[#FF1493] px-4 py-3 sm:px-5 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 relative">
-                  <button onClick={() => setShowCalculatorModal(false)} className="absolute top-3 right-4 text-white/80 hover:text-white font-black text-[28px] leading-none hover:scale-110 transition-transform">&times;</button>
-                  <div className="text-white pr-10 sm:pr-0">
-                    <h2 className="brand-title text-[1.8rem] sm:text-[2.25rem] leading-[0.92] m-0 text-white shadow-none">Peptide Calculator</h2>
-                    <p className="text-white/90 font-bold text-[12px] sm:text-[13px] mt-0.5 max-w-lg leading-snug">Calculate concentration, draw amount, and syringe units for peptide reconstitution.</p>
-                    <p className="mt-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-white/72">Built for BBP using standard U-100 insulin syringe math.</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2 sm:justify-end">
-                    <div className="rounded-[20px] border border-white/30 bg-white/15 px-3 py-1.5 text-white backdrop-blur-sm min-w-[100px]">
-                      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-white/75">Draw To</p>
-                      <p className="mt-1 text-lg font-black leading-none">{peptideCalculator ? `${peptideCalculator.syringeUnits.toFixed(0)} units` : '--'}</p>
-                    </div>
-                    <div className="rounded-[20px] border border-white/30 bg-white/15 px-3 py-1.5 text-white backdrop-blur-sm min-w-[100px]">
-                      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-white/75">Dose</p>
-                      <p className="mt-1 text-lg font-black leading-none">{peptideCalculator ? `${peptideCalculator.doseMg}mg` : '--'}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-4 sm:p-6 overflow-y-auto bg-slate-50 hide-scroll space-y-5">
-                  <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-5">
-                    <div className="bg-white rounded-[28px] border border-pink-100 shadow-sm p-5">
-                      <div className="flex items-center justify-between gap-3 flex-wrap">
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">Calculator Inputs</p>
-                          <p className="mt-1 text-sm font-bold text-slate-500">Set your target dose, vial strength, and bacteriostatic water volume.</p>
-                        </div>
-                      </div>
-
-                      <div className="mt-5 space-y-5">
-                        <div>
-                          <div className="flex items-center justify-between gap-3">
-                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-[#D6006E]">Dose of Peptide</label>
-                            <input type="number" min="0.01" step="0.01" value={calculatorDoseMg} onChange={e => setCalculatorDoseMg(Number(e.target.value) || 0)} className="w-24 rounded-xl border border-pink-200 bg-pink-50 px-3 py-2 text-right text-sm font-black text-[#4A042A] outline-none focus:border-[#D6006E]" />
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {CALCULATOR_DOSE_PRESETS.map((dose) => (
-                              <button
-                                key={`dose-${dose}`}
-                                type="button"
-                                onClick={() => setCalculatorDoseMg(dose)}
-                                className={`rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors ${calculatorDoseMg === dose ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
-                              >
-                                {dose}mg
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="flex items-center justify-between gap-3">
-                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-[#D6006E]">Strength of Peptide</label>
-                            <input type="number" min="0.1" step="0.1" value={calculatorStrengthMg} onChange={e => setCalculatorStrengthMg(Number(e.target.value) || 0)} className="w-24 rounded-xl border border-pink-200 bg-pink-50 px-3 py-2 text-right text-sm font-black text-[#4A042A] outline-none focus:border-[#D6006E]" />
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {CALCULATOR_STRENGTH_PRESETS.map((strength) => (
-                              <button
-                                key={`strength-${strength}`}
-                                type="button"
-                                onClick={() => setCalculatorStrengthMg(strength)}
-                                className={`rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors ${calculatorStrengthMg === strength ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
-                              >
-                                {strength}mg
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="flex items-center justify-between gap-3">
-                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-[#D6006E]">Water of Peptide</label>
-                            <input type="number" min="0.1" step="0.1" value={calculatorWaterMl} onChange={e => setCalculatorWaterMl(Number(e.target.value) || 0)} className="w-24 rounded-xl border border-pink-200 bg-pink-50 px-3 py-2 text-right text-sm font-black text-[#4A042A] outline-none focus:border-[#D6006E]" />
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {CALCULATOR_WATER_PRESETS.map((water) => (
-                              <button
-                                key={`water-${water}`}
-                                type="button"
-                                onClick={() => setCalculatorWaterMl(water)}
-                                className={`rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors ${calculatorWaterMl === water ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
-                              >
-                                {water}mL
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="bg-white rounded-[28px] border border-pink-100 shadow-sm p-5 space-y-4">
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-[0.24em] text-pink-500">Results</p>
-                        <p className="mt-1 text-sm font-bold text-slate-500">Use this as a quick reference for how much to draw into a 100-unit insulin syringe.</p>
-                      </div>
-
-                      {peptideCalculator ? (
-                        <>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="rounded-[22px] border border-pink-100 bg-pink-50/70 p-4 min-h-[124px] flex flex-col justify-between">
-                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-pink-500">Peptide Dose</p>
-                              <div className="mt-3">
-                                <p className="text-2xl font-black leading-none text-[#D6006E]">{peptideCalculator.doseMg}mg</p>
-                                <p className="mt-2 text-[11px] font-bold text-slate-500 leading-snug">{peptideCalculator.doseMcg.toLocaleString()}mcg per shot</p>
-                              </div>
-                            </div>
-                            <div className="rounded-[22px] border border-emerald-100 bg-emerald-50/70 p-4 min-h-[124px] flex flex-col justify-between">
-                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600">Draw Syringe To</p>
-                              <div className="mt-3">
-                                <p className="text-2xl font-black leading-none text-emerald-700">{peptideCalculator.syringeUnits.toFixed(0)} units</p>
-                                <p className="mt-2 text-[11px] font-bold text-slate-500 leading-snug">{peptideCalculator.drawMl.toFixed(2)}mL</p>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="rounded-[24px] border border-pink-100 bg-white p-4">
-                            <div className="flex items-center justify-between gap-3">
-                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-pink-500">Syringe Guide</p>
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">100 units scale</p>
-                            </div>
-                            <div className="mt-4 relative">
-                              <div className="flex items-center">
-                                <div className="mr-3 flex w-14 shrink-0 items-center justify-end">
-                                  <div className="h-[4px] w-6 rounded-full bg-pink-300" />
-                                  <div className="relative h-7 w-7 rounded-full border-[3px] border-pink-300 bg-white shadow-sm">
-                                    <span className="absolute inset-[6px] rounded-full border-2 border-pink-200" />
-                                  </div>
-                                </div>
-                                <div className="relative h-[66px] flex-1 min-w-0">
-                                  <div className="absolute inset-y-[8px] left-0 right-0 rounded-[10px] border-[3px] border-pink-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(255,244,248,0.94))] shadow-inner" />
-                                  <div
-                                    className="absolute inset-y-[16px] left-[8px] rounded-[6px] bg-gradient-to-r from-[#FF7A59] via-[#FF4FA1] to-[#FF1493] shadow-[0_8px_18px_rgba(255,20,147,0.18)]"
-                                    style={{ width: `calc(${Math.max(2, Math.min(peptideCalculator.syringeUnits, 100))}% - 16px)` }}
-                                  />
-                                  <div
-                                    className="absolute top-[11px] w-[8px] rounded-[4px] bg-[#4A042A] shadow-[0_4px_12px_rgba(74,4,42,0.18)]"
-                                    style={{
-                                      left: `calc(${Math.max(2, Math.min(peptideCalculator.syringeUnits, 100))}% - 4px)`,
-                                      height: '32px'
-                                    }}
-                                  />
-                                  <div className="absolute inset-x-[10px] top-[9px] bottom-[9px] flex items-stretch justify-between pointer-events-none">
-                                    {Array.from({ length: 21 }).map((_, tickIndex) => (
-                                      <div key={tickIndex} className="relative h-full">
-                                        <span className={`absolute left-1/2 -translate-x-1/2 rounded-full bg-pink-300/90 ${tickIndex % 5 === 0 ? 'top-[4px] h-[28px] w-[2px]' : 'top-[11px] h-[14px] w-[1.5px]'}`} />
-                                      </div>
-                                    ))}
-                                  </div>
-                                  <div className="absolute -top-3 transition-all" style={{ left: `calc(${Math.max(4, Math.min(peptideCalculator.syringeUnits, 96))}% - 24px)` }}>
-                                    <div className="rounded-full bg-[#4A042A] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-white shadow-lg">
-                                      {peptideCalculator.syringeUnits.toFixed(0)}u
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="ml-3 flex w-16 shrink-0 items-center">
-                                  <div className="h-4 w-4 rounded-r-[6px] rounded-l-[3px] bg-pink-300 shadow-sm" />
-                                  <div className="h-[3px] w-10 rounded-full bg-slate-400" />
-                                  <div className="h-0 w-0 border-y-[3px] border-y-transparent border-l-[12px] border-l-slate-400" />
-                                </div>
-                              </div>
-                            </div>
-                            <div className="mt-2 flex items-center justify-between pl-[58px] pr-[64px] text-[10px] font-black uppercase tracking-widest text-slate-400">
-                              <span>0</span>
-                              <span>50</span>
-                              <span>100</span>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            <div className="rounded-[22px] border border-slate-200 bg-slate-50/70 p-4 min-h-[138px] flex flex-col justify-between min-w-0">
-                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Vial Contains</p>
-                              <div className="mt-3">
-                                <p className="text-[1.4rem] sm:text-[1.55rem] font-black leading-none text-slate-700 break-words">{peptideCalculator.strengthMg}mg</p>
-                                <p className="mt-2 text-[11px] font-bold text-slate-500 leading-snug">mixed with {peptideCalculator.waterMl}mL</p>
-                              </div>
-                            </div>
-                            <div className="rounded-[22px] border border-blue-100 bg-blue-50/80 p-4 min-h-[138px] flex flex-col justify-between min-w-0">
-                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-500">Concentration</p>
-                              <div className="mt-3">
-                                <p className="text-[1.25rem] sm:text-[1.45rem] font-black leading-tight text-blue-700 break-words">{peptideCalculator.concentrationMgPerMl.toFixed(2)}<span className="ml-1 text-[0.7em] uppercase tracking-[0.14em]">mg/mL</span></p>
-                                <p className="mt-2 text-[11px] font-bold text-slate-500 leading-snug">{peptideCalculator.concentrationMcgPerUnit.toFixed(1)}mcg per unit</p>
-                              </div>
-                            </div>
-                            <div className="rounded-[22px] border border-amber-100 bg-amber-50/80 p-4 min-h-[138px] flex flex-col justify-between min-w-0">
-                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-600">Approx Doses</p>
-                              <div className="mt-3">
-                                <p className="text-[1.4rem] sm:text-[1.55rem] font-black leading-none text-amber-700 break-words">{peptideCalculator.remainingDoses}</p>
-                                <p className="mt-2 text-[11px] font-bold text-slate-500 leading-snug">full doses from one vial</p>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="rounded-[22px] border border-pink-100 bg-pink-50/60 px-4 py-3 text-xs font-bold text-[#8F2C5D] leading-relaxed">
-                            Formula: strength ÷ water = concentration, then dose ÷ concentration = draw amount. On a standard U-100 syringe, 1mL = 100 units.
-                          </div>
-                        </>
-                      ) : (
-                        <div className="rounded-[22px] border border-amber-100 bg-amber-50/80 px-4 py-6 text-center text-sm font-black text-amber-700">
-                          Enter a dose, vial strength, and water volume to calculate your draw amount.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {showWikiModal && (
-            <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[400] flex items-center justify-center p-4">
-              <div className="bg-white rounded-[32px] w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
-
-                <div className="bg-gradient-to-r from-[#FF1493] to-[#FF69B4] px-4 py-3 sm:px-5 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 relative">
-                  <button onClick={() => setShowWikiModal(false)} className="absolute top-3 right-4 text-white/80 hover:text-white font-black text-[28px] leading-none hover:scale-110 transition-transform">&times;</button>
-                  <div className="text-white pr-10 sm:pr-0">
-                    <h2 className="brand-title text-[1.75rem] sm:text-[2.15rem] leading-[0.92] m-0 text-white shadow-none">Peptide Wiki</h2>
-                    <p className="text-white/90 font-bold text-[12px] sm:text-[13px] mt-0.5 max-w-lg leading-snug">Quick product context, simple benefits, and handling notes in one place.</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2 sm:justify-end">
-                    <div className="rounded-[20px] border border-white/30 bg-white/15 px-3 py-1.5 text-white backdrop-blur-sm min-w-[98px]">
-                      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-white/75">Entries</p>
-                      <p className="mt-1 text-lg font-black leading-none">{filteredWikiData.length}</p>
-                    </div>
-                    <div className="rounded-[20px] border border-white/30 bg-white/15 px-3 py-1.5 text-white backdrop-blur-sm min-w-[118px]">
-                      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-white/75">Focus</p>
-                      <p className="mt-1 text-[12px] font-black leading-snug">{wikiTagFilter === 'All' ? 'All Categories' : wikiTagFilter}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-[#FFF0F5] px-4 py-2.5 border-b-2 border-[#FFC0CB] space-y-2.5">
-                  <div className="relative w-full max-w-[720px] mx-auto">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-400" size={18} />
-                    <input type="text" value={wikiSearchQuery} onChange={e => setWikiSearchQuery(e.target.value)} placeholder="Search by product, tag, or benefit..." className="w-full pl-11 pr-24 py-2 rounded-2xl text-[14px] font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-white text-[#4A042A] shadow-sm" />
-                    {(wikiSearchQuery || wikiTagFilter !== 'All') && (
-                      <button
-                        type="button"
-                        onClick={() => { setWikiSearchQuery(''); setWikiTagFilter('All'); }}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-pink-200 bg-pink-50 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-[#D6006E] transition-colors hover:bg-pink-100"
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex gap-1.5 overflow-x-auto hide-scroll pb-0.5">
-                    {wikiFilterOptions.map((tag) => (
-                      <button
-                        key={tag}
-                        type="button"
-                        onClick={() => setWikiTagFilter(tag)}
-                        className={`shrink-0 rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.16em] transition-colors ${wikiTagFilter === tag ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
-                      >
-                        {tag}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-center text-[10px] font-bold text-[#9E2A5E]">
-                    {wikiTagFilter === 'All'
-                      ? `Showing all ${filteredWikiData.length} wiki entries.`
-                      : `Showing ${filteredWikiData.length} entries in ${wikiTagFilter}.`}
-                  </p>
-                </div>
-
-                <div className="p-4 sm:p-6 overflow-y-auto bg-slate-50 hide-scroll">
-                  {filteredWikiData.length === 0 ? (
-                    <div className="text-center p-12 text-slate-400 font-bold italic">No wiki entries found for that search yet.</div>
-                  ) : (
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                      {filteredWikiData.map((item, idx) => (
-                        <div key={idx} className="bg-white p-5 rounded-[24px] border border-pink-100 shadow-sm hover:border-pink-300 transition-colors">
-                          <div className="flex items-start justify-between gap-3 mb-3">
-                            <div>
-                              <h3 className="font-black text-lg text-[#D6006E] leading-tight">{item.name}</h3>
-                              <div className="flex flex-wrap gap-1.5 mt-2">
-                                {item.tags.map((tag, tIdx) => (
-                                  <span key={tIdx} className="bg-pink-50 text-pink-600 border border-pink-200 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest">{tag}</span>
-                                ))}
-                              </div>
-                            </div>
-                            {item.benefits?.[0] && (
-                              <span className="shrink-0 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-emerald-700">
-                                {item.benefits[0]}
-                              </span>
-                            )}
-                          </div>
-
-                          {item.benefits?.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 mb-3">
-                              {item.benefits.map((benefit, benefitIdx) => (
-                                <span key={benefitIdx} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-slate-500">
-                                  {benefit}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-
-                          <p className="text-sm text-slate-600 font-semibold leading-relaxed border-t border-slate-100 pt-3 mb-4">{item.desc}</p>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                            {item.dosage && (
-                              <div className="rounded-2xl bg-pink-50/70 border border-pink-100 p-3">
-                                <div className="flex items-start gap-2">
-                                  <Droplet size={14} className="text-pink-500 mt-0.5 shrink-0" />
-                                  <div>
-                                    <p className="text-[9px] font-black text-pink-500 uppercase tracking-widest">Dosage</p>
-                                    <p className="text-xs font-bold text-slate-700 leading-tight mt-1">{item.dosage}</p>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                            {item.cycle && (
-                              <div className="rounded-2xl bg-white border border-slate-200 p-3">
-                                <div className="flex items-start gap-2">
-                                  <Repeat size={14} className="text-[#D6006E] mt-0.5 shrink-0" />
-                                  <div>
-                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Cycle</p>
-                                    <p className="text-xs font-bold text-slate-700 leading-tight mt-1">{item.cycle}</p>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                            {item.storage && (
-                              <div className="rounded-2xl bg-blue-50/75 border border-blue-100 p-3">
-                                <div className="flex items-start gap-2">
-                                  <ThermometerSnowflake size={14} className="text-blue-500 mt-0.5 shrink-0" />
-                                  <div>
-                                    <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest">Storage</p>
-                                    <p className="text-xs font-bold text-slate-700 leading-tight mt-1">{item.storage}</p>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <p className="text-[10px] text-center text-slate-400 font-bold mt-6 px-4">Disclaimer: The information provided is for educational and research purposes only. Always consult with a qualified healthcare professional.</p>
-                </div>
-
-              </div>
-            </div>
-          )}
-        </div>
+          </ShopChrome>
+        </Suspense>
       ) : (
         /* --- ADMIN VIEW --- */
         !isAdminAuthenticated ? (
@@ -6453,7 +5815,7 @@ export default function App() {
               {loginError && <p className="text-xs font-bold text-rose-500">{loginError}</p>}
               <div className="flex flex-col gap-2 pt-4">
                 <button type="submit" className={originalBtn}>Enter Dashboard</button>
-                <button type="button" onClick={() => setView('shop')} className="text-gray-400 font-bold text-[10px] uppercase tracking-[0.2em] mt-2 hover:underline">Cancel / Back to Shop</button>
+                <button type="button" onClick={() => switchView('shop')} className="text-gray-400 font-bold text-[10px] uppercase tracking-[0.2em] mt-2 hover:underline">Cancel / Back to Shop</button>
               </div>
             </form>
           </div>
@@ -6466,14 +5828,14 @@ export default function App() {
               <nav className="space-y-1 mb-6">
                 {[
                   { id: 'overview', icon: <LayoutDashboard size={18} />, label: 'Inventory' },
-                  { id: 'active-orders', icon: <ShoppingCart size={18} />, label: 'Active Orders' }, // âœ¨ NEW
+                  { id: 'active-orders', icon: <ShoppingCart size={18} />, label: 'Active Orders' }, // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW
                   { id: 'payments', icon: <BadgeDollarSign size={18} />, label: 'Payments' },
                   { id: 'audit', icon: <AlertTriangle size={18} />, label: 'Audit' },
                   { id: 'packing', icon: <ClipboardList size={18} />, label: 'Packing Guide' },
                   { id: 'trimming', icon: <Scissors size={18} />, label: 'Hit List' },
                   { id: 'safety', icon: <RotateCcw size={18} />, label: 'Admin Safety' }
                 ].map(t => (
-                  <button key={t.id} onClick={() => setAdminTab(t.id)} className={`nav-item w-full flex items-center gap-3 px-4 py-3 font-black text-xs uppercase tracking-widest transition-all ${adminTab === t.id ? 'active shadow-lg' : 'text-pink-300/60 hover:text-white'}`}>
+                  <button key={t.id} onClick={() => switchAdminTab(t.id)} className={`nav-item w-full flex items-center gap-3 px-4 py-3 font-black text-xs uppercase tracking-widest transition-all ${adminTab === t.id ? 'active shadow-lg' : 'text-pink-300/60 hover:text-white'}`}>
                     {t.icon} {t.label}
                   </button>
                 ))}
@@ -6485,7 +5847,7 @@ export default function App() {
                   { id: 'customers', icon: <Users size={18} />, label: 'Customer DB' },
                   { id: 'logs', icon: <ScrollText size={18} />, label: 'Activity Logs' }
                 ].map(t => (
-                  <button key={t.id} onClick={() => setAdminTab(t.id)} className={`nav-item w-full flex items-center gap-3 px-4 py-3 font-black text-xs uppercase tracking-widest transition-all ${adminTab === t.id ? 'active shadow-lg' : 'text-pink-300/60 hover:text-white'}`}>
+                  <button key={t.id} onClick={() => switchAdminTab(t.id)} className={`nav-item w-full flex items-center gap-3 px-4 py-3 font-black text-xs uppercase tracking-widest transition-all ${adminTab === t.id ? 'active shadow-lg' : 'text-pink-300/60 hover:text-white'}`}>
                     {t.icon} {t.label}
                   </button>
                 ))}
@@ -6498,14 +5860,14 @@ export default function App() {
                   { id: 'settings-admins', icon: <ShieldCheck size={18} />, label: 'Admin Profiles' },
                   { id: 'settings-products', icon: <Package size={18} />, label: 'Products & Limits' }
                 ].map(t => (
-                  <button key={t.id} onClick={() => setAdminTab(t.id)} className={`nav-item w-full flex items-center gap-3 px-4 py-3 font-black text-xs uppercase tracking-widest transition-all ${adminTab === t.id ? 'active shadow-lg' : 'text-pink-300/60 hover:text-white'}`}>
+                  <button key={t.id} onClick={() => switchAdminTab(t.id)} className={`nav-item w-full flex items-center gap-3 px-4 py-3 font-black text-xs uppercase tracking-widest transition-all ${adminTab === t.id ? 'active shadow-lg' : 'text-pink-300/60 hover:text-white'}`}>
                     {t.icon} {t.label}
                   </button>
                 ))}
               </nav>
 
               <div className="pt-6 border-t border-white/10">
-                <button onClick={() => setView('shop')} className="w-full flex items-center gap-3 px-4 py-3 text-pink-300/60 font-bold text-xs uppercase tracking-widest hover:text-white"><Home size={18} /> Shop View</button>
+                <button onClick={() => switchView('shop')} className="w-full flex items-center gap-3 px-4 py-3 text-pink-300/60 font-bold text-xs uppercase tracking-widest hover:text-white"><Home size={18} /> Shop View</button>
                 <button onClick={() => setIsAdminAuthenticated(false)} className="w-full flex items-center gap-3 px-4 py-3 text-pink-300/60 font-bold text-xs uppercase tracking-widest hover:text-white"><LogOut size={18} /> Logout</button>
               </div>
             </aside>
@@ -6513,10 +5875,10 @@ export default function App() {
             <main className="flex-1 h-screen overflow-y-auto p-4 lg:p-6 hide-scroll">
               <div className="lg:hidden flex items-center justify-between mb-4 bg-[#4A042A] p-3 sm:p-4 rounded-xl sm:rounded-2xl shadow-xl sticky top-2 z-50">
                 <div className="flex items-center gap-2 sm:gap-3">
-                  <button onClick={() => setView('shop')} className="text-white bg-white/10 p-1.5 sm:p-2 rounded-lg hover:bg-white/20 transition-colors"><Home size={18} /></button>
+                  <button onClick={() => switchView('shop')} className="text-white bg-white/10 p-1.5 sm:p-2 rounded-lg hover:bg-white/20 transition-colors"><Home size={18} /></button>
                   <span className="brand-title text-white text-lg sm:text-xl">BBP</span>
                 </div>
-                <select value={adminTab} onChange={e => setAdminTab(e.target.value)} className="bg-white text-[#D6006E] font-black text-[10px] uppercase tracking-widest px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl outline-none max-w-[130px] sm:max-w-none">
+                <select value={adminTab} onChange={e => switchAdminTab(e.target.value)} className="bg-white text-[#D6006E] font-black text-[10px] uppercase tracking-widest px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl outline-none max-w-[130px] sm:max-w-none">
                   <option value="overview">Inventory</option>
                   <option value="active-orders">Active Orders</option>
                   <option value="payments">Payments</option>
@@ -6532,7 +5894,7 @@ export default function App() {
                 </select>
               </div>
 
-              <div className="w-full max-w-[1280px] mx-auto relative">
+              <div className="w-full max-w-[1680px] 2xl:max-w-[1840px] mx-auto relative">
                 {!adminTab.includes('settings') && (
                   <div className="bg-white p-3 rounded-2xl shadow-sm border-2 border-pink-100 mb-6 flex items-center gap-3 sticky top-[70px] lg:top-0 z-40">
                     <Search size={20} className="text-pink-400 ml-2 shrink-0" />
@@ -6671,13 +6033,13 @@ export default function App() {
                   </div>
                 )}
 
-                {/* âœ¨ NEW: ACTIVE ORDERS TAB */}
+                {/* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW: ACTIVE ORDERS TAB */}
                 {adminTab === 'active-orders' && (
-                  <div className="space-y-5">
+                  <div className="space-y-5 defer-render-xl">
                     <div className="flex justify-between items-center flex-wrap gap-4">
-                      <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Current Active Orders</h2>
+                      <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Active Orders</h2>
 
-                      {/* âœ¨ MOVED FROM CUSTOMER DB: Sheet and CSV buttons */}
+                      {/* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ MOVED FROM CUSTOMER DB: Sheet and CSV buttons */}
                       <div className="flex flex-wrap gap-2">
                         {settings.googleSheetUrl && (
                           <a href={settings.googleSheetUrl} target="_blank" rel="noreferrer" className="bg-white border-2 border-[#D6006E] text-[#D6006E] px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:bg-pink-50 transition-colors flex items-center gap-2">
@@ -6924,7 +6286,7 @@ export default function App() {
                                     </div>
                                   </td>
                                   <td className="text-center py-3">
-                                    <p className="font-black text-base text-pink-600">₱{c.totalPHP.toLocaleString()}</p>
+                          <p className="font-black text-base text-pink-600">{"\u20B1"}{c.totalPHP.toLocaleString()}</p>
                                     {!c.isPaid && <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-amber-600">Unpaid</p>}
                                   </td>
                                   <td className="text-center py-3">
@@ -6964,7 +6326,7 @@ export default function App() {
                 )}
 
                 {adminTab === 'logs' && (
-                  <div className="space-y-6">
+                  <div className="space-y-6 defer-render">
                     <div className="space-y-3">
                       <div className="flex items-center justify-between gap-3 flex-wrap">
                         <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">System Activity Logs</h2>
@@ -7007,7 +6369,7 @@ export default function App() {
                 )}
 
                 {adminTab === 'payments' && (
-                  <div className="space-y-6">
+                  <div className="space-y-6 defer-render-xl">
                     <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
                       <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Customer Payments Management</h2>
 
@@ -7040,7 +6402,7 @@ export default function App() {
                       </div>
                       <button
                         type="button"
-                        onClick={() => { setAdminTab('payments'); setPaymentFilterAdmin('All'); }}
+                        onClick={() => { switchAdminTab('payments'); setPaymentFilterAdmin('All'); }}
                         className="bg-white border-2 border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-[#D6006E] hover:text-[#D6006E] transition-colors"
                       >
                         Back to Payments
@@ -7077,7 +6439,7 @@ export default function App() {
                             <tr key={row.key}>
                               <td className="font-black text-[#4A042A]">
                                 {row.product}
-                                <div className="text-[9px] text-indigo-500 uppercase tracking-widest mt-0.5">Expect {Math.ceil((enrichedProducts.find(ep => ep.name === row.product)?.totalVials || 0) / SLOTS_PER_BATCH)} Box(es)</div>
+                                <div className="text-[9px] text-indigo-500 uppercase tracking-widest mt-0.5">Expect {Math.ceil((enrichedProductsByName[row.product]?.totalVials || 0) / SLOTS_PER_BATCH)} Box(es)</div>
                               </td>
                               <td className="text-center font-bold text-pink-600">Box {row.box}</td>
                               <td>
@@ -7127,7 +6489,7 @@ export default function App() {
                                 <td className="font-bold">
                                   <div>{v.prod}</div>
                                   <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-pink-500">
-                                    ${Number(enrichedProducts.find(product => product.name === v.prod)?.pricePerVialUSD || 0).toFixed(2)} / vial
+                                    ${Number(enrichedProductsByName[v.prod]?.pricePerVialUSD || 0).toFixed(2)} / vial
                                   </div>
                                 </td>
                                 <td className="text-[10px] font-black text-rose-500 uppercase">
@@ -7243,7 +6605,7 @@ export default function App() {
                                 <div>
                                   <p className="text-sm font-black text-[#4A042A]">{record.label}</p>
                                   <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                                    {new Date(record.createdAt).toLocaleString()} • {record.recycleType === 'proof' ? 'Proof Reference' : `${(record.ordersSnapshot || []).length} order row${(record.ordersSnapshot || []).length === 1 ? '' : 's'}`}
+                                    {new Date(record.createdAt).toLocaleString()} {"\u2022"} {record.recycleType === 'proof' ? 'Proof Reference' : `${(record.ordersSnapshot || []).length} order row${(record.ordersSnapshot || []).length === 1 ? '' : 's'}` }
                                   </p>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -7309,9 +6671,9 @@ export default function App() {
                   </div>
                 )}
 
-                {/* âœ¨ REFACTORED: PURE CUSTOMER DATABASE */}
+                {/* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ REFACTORED: PURE CUSTOMER DATABASE */}
                 {adminTab === 'customers' && (
-                  <div className="space-y-6">
+                  <div className="space-y-6 defer-render">
                     <div className="flex justify-between items-center flex-wrap gap-4">
                       <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Registered Customers Database</h2>
                     </div>
@@ -7340,7 +6702,7 @@ export default function App() {
                                   <p className="text-[10px] text-slate-400">{u.id}</p>
                                   {u.handle && <p className="text-[10px] text-[#D6006E] font-bold">{u.handle}</p>}
                                 </td>
-                                <td className="text-[10px] text-slate-500">{u.address?.street ? `${u.address.street}, ${u.address.brgy ? u.address.brgy + ', ' : ''}${u.address.city} (${u.address.shipOpt})${getPartialShipPreferenceLabel(u.address?.partialShipPref) ? ` • ${getPartialShipPreferenceLabel(u.address?.partialShipPref)}` : ''}` : <span className="italic opacity-40">No address on file</span>}</td>
+                                <td className="text-[10px] text-slate-500">{u.address?.street ? `${u.address.street}, ${u.address.brgy ? u.address.brgy + ', ' : ''}${u.address.city} (${u.address.shipOpt})${getPartialShipPreferenceLabel(u.address?.partialShipPref) ? ` \u2022 ${getPartialShipPreferenceLabel(u.address?.partialShipPref)}` : ''}` : <span className="italic opacity-40">No address on file</span>}</td>
                                 <td className="text-center">
                                   <div className="flex items-center justify-center gap-2">
                                     {confirmAction.type === 'deleteCustomer' && confirmAction.id === u.id ? (
@@ -7395,7 +6757,7 @@ export default function App() {
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
-                          <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Exchange Rate (1$ = ?)</label><input type="number" className={lockedAdminInput} value={settings.fxRate} onChange={e => updateSetting('fxRate', Number(e.target.value))} disabled={settings.paymentsOpen} /></div>
+                          <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Exchange Rate (USD to PHP)</label><input type="number" className={lockedAdminInput} value={settings.fxRate} onChange={e => updateSetting('fxRate', Number(e.target.value))} disabled={settings.paymentsOpen} /></div>
                           <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Admin Fee (PHP)</label><input type="number" className={lockedAdminInput} value={settings.adminFeePhp} onChange={e => updateSetting('adminFeePhp', Number(e.target.value))} disabled={settings.paymentsOpen} /></div>
                         </div>
                         <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Minimum Vials Per Order</label><input type="number" className={lockedAdminInput} value={settings.minOrder} onChange={e => updateSetting('minOrder', Number(e.target.value))} disabled={settings.paymentsOpen} /></div>
@@ -7474,6 +6836,25 @@ export default function App() {
                               panel: 'bg-slate-50 border-slate-200',
                               badge: 'bg-slate-100 text-slate-600',
                               track: 'border-slate-300 bg-slate-200'
+                            }
+                          })}
+
+                          {renderAdminToggle({
+                            label: 'Show Payment Routes',
+                            description: 'Shows or hides bank and QR instructions while the payment window is open.',
+                            active: settings.paymentRoutesVisible !== false,
+                            activeText: 'Visible',
+                            inactiveText: 'Hidden',
+                            onToggle: () => updateSetting('paymentRoutesVisible', settings.paymentRoutesVisible === false),
+                            activeTone: {
+                              panel: 'bg-emerald-50 border-emerald-200',
+                              badge: 'bg-emerald-100 text-emerald-700',
+                              track: 'border-emerald-400 bg-emerald-500'
+                            },
+                            inactiveTone: {
+                              panel: 'bg-rose-50 border-rose-200',
+                              badge: 'bg-rose-100 text-rose-700',
+                              track: 'border-rose-300 bg-rose-400'
                             }
                           })}
 
@@ -7575,7 +6956,7 @@ export default function App() {
                                 ))}
                               </div>
                             </div>
-                            {/* âœ¨ FIXED: Inline Confirmation for Admin Delete */}
+                            {/* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ FIXED: Inline Confirmation for Admin Delete */}
                             {confirmAction.type === 'deleteAdmin' && confirmAction.id === idx ? (
                               <div className="flex gap-2 items-center animate-fadeIn bg-rose-50 p-1.5 rounded-lg border border-rose-200">
                                 <span className="text-[9px] font-bold text-rose-700 uppercase">Remove?</span>
@@ -7642,7 +7023,7 @@ export default function App() {
                 )}
 
                 {adminTab === 'settings-products' && (
-                  <div className="space-y-6 pb-20 max-w-5xl mx-auto">
+                  <div className="space-y-6 pb-20 max-w-5xl mx-auto defer-render">
                     <div className="space-y-3">
                       <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Product Catalog Management</h2>
                       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
@@ -7715,295 +7096,63 @@ export default function App() {
         )
       )}
 
-      {/* âœ¨ NEW: ADMIN INLINE EDIT MODAL */}
-      {adminOrderEditTarget && (() => {
-        const targetProfile = users.find(u => u.id === adminOrderEditTarget) || { name: 'Unknown User' };
-
-        const filteredModalProducts = enrichedProducts
-          .filter(p => !adminModalSearchQuery || p.name.toLowerCase().includes(adminModalSearchQuery.toLowerCase()))
-          .sort((a, b) => {
-            // Pin items they already ordered to the top
-            const inOrderA = orders.some(o => o.email === adminOrderEditTarget && o.product === a.name);
-            const inOrderB = orders.some(o => o.email === adminOrderEditTarget && o.product === b.name);
-
-            if (inOrderA && !inOrderB) return -1;
-            if (!inOrderA && inOrderB) return 1;
-
-            // Alphabetical sorting for the rest
-            return a.name.localeCompare(b.name);
-          });
-
-        return (
-          <div className="fixed inset-0 bg-[#4A042A]/90 backdrop-blur-sm z-[500] flex items-center justify-center p-4">
-            <div className="bg-slate-50 rounded-[32px] w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
-              <div className="bg-white p-5 flex justify-between items-center border-b-2 border-slate-200">
-                <div>
-                  <h2 className="brand-title text-xl text-[#D6006E] m-0">Editing Active Order</h2>
-                  <p className="text-xs font-bold text-slate-500 mt-1">{targetProfile.name} ({adminOrderEditTarget})</p>
-                </div>
-                <button onClick={() => { setAdminOrderEditTarget(null); setAdminModalSearchQuery(''); }} className="text-slate-400 hover:text-[#D6006E] font-black text-3xl transition-colors">&times;</button>
-              </div>
-
-              <div className="bg-[#FFF0F5] p-4 border-b border-pink-100 flex gap-4">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-pink-400" size={16} />
-                  <input type="text" value={adminModalSearchQuery} onChange={e => setAdminModalSearchQuery(e.target.value)} placeholder="Search products to add/edit..." className={`${adminInputSm} pl-10 border-pink-200 m-0 py-2 shadow-inner`} />
-                </div>
-              </div>
-
-              <div className="p-4 sm:p-6 overflow-y-auto flex-1 hide-scroll">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {filteredModalProducts.map(p => {
-                    const currentQty = adminCart[p.name] || 0;
-                    const isSelected = currentQty > 0;
-
-                    return (
-                      <div key={p.id} className={`flex items-center justify-between p-3 rounded-xl border-2 transition-colors ${isSelected ? 'bg-pink-50 border-pink-400 shadow-sm' : 'bg-white border-slate-200 hover:border-pink-300'}`}>
-                        <div className="flex-1 min-w-0 pr-2">
-                          <h4 className={`font-black text-sm truncate ${isSelected ? 'text-[#D6006E]' : 'text-slate-700'}`}>{p.name}</h4>
-                          <p className="text-[10px] font-bold text-slate-400">${p.pricePerVialUSD.toFixed(2)} / vial</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => handleAdminCartChange(p.name, Math.max(0, currentQty - 1))} className="w-8 h-8 rounded-lg bg-white border border-slate-300 text-slate-600 font-black flex items-center justify-center hover:bg-slate-100 active:scale-95">-</button>
-                          <input type="number" value={currentQty || ''} onChange={e => handleAdminCartChange(p.name, e.target.value)} className="w-12 h-8 text-center font-black text-[#D6006E] bg-transparent border-b-2 border-pink-200 outline-none focus:border-[#D6006E]" placeholder="0" />
-                          <button onClick={() => handleAdminCartChange(p.name, currentQty + 1)} className="w-8 h-8 rounded-lg bg-pink-600 border border-pink-600 text-white font-black flex items-center justify-center hover:bg-pink-700 active:scale-95">+</button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                {filteredModalProducts.length === 0 && <p className="text-center text-slate-400 italic font-bold py-8">No products found matching your search.</p>}
-              </div>
-
-              <div className="p-5 border-t-2 border-slate-200 bg-white flex justify-end gap-3">
-                <button onClick={() => { setAdminOrderEditTarget(null); setAdminModalSearchQuery(''); }} className="px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors">Cancel</button>
-                <button onClick={saveAdminOrderEdit} disabled={isBtnLoading} className="px-8 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white bg-gradient-to-r from-[#FF1493] to-[#FF69B4] shadow-md hover:scale-[0.98] transition-transform disabled:opacity-50">
-                  {isBtnLoading ? 'Saving...' : 'Save Changes'}
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* âœ¨ FULL SCREEN PROOF MODAL */}
-      {fullScreenProof && (
-        <div className="fixed inset-0 bg-black/90 z-[2000] flex flex-col items-center justify-center p-4 cursor-pointer" onClick={() => setFullScreenProof(null)}>
-          <button className="absolute top-4 right-4 sm:top-8 sm:right-8 text-white/80 hover:text-white text-4xl font-black transition-colors">&times;</button>
-          <img src={fullScreenProof} alt="Full Screen Proof" className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" />
-        </div>
+      {/* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW: ADMIN INLINE EDIT MODAL */}
+      {adminOrderEditTarget && (
+        <Suspense fallback={null}>
+          <AdminOrderEditHost
+            adminCart={adminCart}
+            adminInputSm={adminInputSm}
+            adminModalSearchQuery={adminModalSearchQuery}
+            adminOrderEditTarget={adminOrderEditTarget}
+            enrichedProducts={enrichedProducts}
+            isBtnLoading={isBtnLoading}
+            normalizedAdminModalSearchQuery={normalizedAdminModalSearchQuery}
+            onChangeQty={handleAdminCartChange}
+            onClose={() => { setAdminOrderEditTarget(null); setAdminModalSearchQuery(''); }}
+            onSave={saveAdminOrderEdit}
+            setSearchQuery={setAdminModalSearchQuery}
+            targetProfile={usersById[adminOrderEditTarget] || { name: 'Unknown User' }}
+          />
+        </Suspense>
       )}
 
-      {/* âœ¨ ALL PROOFS GALLERY MODAL */}
-      {showAllProofsModal && (
-        <div className="fixed inset-0 bg-[#4A042A]/90 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
-          <div className="bg-slate-50 rounded-[32px] w-full max-w-6xl overflow-hidden shadow-2xl flex flex-col h-[90vh] border-4 border-white">
-            <div className="bg-white p-5 flex justify-between items-center border-b-2 border-slate-200">
-              <h2 className="brand-title text-2xl text-[#D6006E]">All Payment Proofs</h2>
-              <button onClick={() => setShowAllProofsModal(false)} className="text-slate-400 hover:text-[#D6006E] font-black text-3xl transition-colors">&times;</button>
-            </div>
-            <div className="p-6 overflow-y-auto flex-1 hide-scroll">
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {customerList.filter(c => c.proofUrl).length === 0 ? (
-                  <div className="col-span-full text-center py-12 text-slate-400 font-bold italic">No proofs uploaded yet.</div>
-                ) : (
-                  customerList.filter(c => c.proofUrl).map((c, idx) => (
-                    <div key={idx} className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col group">
-                      <button onClick={() => setFullScreenProof(c.proofUrl)} className="flex-1 min-h-[150px] bg-slate-100 rounded-xl overflow-hidden mb-2 relative cursor-zoom-in border-none p-0 m-0">
-                        <img src={c.proofUrl} alt="Proof" className="absolute inset-0 w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
-                      </button>
-                      <p className="text-[10px] font-black text-slate-800 truncate">{c.name}</p>
-                      <p className="text-[9px] text-slate-400 truncate">{c.email}</p>
-                      <span className="mt-1 bg-violet-50 text-violet-700 border border-violet-100 px-2 py-0.5 rounded text-[8px] font-black uppercase text-center">Proof On File</span>
-                      <button
-                        onClick={() => removeCustomerProof(c)}
-                        className="mt-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300"
-                      >
-                        Remove Proof
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+      {(fullScreenProof || showAllProofsModal || quickInfoProduct) && (
+        <Suspense fallback={null}>
+          <ProofModalHost
+            customerList={customerList}
+            fullScreenProof={fullScreenProof}
+            onCloseAllProofs={() => setShowAllProofsModal(false)}
+            onCloseFullScreenProof={() => setFullScreenProof(null)}
+            onCloseQuickInfo={() => setQuickInfoProduct(null)}
+            onOpenFullScreenProof={setFullScreenProof}
+            onRemoveCustomerProof={removeCustomerProof}
+            quickInfoProduct={quickInfoProduct}
+            setFullScreenProof={setFullScreenProof}
+            showAllProofsModal={showAllProofsModal}
+          />
+        </Suspense>
       )}
 
-      {/* âœ¨ NEW: Quick Info Product Modal */}
-      {quickInfoProduct && (
-        <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4" onClick={() => setQuickInfoProduct(null)}>
-          <div className="bg-white rounded-[24px] w-full max-w-sm overflow-hidden shadow-2xl border-4 border-pink-100 relative animate-fadeIn" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setQuickInfoProduct(null)} className="absolute top-4 right-4 text-slate-400 hover:text-[#D6006E] font-black text-2xl transition-colors">&times;</button>
-
-            <div className="p-6">
-              <h3 className="font-black text-2xl text-[#D6006E] mb-2">{quickInfoProduct.displayName || quickInfoProduct.name}</h3>
-              {quickInfoProduct.strength && (
-                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400 mb-3">{quickInfoProduct.strength}</p>
-              )}
-
-              <div className="flex flex-wrap gap-1.5 mb-4">
-                {quickInfoProduct.tags.map((tag, tIdx) => (
-                  <span key={tIdx} className="bg-pink-50 text-pink-600 border border-pink-200 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest">{tag}</span>
-                ))}
-              </div>
-
-              {quickInfoProduct.benefits?.length > 0 && (
-                <div className="grid grid-cols-3 gap-2 mb-4">
-                  {quickInfoProduct.benefits.map((benefit, idx) => (
-                    <div key={idx} className="bg-slate-50 border border-slate-100 rounded-xl p-2 text-center">
-                      <p className="text-[8px] font-black uppercase tracking-widest text-pink-500">Benefit</p>
-                      <p className="text-[10px] font-bold text-slate-600 mt-1">{benefit}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <p className="text-sm text-slate-700 font-semibold leading-relaxed mb-6 bg-slate-50 p-4 rounded-xl border border-slate-100">
-                {quickInfoProduct.desc}
-              </p>
-
-              <div className="space-y-3">
-                {quickInfoProduct.dosage && (
-                  <div className="flex items-start gap-3">
-                    <div className="bg-pink-100 p-2 rounded-lg text-pink-600 shrink-0"><Droplet size={16} /></div>
-                    <div>
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Dosage</p>
-                      <p className="text-xs font-bold text-slate-700">{quickInfoProduct.dosage}</p>
-                    </div>
-                  </div>
-                )}
-                {quickInfoProduct.cycle && (
-                  <div className="flex items-start gap-3">
-                    <div className="bg-pink-100 p-2 rounded-lg text-pink-600 shrink-0"><Repeat size={16} /></div>
-                    <div>
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Cycle</p>
-                      <p className="text-xs font-bold text-slate-700">{quickInfoProduct.cycle}</p>
-                    </div>
-                  </div>
-                )}
-                {quickInfoProduct.storage && (
-                  <div className="flex items-start gap-3">
-                    <div className="bg-blue-100 p-2 rounded-lg text-blue-500 shrink-0"><ThermometerSnowflake size={16} /></div>
-                    <div>
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Storage</p>
-                      <p className="text-xs font-bold text-slate-700">{quickInfoProduct.storage}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-5 bg-amber-50 border border-amber-100 rounded-xl p-3">
-                <p className="text-[9px] font-black uppercase tracking-widest text-amber-700 mb-1">Kit Rule</p>
-                <p className="text-[11px] font-bold text-amber-800 leading-relaxed">{quickInfoProduct.protectionNote}</p>
-              </div>
-            </div>
-          </div>
-        </div>
+      {selectedProfileEmail && (
+        <Suspense fallback={null}>
+          <ProfileViewerHost
+            currentOrders={ordersByEmail[normalizedSelectedProfileEmail] || []}
+            editAddressForm={editAddressForm}
+            getPartialShipPreferenceLabel={getPartialShipPreferenceLabel}
+            historyOrders={history.filter(o => o.email === normalizedSelectedProfileEmail)}
+            isBtnLoading={isBtnLoading}
+            isEditingAddress={isEditingAddress}
+            onClose={() => { setSelectedProfileEmail(null); setIsEditingAddress(false); }}
+            partialShipOptions={PARTIAL_SHIP_OPTIONS}
+            profile={selectedProfile || { id: selectedProfileEmail, name: 'Unknown Customer' }}
+            saveEditedAddress={saveEditedAddress}
+            setEditAddressForm={setEditAddressForm}
+            setIsEditingAddress={setIsEditingAddress}
+            shippingOptions={settings.shippingOptions}
+            startEditingAddress={startEditingAddress}
+          />
+        </Suspense>
       )}
-
-      {/* Profile Viewer Modal */}
-      {selectedProfileEmail && (() => {
-        const profile = users.find(u => u.id === selectedProfileEmail.toLowerCase().trim()) || { id: selectedProfileEmail, name: 'Unknown Customer' };
-        const curOrders = orders.filter(o => o.email === selectedProfileEmail.toLowerCase().trim());
-        const histOrders = history.filter(o => o.email === selectedProfileEmail.toLowerCase().trim());
-
-        return (
-          <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[300] flex items-center justify-center p-4">
-            <div className="bg-white rounded-[32px] w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
-              <div className="bg-[#FFF0F5] p-4 sm:p-5 flex justify-between items-center border-b-2 border-[#FFC0CB]">
-                <h2 className="brand-title text-2xl text-[#D6006E]">Profile & History</h2>
-                <button onClick={() => { setSelectedProfileEmail(null); setIsEditingAddress(false); }} className="text-pink-600 font-black text-2xl hover:text-pink-800 transition-colors hover:scale-110">&times;</button>
-              </div>
-              <div className="p-4 sm:p-5 overflow-y-auto space-y-4 bg-slate-50 hide-scroll">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-                  <div className="bg-white p-4 rounded-2xl border border-pink-100 shadow-sm">
-                    <p className="text-[10px] font-black text-pink-400 uppercase tracking-widest mb-1">Customer Details</p>
-                    <p className="font-black text-lg text-[#4A042A]">{profile.name}</p>
-                    <p className="text-xs text-slate-500 font-bold">{profile.id}</p>
-                    <p className="text-xs text-[#D6006E] font-black mt-1">{profile.handle || 'No handle provided'}</p>
-                  </div>
-
-                  <div className="bg-white p-4 rounded-2xl border border-pink-100 shadow-sm relative">
-                    <div className="flex justify-between items-center mb-2">
-                      <p className="text-[10px] font-black text-pink-400 uppercase tracking-widest">Saved Address</p>
-                      {!isEditingAddress && (
-                        <button onClick={() => startEditingAddress(profile)} className="text-[#D6006E] text-[10px] font-black uppercase hover:underline">Edit</button>
-                      )}
-                    </div>
-
-                    {isEditingAddress ? (
-                      <div className="space-y-2 mt-2">
-                        <div className="grid grid-cols-2 gap-2">
-                          <select value={editAddressForm.shipOpt} onChange={e => setEditAddressForm({ ...editAddressForm, shipOpt: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none">
-                            <option value="" disabled>Select Courier...</option>
-                            {settings.shippingOptions.map(o => <option key={o} value={o}>{o}</option>)}
-                          </select>
-                          <select value={editAddressForm.partialShipPref} onChange={e => setEditAddressForm({ ...editAddressForm, partialShipPref: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none">
-                            <option value="" disabled>If may maunang dumating...</option>
-                            {PARTIAL_SHIP_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                          </select>
-                        </div>
-                        <input type="text" value={editAddressForm.street} onChange={e => setEditAddressForm({ ...editAddressForm, street: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Street & Barangay" />
-                        <div className="grid grid-cols-2 gap-2">
-                          <input type="text" value={editAddressForm.city} onChange={e => setEditAddressForm({ ...editAddressForm, city: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="City" />
-                          <input type="text" value={editAddressForm.prov} onChange={e => setEditAddressForm({ ...editAddressForm, prov: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Province" />
-                          <input type="text" value={editAddressForm.zip} onChange={e => setEditAddressForm({ ...editAddressForm, zip: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Zip Code" />
-                          <input type="text" value={editAddressForm.contact} onChange={e => setEditAddressForm({ ...editAddressForm, contact: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Contact #" />
-                        </div>
-                        <div className="flex gap-2 mt-3">
-                          <button onClick={saveEditedAddress} disabled={isBtnLoading} className="flex-1 bg-[#D6006E] text-white text-[10px] font-black uppercase tracking-widest py-2 rounded-xl hover:bg-pink-700">{isBtnLoading ? 'Saving...' : 'Save'}</button>
-                          <button onClick={() => setIsEditingAddress(false)} className="flex-1 bg-slate-200 text-slate-700 text-[10px] font-black uppercase tracking-widest py-2 rounded-xl hover:bg-slate-300">Cancel</button>
-                        </div>
-                      </div>
-                    ) : (
-                      profile.address?.street ? (
-                        <p className="text-xs font-bold text-slate-700 leading-tight">
-                          {profile.address.street}<br />
-                          {profile.address.brgy ? `${profile.address.brgy}, ` : ''}{profile.address.city}<br />
-                          {profile.address.prov} {profile.address.zip}<br />
-                          <span className="text-emerald-600 mt-1 inline-block">Courier: {profile.address.shipOpt}</span><br />
-                          {getPartialShipPreferenceLabel(profile.address.partialShipPref) ? <><span className="text-[#D6006E]">Shipping note: {getPartialShipPreferenceLabel(profile.address.partialShipPref)}</span><br /></> : null}
-                          <span className="text-slate-500">Contact: {profile.address.contact}</span>
-                        </p>
-                      ) : <p className="text-xs text-slate-400 italic">No address on file</p>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="font-black text-sm text-[#D6006E] uppercase tracking-widest mb-2 border-b-2 border-pink-100 pb-1">Current Active Orders</h3>
-                  {curOrders.length === 0 ? <p className="text-xs text-slate-400 italic bg-white p-3 rounded-lg border border-slate-200">No active orders in this batch.</p> : (
-                    <div className="bg-white border-2 border-pink-100 rounded-xl overflow-hidden shadow-sm">
-                      <table className="w-full text-left text-sm">
-                        <thead className="bg-[#FFF0F5] text-[#D6006E] text-[10px] uppercase"><tr><th className="p-2 sm:p-3">Product</th><th className="p-2 sm:p-3 text-center">Qty</th></tr></thead>
-                        <tbody>
-                          {curOrders.map(o => <tr key={o.id} className="border-t border-pink-50"><td className="p-2 sm:p-3 font-bold text-slate-800 text-xs sm:text-sm">{o.product}</td><td className="p-2 sm:p-3 text-center font-black text-[#D6006E] text-base">{o.qty}</td></tr>)}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <h3 className="font-black text-sm text-slate-500 uppercase tracking-widest mb-2 border-b-2 border-slate-200 pb-1">Past Order History</h3>
-                  {histOrders.length === 0 ? <p className="text-xs text-slate-400 italic bg-white p-3 rounded-lg border border-slate-200">No past orders found.</p> : (
-                    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                      <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-100 text-slate-500 text-[10px] uppercase"><tr><th className="p-2 sm:p-3">Batch</th><th className="p-2 sm:p-3">Product</th><th className="p-2 sm:p-3 text-center">Qty</th></tr></thead>
-                        <tbody>
-                          {histOrders.map(o => <tr key={o.id} className="border-t border-slate-100"><td className="p-2 sm:p-3 text-[10px] sm:text-xs text-slate-500 font-bold">{o.batchName || 'Unknown'}</td><td className="p-2 sm:p-3 font-bold text-slate-700 text-xs sm:text-sm">{o.product}</td><td className="p-2 sm:p-3 text-center font-black text-slate-500 text-sm">{o.qty}</td></tr>)}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       {toast && (
         <div className="fixed bottom-24 sm:bottom-8 left-1/2 -translate-x-1/2 z-[10000] w-[min(92vw,680px)] px-3">
@@ -8018,17 +7167,17 @@ export default function App() {
         </div>
       )}
 
-      {/* âœ¨ NEW: Celebration Overlay with UNICORN */}
+      {/* Celebration Overlay with Unicorn */}
       {celebration.show && (
         <div className="fixed inset-0 pointer-events-none z-[9999] overflow-hidden">
           <div className="absolute inset-0 bg-white/40 backdrop-blur-[2px] animate-fadeIn"></div>
 
           <div className="unicorn-wrapper">
             <div className="rainbow-trail"></div>
-            <div className="unicorn-emoji">🦄</div>
+            <div className="unicorn-emoji">{"\uD83E\uDD84"}</div>
           </div>
 
-          {/* âœ¨ FIXED: Perfectly Centered Celebration Text */}
+          {/* Centered celebration text */}
           <div className="absolute inset-0 flex items-center justify-center z-10 w-full px-4" style={{ animation: 'fadeIn 0.5s ease-out forwards, fadeOut 0.5s ease-in forwards 3s' }}>
             <h2 className="brand-title text-5xl sm:text-7xl text-[#D6006E] drop-shadow-xl filter text-center m-0 p-0 w-full leading-tight">
               {celebration.type === 'payment' ? 'Payment Sent!' : 'Order Saved!'}
@@ -8039,3 +7188,5 @@ export default function App() {
     </>
   );
 }
+
+
