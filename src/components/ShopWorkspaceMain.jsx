@@ -209,57 +209,68 @@ export default function ShopWorkspaceMain({
               </div>
 
               {currentProtectionSummary && (
-                <div className="order-summary-card rounded-[22px] p-3.5">
+                <div className="order-summary-card rounded-[24px] border border-pink-200/80 bg-[linear-gradient(145deg,rgba(255,255,255,0.96),rgba(255,244,249,0.92))] p-4 shadow-[0_22px_55px_rgba(214,0,110,0.10)] ring-1 ring-white/70">
                   <div className="flex items-start gap-3">
-                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl shadow-inner ${
+                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] shadow-[0_10px_24px_rgba(214,0,110,0.14)] ring-1 ring-white/80 ${
+                      !settings.addOnly && !isReviewStageOpen && !settings.paymentsOpen ? 'animate-pulse' : ''
+                    } ${
                       currentProtectionSummary.tone === 'emerald'
-                        ? 'bg-emerald-100 text-emerald-700'
+                        ? 'bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.9),rgba(16,185,129,0.18))] text-emerald-700'
                         : currentProtectionSummary.tone === 'amber'
-                          ? 'bg-amber-100 text-amber-700'
-                          : 'bg-rose-100 text-rose-700'
+                          ? 'bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.92),rgba(245,158,11,0.2))] text-amber-700'
+                          : 'bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.92),rgba(244,63,94,0.18))] text-rose-700'
                     }`}>
                       <ShieldCheck size={16} />
                     </div>
                     <div>
                       <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Current protection</p>
-                      <p className="mt-1.5 text-xs font-black leading-snug text-[#4A042A]">{currentProtectionSummary.label}</p>
-                      <p className="mt-1 text-[11px] font-bold leading-relaxed text-[#8F2C5D]">{currentProtectionSummary.detail}</p>
+                      <p className="mt-1.5 text-sm font-black leading-snug text-[#4A042A]">{currentProtectionSummary.label}</p>
+                      <p className="mt-1.5 max-w-[56rem] text-[11px] font-bold leading-relaxed text-[#8F2C5D]">{currentProtectionSummary.detail}</p>
                       {currentProtectionSummary.sections?.length ? (
-                        <div className="mt-3 space-y-2">
+                        <div className="mt-4 space-y-3">
                           {currentProtectionSummary.sections.map((section) => (
                             <div
                               key={section.key}
-                              className={`rounded-[16px] border px-3 py-2 ${
+                              className={`relative overflow-hidden rounded-[18px] border px-3.5 py-3 shadow-[0_16px_30px_rgba(74,4,42,0.06)] ring-1 ring-white/70 ${
                                 section.tone === 'emerald'
-                                  ? 'border-emerald-200 bg-emerald-50/70'
+                                  ? 'border-emerald-200 bg-[linear-gradient(145deg,rgba(236,253,245,0.98),rgba(209,250,229,0.82))]'
                                   : section.tone === 'amber'
-                                    ? 'border-amber-200 bg-amber-50/80'
-                                    : 'border-rose-200 bg-rose-50/80'
+                                    ? 'border-amber-200 bg-[linear-gradient(145deg,rgba(255,251,235,0.98),rgba(254,240,138,0.22))]'
+                                    : 'border-rose-200 bg-[linear-gradient(145deg,rgba(255,241,242,0.98),rgba(255,228,230,0.9))]'
                               }`}
                             >
+                              <div className={`pointer-events-none absolute inset-x-0 top-0 h-[3px] ${
+                                !settings.addOnly && !isReviewStageOpen && !settings.paymentsOpen ? 'animate-pulse' : ''
+                              } ${
+                                section.tone === 'emerald'
+                                  ? 'bg-emerald-400/80'
+                                  : section.tone === 'amber'
+                                    ? 'bg-amber-400/80'
+                                    : 'bg-rose-400/80'
+                              }`} />
                               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                                 <div>
-                                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[#4A042A]">{section.title}</p>
-                                  <p className="mt-1 text-[11px] font-bold leading-relaxed text-[#8F2C5D]">{section.description}</p>
+                                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#4A042A]">{section.title}</p>
+                                  <p className="mt-1.5 max-w-[42rem] text-[11px] font-bold leading-relaxed text-[#8F2C5D]">{section.description}</p>
                                 </div>
-                                <div className="shrink-0 rounded-[14px] border border-white/90 bg-white/90 px-3 py-2 shadow-sm">
+                                <div className="shrink-0 rounded-[16px] border border-white/90 bg-white/92 px-3 py-2.5 shadow-[0_12px_24px_rgba(74,4,42,0.08)]">
                                   <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">{section.subtotalLabel}</p>
-                                  <p className="mt-1 text-sm font-black text-[#4A042A]">{"\u20B1"}{Number(section.subtotalPHP || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                  <p className="mt-1 text-base font-black text-[#4A042A]">{"\u20B1"}{Number(section.subtotalPHP || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                                 </div>
                               </div>
                               {section.items.length > 0 ? (
-                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                <div className="mt-3 flex flex-wrap gap-2">
                                   {section.items.map((item) => (
                                     <span
                                       key={item}
-                                      className="inline-flex rounded-full border border-white/80 bg-white/80 px-2.5 py-1 text-[10px] font-black text-[#4A042A] shadow-sm"
+                                      className="inline-flex rounded-full border border-white/85 bg-white/88 px-2.5 py-1.5 text-[10px] font-black text-[#4A042A] shadow-[0_8px_18px_rgba(74,4,42,0.06)]"
                                     >
                                       {item}
                                     </span>
                                   ))}
                                 </div>
                               ) : (
-                                <p className="mt-2 text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                                <p className="mt-3 text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
                                   {section.emptyText}
                                 </p>
                               )}

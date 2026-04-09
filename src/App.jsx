@@ -4435,42 +4435,34 @@ export default function App() {
     const protectedKitProducts = protectedRows
       .map((row) => ({
         product: row.product,
+        protectedQty: row.protectedQty,
         protectedKits: Math.floor(row.protectedQty / 10)
       }))
-      .filter((row) => row.protectedKits > 0);
-    const partialProtectionProducts = protectedRows
-      .filter((row) => row.protectedQty > 0 && row.atRiskQty > 0)
-      .map((row) => ({
-        product: row.product,
-        slotsLeft: Number(enrichedProductsByName[row.product]?.slotsLeft || 0),
-        protectedKits: Math.floor(row.protectedQty / 10),
-        extraProtectedVials: row.protectedQty % 10,
-        protectedQty: row.protectedQty,
-        atRiskQty: row.atRiskQty
-      }));
-    const incompleteProducts = protectedRows
+      .filter((row) => row.protectedQty > 0);
+    const openBoxProducts = protectedRows
       .filter((row) => row.atRiskQty > 0)
       .map((row) => ({
         product: row.product,
         slotsLeft: Number(enrichedProductsByName[row.product]?.slotsLeft || 0),
-        atRiskQty: row.atRiskQty
+        atRiskQty: row.atRiskQty,
+        pricePerVialUSD: row.pricePerVialUSD
       }));
-    const nearlyCompleteProducts = incompleteProducts.filter((row) => row.slotsLeft > 0 && row.slotsLeft <= 2);
-    const atRiskLooseProducts = incompleteProducts.filter((row) => row.slotsLeft === 0 || row.slotsLeft > 2);
+    const nearlyCompleteProducts = openBoxProducts.filter((row) => row.slotsLeft > 0 && row.slotsLeft <= 2);
+    const atRiskLooseProducts = openBoxProducts.filter((row) => row.slotsLeft === 0 || row.slotsLeft > 2);
 
     if (totalSaved === 0) return null;
 
     const sections = [
       {
         key: 'protected',
-        title: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen ? 'Locked-in kits' : 'Currently protected',
+        title: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen ? 'Locked-in' : 'Currently protected',
         tone: 'emerald',
         description: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
-          ? 'These full kits are locked in now. Buyers cannot reduce them anymore through the normal order flow.'
-          : 'These full kits are in completed boxes right now. They are the safest part of your order, but changes are still possible until buyer edits are restricted.',
-        items: protectedKitProducts.map((row) => `${row.product} - ${row.protectedKits} protected kit${row.protectedKits === 1 ? '' : 's'}`),
-        emptyText: 'No full protected kits yet.',
-        subtotalPHP: getSectionSubtotalPHP(protectedRows, (row) => Math.floor(row.protectedQty / 10) * 10),
+          ? 'This part of your order is locked in now. Buyers cannot reduce it anymore through the normal order flow.'
+          : 'This part of your order is in completed boxes right now. It is the safest part of your order, but changes are still possible until buyer edits are restricted.',
+        items: protectedKitProducts.map((row) => `${row.product} - ${row.protectedQty} vial${row.protectedQty === 1 ? '' : 's'} currently protected${row.protectedKits > 0 ? ` (${row.protectedKits} full kit${row.protectedKits === 1 ? '' : 's'})` : ''}`),
+        emptyText: 'Nothing is currently protected yet.',
+        subtotalPHP: getSectionSubtotalPHP(protectedRows, (row) => row.protectedQty),
         subtotalLabel: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen ? 'Locked-in total' : 'Current protected total'
       },
       {
@@ -4478,27 +4470,9 @@ export default function App() {
         title: 'Almost complete',
         tone: 'amber',
         description: 'These products are close to finishing the next box, so they are likely to stay. They are still not guaranteed yet, because other buyers in that same box can still reduce or cancel before cutoff.',
-        items: partialProtectionProducts
-          .filter((row) => row.slotsLeft > 0 && row.slotsLeft <= 2)
-          .map((row) => {
-          const protectedLabel = row.protectedKits > 0
-            ? `${row.protectedKits} protected kit${row.protectedKits === 1 ? '' : 's'}`
-            : `${row.extraProtectedVials} protected vial${row.extraProtectedVials === 1 ? '' : 's'}`;
-          return `${row.product} - ${protectedLabel}, ${row.atRiskQty} more vial${row.atRiskQty === 1 ? '' : 's'} still waiting, ${row.slotsLeft} slot${row.slotsLeft === 1 ? '' : 's'} left`;
-        })
-          .concat(
-            nearlyCompleteProducts
-              .filter((row) => !partialProtectionProducts.some((partialRow) => partialRow.product === row.product))
-              .map((row) => `${row.product} - ${row.atRiskQty} vial${row.atRiskQty === 1 ? '' : 's'} still waiting, ${row.slotsLeft} slot${row.slotsLeft === 1 ? '' : 's'} left`)
-          ),
+        items: nearlyCompleteProducts.map((row) => `${row.product} - ${row.atRiskQty} vial${row.atRiskQty === 1 ? '' : 's'} almost complete, ${row.slotsLeft} slot${row.slotsLeft === 1 ? '' : 's'} left`),
         emptyText: 'Nothing is close enough to call almost complete right now.',
-        subtotalPHP: getSectionSubtotalPHP(
-          protectedRows.filter((row) => {
-            const slotsLeft = Number(enrichedProductsByName[row.product]?.slotsLeft || 0);
-            return row.atRiskQty > 0 && slotsLeft > 0 && slotsLeft <= 2;
-          }),
-          (row) => row.atRiskQty
-        ),
+        subtotalPHP: getSectionSubtotalPHP(nearlyCompleteProducts, (row) => row.atRiskQty),
         subtotalLabel: 'Likely-to-complete total'
       },
       {
@@ -4508,13 +4482,7 @@ export default function App() {
         description: 'These saved vials are not in a full protected kit yet, so they can still move while ordering is open.',
         items: atRiskLooseProducts.map((row) => `${row.product} - ${row.atRiskQty} vial${row.atRiskQty === 1 ? '' : 's'} still waiting`),
         emptyText: 'No loose vials at risk right now.',
-        subtotalPHP: getSectionSubtotalPHP(
-          protectedRows.filter((row) => {
-            const slotsLeft = Number(enrichedProductsByName[row.product]?.slotsLeft || 0);
-            return row.atRiskQty > 0 && (slotsLeft === 0 || slotsLeft > 2);
-          }),
-          (row) => row.atRiskQty
-        ),
+        subtotalPHP: getSectionSubtotalPHP(atRiskLooseProducts, (row) => row.atRiskQty),
         subtotalLabel: 'At-risk total'
       }
     ];
@@ -4522,11 +4490,11 @@ export default function App() {
     if (totalAtRisk <= 0) {
       return {
         tone: 'emerald',
-        label: `${totalProtected} saved vial${totalProtected === 1 ? '' : 's'} currently protected`,
+        label: `${totalProtected} vial${totalProtected === 1 ? '' : 's'} currently protected`,
         detail: 'Nothing in your saved order is on the loose-vial risk list right now.',
         note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
-          ? 'These numbers are locked to the current saved batch.'
-          : 'Current estimate while ordering is still open. Only completed kits are the safest part; the rest can still move until edits are restricted.',
+          ? 'These section totals add up to your saved subtotal before admin fee.'
+          : 'Current estimate while ordering is still open. These section totals add up to your saved subtotal before admin fee.',
         sections
       };
     }
@@ -4534,22 +4502,22 @@ export default function App() {
     if (totalProtected > 0) {
       return {
         tone: 'amber',
-        label: `${totalProtected} protected, ${totalAtRisk} still loose`,
+        label: `${totalProtected} protected, ${nearlyCompleteProducts.reduce((sum, row) => sum + row.atRiskQty, 0)} almost complete, ${atRiskLooseProducts.reduce((sum, row) => sum + row.atRiskQty, 0)} at risk`,
         detail: `${atRiskProducts} product${atRiskProducts === 1 ? '' : 's'} in your saved order still depend on the next box filling.`,
         note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
-          ? 'Check the hit list before payments open.'
-          : 'Current estimate while ordering is still open. Only completed kits are the safest part; the rest can still move until edits are restricted.',
+          ? 'These section totals add up to your saved subtotal before admin fee.'
+          : 'Current estimate while ordering is still open. These section totals add up to your saved subtotal before admin fee.',
         sections
       };
     }
 
     return {
       tone: 'rose',
-      label: `${totalAtRisk} saved vial${totalAtRisk === 1 ? '' : 's'} still loose`,
+      label: `${nearlyCompleteProducts.reduce((sum, row) => sum + row.atRiskQty, 0)} almost complete, ${atRiskLooseProducts.reduce((sum, row) => sum + row.atRiskQty, 0)} at risk`,
       detail: 'Your saved order is currently on the loose-vial risk list and may still change before cutoff.',
       note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
-        ? 'Check the hit list before payments open.'
-        : 'Current estimate while ordering is still open. Only completed kits are the safest part; the rest can still move until edits are restricted.',
+        ? 'These section totals add up to your saved subtotal before admin fee.'
+        : 'Current estimate while ordering is still open. These section totals add up to your saved subtotal before admin fee.',
       sections
     };
   }, [enrichedProductsByName, existingMap, hasExistingOrder, normalizedCustomerEmail, productsByName, settings.addOnly, settings.fxRate, settings.paymentsOpen, settings.reviewStageOpen, trimmingHitList]);
