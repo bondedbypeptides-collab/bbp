@@ -3168,6 +3168,7 @@ export default function App() {
       triggerCelebration('order');
       setCartItems(createEditableCart(Object.fromEntries(newOrderItems.map(item => [item.product, item.qty]))));
       setCartInputDrafts({});
+      showToast(existingUser?.address?.street ? "Order saved." : "Order saved. You can add your shipping details any time from Profile & Address.");
     } catch (err) { console.error(err); showToast(`Error saving: ${err.message}`); }
     setIsBtnLoading(false);
   }
@@ -3243,13 +3244,24 @@ export default function App() {
   }
 
   const saveEditedAddress = async () => {
-    if (!editAddressForm.shipOpt || !editAddressForm.partialShipPref || !editAddressForm.street || !editAddressForm.brgy || !editAddressForm.city || !editAddressForm.contact) {
-      showToast("Please fill all basic address fields."); return;
+    const normalizedAddress = {
+      shipOpt: String(editAddressForm.shipOpt || '').trim(),
+      partialShipPref: normalizePartialShipPreference(editAddressForm.partialShipPref),
+      street: String(editAddressForm.street || '').trim(),
+      brgy: String(editAddressForm.brgy || '').trim(),
+      city: String(editAddressForm.city || '').trim(),
+      prov: String(editAddressForm.prov || '').trim(),
+      zip: String(editAddressForm.zip || '').trim(),
+      contact: String(editAddressForm.contact || '').trim(),
+    };
+    if (!normalizedAddress.shipOpt || !normalizedAddress.partialShipPref || !normalizedAddress.street || !normalizedAddress.brgy || !normalizedAddress.city || !normalizedAddress.prov || !normalizedAddress.zip || !normalizedAddress.contact) {
+      showToast("Please fill all shipping fields before saving the address."); return;
     }
     setIsBtnLoading(true);
     try {
-      await safeAwait(setDoc(doc(db, colPath('users'), selectedProfileEmail.toLowerCase().trim()), { address: editAddressForm }, { merge: true }));
-      showToast("Address successfully updated.");
+      await safeAwait(setDoc(doc(db, colPath('users'), selectedProfileEmail.toLowerCase().trim()), { address: normalizedAddress }, { merge: true }));
+      setEditAddressForm(normalizedAddress);
+      showToast("Address saved.");
       setIsEditingAddress(false);
     } catch (e) {
       showToast("Error updating address.");
@@ -4392,6 +4404,62 @@ export default function App() {
   const showCatalogReference = !settings.paymentsOpen && (!isReviewStageOpen || hasShopAccess);
   const isOrderOnlyMode = settings.paymentsOpen || (isReviewStageOpen && !hasShopAccess);
   const hasExistingOrder = Object.keys(existingMap).length > 0;
+  const currentProtectionSummary = useMemo(() => {
+    if (!hasExistingOrder) return null;
+
+    const protectedRows = Object.entries(existingMap)
+      .filter(([, qty]) => qty > 0)
+      .map(([product, qty]) => {
+        const atRiskQty = trimmingHitList
+          .filter((item) => item.email === normalizedCustomerEmail && item.prod === product)
+          .reduce((sum, item) => sum + Number(item.amountToRemove || 0), 0);
+
+        return {
+          product,
+          qty,
+          atRiskQty,
+          protectedQty: Math.max(qty - atRiskQty, 0)
+        };
+      });
+
+    const totalSaved = protectedRows.reduce((sum, row) => sum + row.qty, 0);
+    const totalAtRisk = protectedRows.reduce((sum, row) => sum + row.atRiskQty, 0);
+    const totalProtected = Math.max(totalSaved - totalAtRisk, 0);
+    const atRiskProducts = protectedRows.filter((row) => row.atRiskQty > 0).length;
+
+    if (totalSaved === 0) return null;
+
+    if (totalAtRisk <= 0) {
+      return {
+        tone: 'emerald',
+        label: `${totalProtected} saved vial${totalProtected === 1 ? '' : 's'} currently protected`,
+        detail: 'Nothing in your saved order is on the loose-vial risk list right now.',
+        note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
+          ? 'Based on the current saved batch.'
+          : 'Current estimate while ordering is still open.'
+      };
+    }
+
+    if (totalProtected > 0) {
+      return {
+        tone: 'amber',
+        label: `${totalProtected} protected, ${totalAtRisk} still loose`,
+        detail: `${atRiskProducts} product${atRiskProducts === 1 ? '' : 's'} in your saved order still depend on the next box filling.`,
+        note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
+          ? 'Check the hit list before payments open.'
+          : 'Current estimate while ordering is still open.'
+      };
+    }
+
+    return {
+      tone: 'rose',
+      label: `${totalAtRisk} saved vial${totalAtRisk === 1 ? '' : 's'} still loose`,
+      detail: 'Your saved order is currently on the loose-vial risk list and may still change before cutoff.',
+      note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
+        ? 'Check the hit list before payments open.'
+        : 'Current estimate while ordering is still open.'
+    };
+  }, [existingMap, hasExistingOrder, normalizedCustomerEmail, settings.addOnly, settings.paymentsOpen, settings.reviewStageOpen, trimmingHitList]);
   const isCartEditable = !settings.paymentsOpen && !settings.reviewStageOpen && settings.storeOpen !== false;
   const isHitListSaveReady = Boolean(
     customerName.trim() &&
@@ -4455,7 +4523,7 @@ export default function App() {
       : 'Choose vial totals, review the cart, and save.';
   const orderCardProfileCopy = customerProfile?.address?.street
     ? `Shipping set to ${customerProfile.address.city}.`
-    : 'Address saves securely after payment.';
+    : 'Save your address early from Profile & Address.';
   const orderCardProtectionCopy = settings.addOnly
     ? 'Only increases are allowed right now so loose kits do not get worse.'
     : 'Every 10 vials makes 1 protected kit.';
@@ -5608,6 +5676,7 @@ export default function App() {
                   cartItems={cartItems}
                   cartList={cartList}
                   confirmAction={confirmAction}
+                  currentProtectionSummary={currentProtectionSummary}
                   currentReviewReady={currentReviewReady}
                   customerEmail={customerEmail}
                   customerEmailConfirm={customerEmailConfirm}

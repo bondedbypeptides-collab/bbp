@@ -7,6 +7,7 @@ export default function ShopWorkspaceMain({
   cartItems,
   cartList,
   confirmAction,
+  currentProtectionSummary,
   currentReviewReady,
   customerEmail,
   customerEmailConfirm,
@@ -112,7 +113,7 @@ export default function ShopWorkspaceMain({
                 {customerProfile && (
                   <button onClick={onOpenProfileHistory} className="order-form-chip inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E] transition-colors hover:bg-white/90">
                     <Users size={13} />
-                    View Profile & History
+                    Profile & Address
                   </button>
                 )}
                 {hasExistingOrder && !settings.paymentsOpen && !settings.addOnly && !settings.reviewStageOpen && (
@@ -206,6 +207,32 @@ export default function ShopWorkspaceMain({
                   </div>
                 </div>
               </div>
+
+              {currentProtectionSummary && (
+                <div className="order-summary-card rounded-[22px] p-3.5">
+                  <div className="flex items-start gap-3">
+                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl shadow-inner ${
+                      currentProtectionSummary.tone === 'emerald'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : currentProtectionSummary.tone === 'amber'
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-rose-100 text-rose-700'
+                    }`}>
+                      <ShieldCheck size={16} />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Current protection</p>
+                      <p className="mt-1.5 text-xs font-black leading-snug text-[#4A042A]">{currentProtectionSummary.label}</p>
+                      <p className="mt-1 text-[11px] font-bold leading-relaxed text-[#8F2C5D]">{currentProtectionSummary.detail}</p>
+                      {currentProtectionSummary.note ? (
+                        <p className="mt-2 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                          {currentProtectionSummary.note}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -412,8 +439,8 @@ export default function ShopWorkspaceMain({
                     const productInfo = buildProductInfo(p.name);
                     const productImage = getProductImageSrc(productInfo);
                     const productImageSrc = getRealProductImageSrc(p.name, p.imageUrl || '');
-                    const protectedKits = Math.floor((cart.v || 0) / 10);
-                    const looseVials = (cart.v || 0) % 10;
+                    const protectedKits = Math.floor((p.totalVials || 0) / 10);
+                    const looseVials = (p.totalVials || 0) % 10;
                     const compactStatusText = p.statusKey === 'locked'
                       ? 'locked'
                       : p.statusKey === 'full'
