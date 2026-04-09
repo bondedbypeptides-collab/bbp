@@ -4426,8 +4426,61 @@ export default function App() {
     const totalAtRisk = protectedRows.reduce((sum, row) => sum + row.atRiskQty, 0);
     const totalProtected = Math.max(totalSaved - totalAtRisk, 0);
     const atRiskProducts = protectedRows.filter((row) => row.atRiskQty > 0).length;
+    const protectedKitProducts = protectedRows
+      .map((row) => ({
+        product: row.product,
+        protectedKits: Math.floor(row.protectedQty / 10)
+      }))
+      .filter((row) => row.protectedKits > 0);
+    const partialProtectionProducts = protectedRows
+      .filter((row) => row.protectedQty > 0 && row.atRiskQty > 0)
+      .map((row) => ({
+        product: row.product,
+        protectedKits: Math.floor(row.protectedQty / 10),
+        extraProtectedVials: row.protectedQty % 10,
+        protectedQty: row.protectedQty,
+        atRiskQty: row.atRiskQty
+      }));
+    const incompleteProducts = protectedRows
+      .filter((row) => row.atRiskQty > 0)
+      .map((row) => ({
+        product: row.product,
+        atRiskQty: row.atRiskQty
+      }));
 
     if (totalSaved === 0) return null;
+
+    const sections = [
+      {
+        key: 'protected',
+        title: 'Protected kits',
+        tone: 'emerald',
+        description: 'These full kits are already protected. They are the safe part of your saved order.',
+        items: protectedKitProducts.map((row) => `${row.product} - ${row.protectedKits} protected kit${row.protectedKits === 1 ? '' : 's'}`),
+        emptyText: 'No full protected kits yet.'
+      },
+      {
+        key: 'partial',
+        title: 'Partially protected kits',
+        tone: 'amber',
+        description: 'These products already have some protected kits, but part of your saved quantity is still in an open box. If other buyers cancel or reduce from that same box, those loose vials can be affected. If the box fills instead, they become protected too.',
+        items: partialProtectionProducts.map((row) => {
+          const protectedLabel = row.protectedKits > 0
+            ? `${row.protectedKits} protected kit${row.protectedKits === 1 ? '' : 's'}`
+            : `${row.extraProtectedVials} protected vial${row.extraProtectedVials === 1 ? '' : 's'}`;
+          return `${row.product} - ${protectedLabel}, ${row.atRiskQty} still waiting`;
+        }),
+        emptyText: 'No partially protected kits right now.'
+      },
+      {
+        key: 'waiting',
+        title: 'At-risk loose vials',
+        tone: 'rose',
+        description: 'These saved vials are not in a full protected kit yet, so they can still move while ordering is open.',
+        items: incompleteProducts.map((row) => `${row.product} - ${row.atRiskQty} still waiting`),
+        emptyText: 'No loose vials at risk right now.'
+      }
+    ];
 
     if (totalAtRisk <= 0) {
       return {
@@ -4436,7 +4489,8 @@ export default function App() {
         detail: 'Nothing in your saved order is on the loose-vial risk list right now.',
         note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
           ? 'Based on the current saved batch.'
-          : 'Current estimate while ordering is still open.'
+          : 'Current estimate while ordering is still open.',
+        sections
       };
     }
 
@@ -4447,7 +4501,8 @@ export default function App() {
         detail: `${atRiskProducts} product${atRiskProducts === 1 ? '' : 's'} in your saved order still depend on the next box filling.`,
         note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
           ? 'Check the hit list before payments open.'
-          : 'Current estimate while ordering is still open.'
+          : 'Current estimate while ordering is still open.',
+        sections
       };
     }
 
@@ -4457,7 +4512,8 @@ export default function App() {
       detail: 'Your saved order is currently on the loose-vial risk list and may still change before cutoff.',
       note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
         ? 'Check the hit list before payments open.'
-        : 'Current estimate while ordering is still open.'
+        : 'Current estimate while ordering is still open.',
+      sections
     };
   }, [existingMap, hasExistingOrder, normalizedCustomerEmail, settings.addOnly, settings.paymentsOpen, settings.reviewStageOpen, trimmingHitList]);
   const isCartEditable = !settings.paymentsOpen && !settings.reviewStageOpen && settings.storeOpen !== false;

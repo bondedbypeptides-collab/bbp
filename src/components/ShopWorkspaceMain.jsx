@@ -224,6 +224,41 @@ export default function ShopWorkspaceMain({
                       <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Current protection</p>
                       <p className="mt-1.5 text-xs font-black leading-snug text-[#4A042A]">{currentProtectionSummary.label}</p>
                       <p className="mt-1 text-[11px] font-bold leading-relaxed text-[#8F2C5D]">{currentProtectionSummary.detail}</p>
+                      {currentProtectionSummary.sections?.length ? (
+                        <div className="mt-3 space-y-2">
+                          {currentProtectionSummary.sections.map((section) => (
+                            <div
+                              key={section.key}
+                              className={`rounded-[16px] border px-3 py-2 ${
+                                section.tone === 'emerald'
+                                  ? 'border-emerald-200 bg-emerald-50/70'
+                                  : section.tone === 'amber'
+                                    ? 'border-amber-200 bg-amber-50/80'
+                                    : 'border-rose-200 bg-rose-50/80'
+                              }`}
+                            >
+                              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[#4A042A]">{section.title}</p>
+                              <p className="mt-1 text-[11px] font-bold leading-relaxed text-[#8F2C5D]">{section.description}</p>
+                              {section.items.length > 0 ? (
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {section.items.map((item) => (
+                                    <span
+                                      key={item}
+                                      className="inline-flex rounded-full border border-white/80 bg-white/80 px-2.5 py-1 text-[10px] font-black text-[#4A042A] shadow-sm"
+                                    >
+                                      {item}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="mt-2 text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                                  {section.emptyText}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
                       {currentProtectionSummary.note ? (
                         <p className="mt-2 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
                           {currentProtectionSummary.note}
