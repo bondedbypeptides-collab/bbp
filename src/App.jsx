@@ -57,6 +57,7 @@ const getStorageServices = async () => {
 
 const SLOTS_PER_BATCH = 10;
 const CHAT_RETENTION_MS = 24 * 60 * 60 * 1000;
+const LIKELY_SAFE_PROGRESS_THRESHOLD = 0.5;
 const HERO_CUTE_FLOATERS = [
   { id: 'unicorn', icon: '\uD83E\uDD84', label: 'unicorn', tone: 'from-white/90 to-pink-100/78', startX: 0.68, startY: 0.16, vx: -1.45, vy: 1.2, spin: -0.45 },
   { id: 'puppy', icon: '\uD83D\uDC36', label: 'puppy', tone: 'from-white/88 to-rose-100/78', startX: 0.12, startY: 0.72, vx: 1.3, vy: -1.18, spin: 0.52 },
@@ -1071,6 +1072,116 @@ export default function App() {
 
   const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
   const cloneRecord = (value) => JSON.parse(JSON.stringify(value ?? null));
+  const aggregateOrderRowsByProduct = (rows = []) => {
+    const grouped = {};
+    rows.forEach((row) => {
+      const product = row?.product;
+      if (!product) return;
+      if (!grouped[product]) {
+        grouped[product] = {
+          id: row.id || product,
+          product,
+          qty: 0,
+          timestamp: Number(row.timestamp || 0)
+        };
+      }
+      grouped[product].qty += Number(row.qty || 0);
+      grouped[product].timestamp = Math.max(grouped[product].timestamp || 0, Number(row.timestamp || 0));
+    });
+    return Object.values(grouped).sort((a, b) => a.product.localeCompare(b.product));
+  };
+
+  const syncOrderRowsPreservingTimestamps = async ({ existingOrders = [], desiredItems = {}, email, name, handle }) => {
+    const existingByProduct = existingOrders.reduce((acc, row) => {
+      if (!acc[row.product]) acc[row.product] = [];
+      acc[row.product].push(row);
+      return acc;
+    }, {});
+
+    const normalizedDesiredItems = Object.fromEntries(
+      Object.entries(desiredItems)
+        .map(([product, qty]) => [product, Number(qty || 0)])
+        .filter(([, qty]) => qty > 0)
+    );
+
+    const nextTimestamp = Date.now();
+    const operations = [];
+    const targetProducts = new Set([
+      ...Object.keys(existingByProduct),
+      ...Object.keys(normalizedDesiredItems)
+    ]);
+
+    targetProducts.forEach((product) => {
+      const desiredQty = Number(normalizedDesiredItems[product] || 0);
+      const rows = [...(existingByProduct[product] || [])].sort((left, right) => {
+        const timeDiff = Number(left.timestamp || 0) - Number(right.timestamp || 0);
+        if (timeDiff !== 0) return timeDiff;
+        return String(left.id || '').localeCompare(String(right.id || ''));
+      });
+
+      let remainingToKeep = desiredQty;
+      rows.forEach((row) => {
+        const currentQty = Number(row.qty || 0);
+        const nextQty = Math.max(Math.min(currentQty, remainingToKeep), 0);
+        remainingToKeep = Math.max(remainingToKeep - nextQty, 0);
+
+        if (nextQty <= 0) {
+          operations.push({
+            type: 'delete',
+            ref: doc(db, colPath('orders'), row.id)
+          });
+          return;
+        }
+
+        const payload = {};
+        if (nextQty !== currentQty) payload.qty = nextQty;
+        if ((row.email || '') !== email) payload.email = email;
+        if ((row.name || '') !== name) payload.name = name;
+        if ((row.handle || '') !== handle) payload.handle = handle;
+
+        if (Object.keys(payload).length > 0) {
+          operations.push({
+            type: 'merge',
+            ref: doc(db, colPath('orders'), row.id),
+            payload
+          });
+        }
+      });
+
+      if (remainingToKeep > 0) {
+        operations.push({
+          type: 'create',
+          payload: {
+            email,
+            name,
+            handle,
+            product,
+            qty: remainingToKeep,
+            timestamp: nextTimestamp
+          }
+        });
+      }
+    });
+
+    for (const chunk of chunkArray(operations, 250)) {
+      const batch = writeBatch(db);
+      chunk.forEach((operation) => {
+        if (operation.type === 'delete') {
+          batch.delete(operation.ref);
+          return;
+        }
+        if (operation.type === 'merge') {
+          batch.set(operation.ref, operation.payload, { merge: true });
+          return;
+        }
+        const ref = doc(collection(db, colPath('orders')));
+        batch.set(ref, operation.payload);
+      });
+      await safeAwait(batch.commit());
+    }
+
+    return nextTimestamp;
+  };
 
   const buildSafetyOrderSnapshot = (rows = []) => rows.map(row => ({ ...cloneRecord(row) }));
   const buildSafetyUserSnapshot = (profiles = []) => profiles.map(profile => ({ ...cloneRecord(profile) }));
@@ -3064,8 +3175,7 @@ export default function App() {
     setIsBtnLoading(true);
     try {
       const errors = [];
-      const newOrderItems = [];
-      const timestamp = Date.now();
+      const desiredItems = {};
       let finalTotalQty = 0;
 
       if (settings.addOnly) {
@@ -3102,7 +3212,7 @@ export default function App() {
           errors.push({ product: prodName, message: getAvailabilityMessage(prodName, pData, qty) });
         }
 
-        newOrderItems.push({ email: emailLower, name: customerName, handle: customerHandle, product: prodName, qty, timestamp });
+        desiredItems[prodName] = qty;
       });
 
       if (finalTotalQty === 0) {
@@ -3130,21 +3240,13 @@ export default function App() {
         return;
       }
 
-      const toDelete = ordersByEmail[emailLower] || [];
-      for (const chunk of chunkArray(toDelete, 250)) {
-        const batch = writeBatch(db);
-        chunk.forEach(o => batch.delete(doc(db, colPath('orders'), o.id)));
-        await safeAwait(batch.commit());
-      }
-
-      for (const chunk of chunkArray(newOrderItems, 250)) {
-        const batch = writeBatch(db);
-        chunk.forEach(item => {
-          const ref = doc(collection(db, colPath('orders')));
-          batch.set(ref, item);
-        });
-        await safeAwait(batch.commit());
-      }
+      await syncOrderRowsPreservingTimestamps({
+        existingOrders: ordersByEmail[emailLower] || [],
+        desiredItems,
+        email: emailLower,
+        name: customerName,
+        handle: customerHandle
+      });
 
       const existingUser = usersById[emailLower];
       const userUpdatePayload = {
@@ -3161,12 +3263,12 @@ export default function App() {
       }
       await safeAwait(setDoc(doc(db, colPath('users'), emailLower), userUpdatePayload, { merge: true }));
 
-      const logDetails = newOrderItems.map(i => `${i.qty}x ${i.product}`).join(', ');
+      const logDetails = Object.entries(desiredItems).map(([product, qty]) => `${qty}x ${product}`).join(', ');
       const logAction = Object.keys(existingOrderData.items).length > 0 ? 'Updated Order' : 'Placed Order';
       await safeAwait(addDoc(collection(db, colPath('logs')), { timestamp: Date.now(), email: emailLower, name: customerName, action: logAction, details: logDetails }));
 
       triggerCelebration('order');
-      setCartItems(createEditableCart(Object.fromEntries(newOrderItems.map(item => [item.product, item.qty]))));
+      setCartItems(createEditableCart(desiredItems));
       setCartInputDrafts({});
       showToast(existingUser?.address?.street ? "Order saved." : "Order saved. You can add your shipping details any time from Profile & Address.");
     } catch (err) { console.error(err); showToast(`Error saving: ${err.message}`); }
@@ -3313,7 +3415,7 @@ export default function App() {
      <div class="label-container">`;
 
     usersToPrint.forEach(c => {
-      const userOrders = ordersByEmail[c.email] || [];
+      const userOrders = aggregateOrderRowsByProduct(ordersByEmail[c.email] || []);
       html += `<div class="label">
             <h2>${c.name}</h2>
             <div class="meta">Handle: <strong>${c.handle || 'N/A'}</strong><br/>Email: ${c.email}</div>
@@ -4230,33 +4332,26 @@ export default function App() {
         replaceCustomerOrders: true,
         meta: { email: targetEmail, name: targetProfile.name || '' }
       });
-      for (const chunk of chunkArray(oldOrders, 250)) {
-        const batch = writeBatch(db);
-        chunk.forEach(o => batch.delete(doc(db, colPath('orders'), o.id)));
-        await safeAwait(batch.commit());
-      }
 
-      const newOrders = [];
-      const timestamp = Date.now();
+      const desiredItems = {};
 
       Object.entries(adminCart).forEach(([prod, qty]) => {
         if (qty > 0) {
-          newOrders.push({ email: targetEmail, name: targetProfile.name || 'Unknown', handle: targetProfile.handle || '', product: prod, qty, timestamp });
+          desiredItems[prod] = qty;
         }
       });
 
-      for (const chunk of chunkArray(newOrders, 250)) {
-        const batch = writeBatch(db);
-        chunk.forEach(item => {
-          const ref = doc(collection(db, colPath('orders')));
-          batch.set(ref, item);
-        });
-        await safeAwait(batch.commit());
-      }
+      await syncOrderRowsPreservingTimestamps({
+        existingOrders: oldOrders,
+        desiredItems,
+        email: targetEmail,
+        name: targetProfile.name || 'Unknown',
+        handle: targetProfile.handle || ''
+      });
 
       const nextItems = {};
-      newOrders.forEach(item => {
-        nextItems[item.product] = (nextItems[item.product] || 0) + item.qty;
+      Object.entries(desiredItems).forEach(([product, qty]) => {
+        nextItems[product] = (nextItems[product] || 0) + qty;
       });
       const existingSnapshot = getFrozenPaymentSnapshot(targetProfile);
       const nextSnapshot = settings.paymentsOpen
@@ -4407,19 +4502,31 @@ export default function App() {
   const currentProtectionSummary = useMemo(() => {
     if (!hasExistingOrder) return null;
 
-    const protectedRows = Object.entries(existingMap)
+    const protectionRows = Object.entries(existingMap)
       .filter(([, qty]) => qty > 0)
       .map(([product, qty]) => {
-        const atRiskQty = trimmingHitList
+        const looseQty = trimmingHitList
           .filter((item) => item.email === normalizedCustomerEmail && item.prod === product)
           .reduce((sum, item) => sum + Number(item.amountToRemove || 0), 0);
+        const productMeta = enrichedProductsByName[product] || {};
+        const currentExpectedBoxes = Math.max(Math.ceil(Number(productMeta.totalVials || 0) / SLOTS_PER_BATCH), 1);
+        const plannedBoxes = Math.max(Number(productMeta.maxBoxes || 0) || currentExpectedBoxes, 1);
+        const completedBoxes = Number(productMeta.boxes || 0);
+        const progressRatio = completedBoxes / plannedBoxes;
+        const likelySafeQty = looseQty > 0 && progressRatio >= LIKELY_SAFE_PROGRESS_THRESHOLD ? looseQty : 0;
+        const atRiskQty = Math.max(looseQty - likelySafeQty, 0);
 
         return {
           product,
           qty,
           atRiskQty,
-          protectedQty: Math.max(qty - atRiskQty, 0),
-          pricePerVialUSD: Number(productsByName[product]?.pricePerVialUSD || 0)
+          likelySafeQty,
+          protectedQty: Math.max(qty - looseQty, 0),
+          pricePerVialUSD: Number(productsByName[product]?.pricePerVialUSD || 0),
+          completedBoxes,
+          plannedBoxes,
+          progressRatio,
+          progressPercent: Math.round(progressRatio * 100)
         };
       });
 
@@ -4428,27 +4535,38 @@ export default function App() {
       return Number((subtotalUSD * Number(settings.fxRate || 0)).toFixed(2));
     };
 
-    const totalSaved = protectedRows.reduce((sum, row) => sum + row.qty, 0);
-    const totalAtRisk = protectedRows.reduce((sum, row) => sum + row.atRiskQty, 0);
-    const totalProtected = Math.max(totalSaved - totalAtRisk, 0);
-    const atRiskProducts = protectedRows.filter((row) => row.atRiskQty > 0).length;
-    const protectedKitProducts = protectedRows
+    const totalSaved = protectionRows.reduce((sum, row) => sum + row.qty, 0);
+    const totalLikelySafe = protectionRows.reduce((sum, row) => sum + row.likelySafeQty, 0);
+    const totalAtRisk = protectionRows.reduce((sum, row) => sum + row.atRiskQty, 0);
+    const totalProtected = protectionRows.reduce((sum, row) => sum + row.protectedQty, 0);
+    const looseProducts = protectionRows.filter((row) => row.likelySafeQty > 0 || row.atRiskQty > 0).length;
+    const protectedKitProducts = protectionRows
       .map((row) => ({
         product: row.product,
         protectedQty: row.protectedQty,
         protectedKits: Math.floor(row.protectedQty / 10)
       }))
       .filter((row) => row.protectedQty > 0);
-    const openBoxProducts = protectedRows
+    const likelySafeProducts = protectionRows
+      .filter((row) => row.likelySafeQty > 0)
+      .map((row) => ({
+        product: row.product,
+        qty: row.likelySafeQty,
+        pricePerVialUSD: row.pricePerVialUSD,
+        progressPercent: row.progressPercent,
+        completedBoxes: row.completedBoxes,
+        plannedBoxes: row.plannedBoxes
+      }));
+    const atRiskLooseProducts = protectionRows
       .filter((row) => row.atRiskQty > 0)
       .map((row) => ({
         product: row.product,
-        slotsLeft: Number(enrichedProductsByName[row.product]?.slotsLeft || 0),
-        atRiskQty: row.atRiskQty,
-        pricePerVialUSD: row.pricePerVialUSD
+        qty: row.atRiskQty,
+        pricePerVialUSD: row.pricePerVialUSD,
+        progressPercent: row.progressPercent,
+        completedBoxes: row.completedBoxes,
+        plannedBoxes: row.plannedBoxes
       }));
-    const nearlyCompleteProducts = openBoxProducts.filter((row) => row.slotsLeft > 0 && row.slotsLeft <= 2);
-    const atRiskLooseProducts = openBoxProducts.filter((row) => row.slotsLeft === 0 || row.slotsLeft > 2);
 
     if (totalSaved === 0) return null;
 
@@ -4462,32 +4580,32 @@ export default function App() {
           : 'This part of your order is in completed boxes right now. It is the safest part of your order, but changes are still possible until buyer edits are restricted.',
         items: protectedKitProducts.map((row) => `${row.product} - ${row.protectedQty} vial${row.protectedQty === 1 ? '' : 's'} currently protected${row.protectedKits > 0 ? ` (${row.protectedKits} full kit${row.protectedKits === 1 ? '' : 's'})` : ''}`),
         emptyText: 'Nothing is currently protected yet.',
-        subtotalPHP: getSectionSubtotalPHP(protectedRows, (row) => row.protectedQty),
+        subtotalPHP: getSectionSubtotalPHP(protectionRows, (row) => row.protectedQty),
         subtotalLabel: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen ? 'Locked-in total' : 'Current protected total'
       },
       {
-        key: 'partial',
-        title: 'Almost complete',
+        key: 'likely-safe',
+        title: 'Likely safe',
         tone: 'amber',
-        description: 'These products are close to finishing the next box, so they are likely to stay. They are still not guaranteed yet, because other buyers in that same box can still reduce or cancel before cutoff.',
-        items: nearlyCompleteProducts.map((row) => `${row.product} - ${row.atRiskQty} vial${row.atRiskQty === 1 ? '' : 's'} almost complete, ${row.slotsLeft} slot${row.slotsLeft === 1 ? '' : 's'} left`),
-        emptyText: 'Nothing is close enough to call almost complete right now.',
-        subtotalPHP: getSectionSubtotalPHP(nearlyCompleteProducts, (row) => row.atRiskQty),
-        subtotalLabel: 'Likely-to-complete total'
+        description: `These loose vials are in the unfinished box, but this product is already at least ${Math.round(LIKELY_SAFE_PROGRESS_THRESHOLD * 100)}% through its planned boxes. They are more stable, but not guaranteed until that box fully closes.`,
+        items: likelySafeProducts.map((row) => `${row.product} - ${row.qty} vial${row.qty === 1 ? '' : 's'} likely safe (${row.completedBoxes}/${row.plannedBoxes} boxes closed, ${row.progressPercent}% progress)`),
+        emptyText: 'Nothing has reached the likely-safe threshold yet.',
+        subtotalPHP: getSectionSubtotalPHP(likelySafeProducts, (row) => row.qty),
+        subtotalLabel: 'Likely-safe total'
       },
       {
         key: 'waiting',
         title: 'At-risk loose vials',
         tone: 'rose',
-        description: 'These saved vials are not in a full protected kit yet, so they can still move while ordering is open.',
-        items: atRiskLooseProducts.map((row) => `${row.product} - ${row.atRiskQty} vial${row.atRiskQty === 1 ? '' : 's'} still waiting`),
+        description: 'These loose vials are still early in the run and still depend on the current open box, so they can move if buyers reduce or cancel before cutoff.',
+        items: atRiskLooseProducts.map((row) => `${row.product} - ${row.qty} vial${row.qty === 1 ? '' : 's'} at risk (${row.completedBoxes}/${row.plannedBoxes} boxes closed, ${row.progressPercent}% progress)`),
         emptyText: 'No loose vials at risk right now.',
-        subtotalPHP: getSectionSubtotalPHP(atRiskLooseProducts, (row) => row.atRiskQty),
+        subtotalPHP: getSectionSubtotalPHP(atRiskLooseProducts, (row) => row.qty),
         subtotalLabel: 'At-risk total'
       }
     ];
 
-    if (totalAtRisk <= 0) {
+    if (totalLikelySafe <= 0 && totalAtRisk <= 0) {
       return {
         tone: 'emerald',
         label: `${totalProtected} vial${totalProtected === 1 ? '' : 's'} currently protected`,
@@ -4502,8 +4620,8 @@ export default function App() {
     if (totalProtected > 0) {
       return {
         tone: 'amber',
-        label: `${totalProtected} protected, ${nearlyCompleteProducts.reduce((sum, row) => sum + row.atRiskQty, 0)} almost complete, ${atRiskLooseProducts.reduce((sum, row) => sum + row.atRiskQty, 0)} at risk`,
-        detail: `${atRiskProducts} product${atRiskProducts === 1 ? '' : 's'} in your saved order still depend on the next box filling.`,
+        label: `${totalProtected} protected, ${totalLikelySafe} likely safe, ${totalAtRisk} at risk`,
+        detail: `${looseProducts} product${looseProducts === 1 ? '' : 's'} in your saved order still depend on the current open box. Likely safe is a confidence tier, not a guarantee.`,
         note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
           ? 'These section totals add up to your saved subtotal before admin fee.'
           : 'Current estimate while ordering is still open. These section totals add up to your saved subtotal before admin fee.',
@@ -4512,9 +4630,11 @@ export default function App() {
     }
 
     return {
-      tone: 'rose',
-      label: `${nearlyCompleteProducts.reduce((sum, row) => sum + row.atRiskQty, 0)} almost complete, ${atRiskLooseProducts.reduce((sum, row) => sum + row.atRiskQty, 0)} at risk`,
-      detail: 'Your saved order is currently on the loose-vial risk list and may still change before cutoff.',
+      tone: totalLikelySafe > 0 ? 'amber' : 'rose',
+      label: `${totalLikelySafe} likely safe, ${totalAtRisk} at risk`,
+      detail: totalLikelySafe > 0
+        ? 'Your saved order still has loose vials in the current box. Some look more stable now, but they are not guaranteed until the box fully closes.'
+        : 'Your saved order is currently on the loose-vial risk list and may still change before cutoff.',
       note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
         ? 'These section totals add up to your saved subtotal before admin fee.'
         : 'Current estimate while ordering is still open. These section totals add up to your saved subtotal before admin fee.',
@@ -7266,7 +7386,7 @@ export default function App() {
       {selectedProfileEmail && (
         <Suspense fallback={null}>
           <ProfileViewerHost
-            currentOrders={ordersByEmail[normalizedSelectedProfileEmail] || []}
+            currentOrders={aggregateOrderRowsByProduct(ordersByEmail[normalizedSelectedProfileEmail] || [])}
             editAddressForm={editAddressForm}
             getPartialShipPreferenceLabel={getPartialShipPreferenceLabel}
             historyOrders={history.filter(o => o.email === normalizedSelectedProfileEmail)}

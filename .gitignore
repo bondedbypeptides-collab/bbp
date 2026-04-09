@@ -22,3 +22,21 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local Codex / preview scratch files
+.artifacts/
+.npm-cache/
+.restore-points/
+.live-*.json
+.live-*.log
+.resume-*.log
+.resume-*.json
+.pilot-*.log
+.preview-*.log
+.preview-*.err.log
+.vite-dev*.log
+.live100-*.log
+.live50-*.log
+.livecheck-*.json
+.regression-*.json
+tmp-proof.png
