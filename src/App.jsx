@@ -4728,8 +4728,8 @@ export default function App() {
             key: `likely-safe-${row.product}-${boxLabel}`,
             product: row.product,
             qtyText: `${row.qty} vial${row.qty === 1 ? '' : 's'}`,
-            boxText: `${boxLabel} out of ${row.totalBoxes} completed boxes`,
-            suffix: 'likely safe ka for now.'
+            boxText: `${boxLabel} right now`,
+            suffix: `${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} so far, so likely safe ka for now.`
           };
         }),
         emptyText: 'Walang qty na nasa likely safe lane ngayon.',
@@ -4750,8 +4750,8 @@ export default function App() {
             key: `at-risk-${row.product}-${boxLabel}`,
             product: row.product,
             qtyText: `${row.qty} vial${row.qty === 1 ? '' : 's'}`,
-            boxText: `${boxLabel} out of ${row.totalBoxes} completed boxes`,
-            suffix: 'puwedeng ma-trim.'
+            boxText: `${boxLabel} right now`,
+            suffix: `${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} so far, so puwedeng ma-trim.`
           };
         }),
         emptyText: 'Walang loose vials na at risk ngayon.',
