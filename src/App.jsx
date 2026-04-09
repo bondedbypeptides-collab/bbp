@@ -57,7 +57,6 @@ const getStorageServices = async () => {
 
 const SLOTS_PER_BATCH = 10;
 const CHAT_RETENTION_MS = 24 * 60 * 60 * 1000;
-const LIKELY_SAFE_PROGRESS_THRESHOLD = 0.5;
 const HERO_CUTE_FLOATERS = [
   { id: 'unicorn', icon: '\uD83E\uDD84', label: 'unicorn', tone: 'from-white/90 to-pink-100/78', startX: 0.68, startY: 0.16, vx: -1.45, vy: 1.2, spin: -0.45 },
   { id: 'puppy', icon: '\uD83D\uDC36', label: 'puppy', tone: 'from-white/88 to-rose-100/78', startX: 0.12, startY: 0.72, vx: 1.3, vy: -1.18, spin: 0.52 },
@@ -83,6 +82,12 @@ const PARTIAL_SHIP_OPTIONS = [
 ];
 const SHOP_ACCESS_STORAGE_KEY = 'bbp-shop-access-code';
 const createEmptyAddressForm = () => ({ shipOpt: '', partialShipPref: '', street: '', brgy: '', city: '', prov: '', zip: '', contact: '' });
+const compareOrdersOldestFirst = (left, right) => {
+  const timeDiff = Number(left?.timestamp || 0) - Number(right?.timestamp || 0);
+  if (timeDiff !== 0) return timeDiff;
+  return String(left?.id || '').localeCompare(String(right?.id || ''));
+};
+const compareOrdersNewestFirst = (left, right) => compareOrdersOldestFirst(right, left);
 const normalizeAccessCode = (value) => String(value || '').trim().toLowerCase();
 const normalizePartialShipPreference = (value) => {
   const cleaned = String(value || '').trim().toLowerCase();
@@ -456,7 +461,7 @@ const buildProductInfo = (productName) => {
   const tagBenefits = tags.flatMap(tag => TAG_BENEFIT_MAP[tag] || []);
   const benefits = Array.from(new Set([...(base.benefits || []), ...tagBenefits])).slice(0, 3);
   const shortDesc = base.desc.length > 120 ? `${base.desc.slice(0, 117)}...` : base.desc;
-  const protectionNote = "10 vials = 1 protected kit. Extra loose vials can still be trimmed if a box stays incomplete.";
+  const protectionNote = "Full 10-vial kits are protected. Loose orders become likely safe after 3 completed boxes. Before that, puwede pa ma-trim.";
 
   const productInfo = {
     name: base.name || productName,
@@ -1367,33 +1372,117 @@ export default function App() {
     return enrichedProducts.reduce((sum, p) => sum + Math.ceil(p.totalVials / SLOTS_PER_BATCH), 0);
   }, [enrichedProducts]);
 
-  const trimmingHitList = useMemo(() => {
-    const toTrim = {}; const openBoxNumbers = {};
-    Object.keys(productTotals).forEach(prod => {
-      if (productTotals[prod] % 10 > 0) {
-        toTrim[prod] = productTotals[prod] % 10;
-        openBoxNumbers[prod] = Math.floor(productTotals[prod] / 10) + 1;
-      }
+  const productPriorityAnalysis = useMemo(() => {
+    const groupedRows = {};
+    orders.forEach((order) => {
+      if (!groupedRows[order.product]) groupedRows[order.product] = [];
+      groupedRows[order.product].push({
+        ...order,
+        qty: Number(order.qty || 0),
+        timestamp: Number(order.timestamp || 0)
+      });
     });
 
-    const victims = [];
-    [...orders].sort((a, b) => b.timestamp - a.timestamp).forEach(row => {
-      if (!toTrim[row.product] || toTrim[row.product] <= 0) return;
-      const custTotal = customerProductTotals[`${row.email}||${row.product}`];
-      if (custTotal % 10 === 0 || row.qty % 10 === 0) return;
+    return Object.fromEntries(
+      Object.entries(groupedRows).map(([product, rows]) => {
+        const normalizedRows = rows
+          .filter((row) => Number(row.qty || 0) > 0)
+          .sort(compareOrdersOldestFirst);
+        const totalQty = normalizedRows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
+        const completedBoxes = Math.floor(totalQty / SLOTS_PER_BATCH);
+        const totalToTrim = totalQty % SLOTS_PER_BATCH;
+        const missingSlots = totalToTrim > 0 ? SLOTS_PER_BATCH - totalToTrim : 0;
+        const openBoxNumber = completedBoxes + 1;
+        const customerTotals = {};
 
-      const amountToRemove = Math.min(toTrim[row.product], row.qty % 10);
-      if (amountToRemove > 0) {
-        victims.push({
-          id: row.id, prod: row.product, boxNum: openBoxNumbers[row.product],
-          missingSlots: 10 - (productTotals[row.product] % 10),
-          name: row.name, email: row.email, handle: row.handle, qty: row.qty, amountToRemove
+        normalizedRows.forEach((row) => {
+          customerTotals[row.email] = (customerTotals[row.email] || 0) + Number(row.qty || 0);
         });
-        toTrim[row.product] -= amountToRemove;
-      }
-    });
-    return victims.sort((a, b) => b.missingSlots - a.missingSlots);
-  }, [customerProductTotals, orders, productTotals]);
+
+        const customerKitAllocated = {};
+        const fragments = normalizedRows.map((row) => {
+          const customerTotal = Number(customerTotals[row.email] || 0);
+          const protectedTarget = Math.floor(customerTotal / SLOTS_PER_BATCH) * SLOTS_PER_BATCH;
+          const protectedRemaining = Math.max(protectedTarget - Number(customerKitAllocated[row.email] || 0), 0);
+          const protectedQty = Math.min(Number(row.qty || 0), protectedRemaining);
+          customerKitAllocated[row.email] = (customerKitAllocated[row.email] || 0) + protectedQty;
+          return {
+            row,
+            protectedQty,
+            looseQty: 0,
+            remainingQty: Math.max(Number(row.qty || 0) - protectedQty, 0)
+          };
+        });
+
+        fragments.forEach((fragment) => {
+          fragment.looseQty = Math.max(Number(fragment.remainingQty || 0), 0);
+        });
+
+        let trimRemaining = totalToTrim;
+        const victims = [];
+        const newestFragments = [...fragments].sort((left, right) => compareOrdersNewestFirst(left.row, right.row));
+
+        newestFragments.forEach((fragment) => {
+          if (trimRemaining <= 0) return;
+          const bucketQty = Number(fragment.looseQty || 0);
+          if (bucketQty <= 0) return;
+          const amountToRemove = Math.min(trimRemaining, bucketQty);
+          victims.push({
+            id: fragment.row.id,
+            prod: product,
+            boxNum: openBoxNumber,
+            missingSlots,
+            name: fragment.row.name,
+            email: fragment.row.email,
+            handle: fragment.row.handle,
+            qty: Number(fragment.row.qty || 0),
+            amountToRemove,
+            timestamp: Number(fragment.row.timestamp || 0),
+            priorityBucket: 'loose'
+          });
+          trimRemaining -= amountToRemove;
+        });
+
+        const customerBuckets = {};
+        fragments.forEach((fragment) => {
+          const email = fragment.row.email;
+          if (!customerBuckets[email]) {
+            customerBuckets[email] = {
+              protectedQty: 0,
+              looseQty: 0,
+              totalQty: 0
+            };
+          }
+
+          customerBuckets[email].protectedQty += Number(fragment.protectedQty || 0);
+          customerBuckets[email].looseQty += Number(fragment.looseQty || 0);
+          customerBuckets[email].totalQty += Number(fragment.row.qty || 0);
+        });
+
+        return [product, {
+          product,
+          totalQty,
+          completedBoxes,
+          openBoxNumber,
+          missingSlots,
+          totalToTrim,
+          fragments,
+          victims,
+          customerBuckets
+        }];
+      })
+    );
+  }, [orders]);
+
+  const trimmingHitList = useMemo(() => {
+    return Object.values(productPriorityAnalysis)
+      .flatMap((analysis) => analysis.victims || [])
+      .sort((left, right) => {
+        if (right.missingSlots !== left.missingSlots) return right.missingSlots - left.missingSlots;
+        if (left.priorityBucket !== right.priorityBucket) return left.priorityBucket === 'loose' ? -1 : 1;
+        return compareOrdersNewestFirst(left, right);
+      });
+  }, [productPriorityAnalysis]);
 
   const discordTrimListText = useMemo(() => {
     if (!trimmingHitList.length) {
@@ -4505,28 +4594,23 @@ export default function App() {
     const protectionRows = Object.entries(existingMap)
       .filter(([, qty]) => qty > 0)
       .map(([product, qty]) => {
-        const looseQty = trimmingHitList
-          .filter((item) => item.email === normalizedCustomerEmail && item.prod === product)
-          .reduce((sum, item) => sum + Number(item.amountToRemove || 0), 0);
-        const productMeta = enrichedProductsByName[product] || {};
-        const currentExpectedBoxes = Math.max(Math.ceil(Number(productMeta.totalVials || 0) / SLOTS_PER_BATCH), 1);
-        const plannedBoxes = Math.max(Number(productMeta.maxBoxes || 0) || currentExpectedBoxes, 1);
-        const completedBoxes = Number(productMeta.boxes || 0);
-        const progressRatio = completedBoxes / plannedBoxes;
-        const likelySafeQty = looseQty > 0 && progressRatio >= LIKELY_SAFE_PROGRESS_THRESHOLD ? looseQty : 0;
-        const atRiskQty = Math.max(looseQty - likelySafeQty, 0);
+        const analysis = productPriorityAnalysis[product];
+        const customerBuckets = analysis?.customerBuckets?.[normalizedCustomerEmail] || {};
+        const protectedQty = Number(customerBuckets.protectedQty || 0);
+        const looseQty = Number(customerBuckets.looseQty || 0);
+        const likelySafeQty = Number(analysis?.completedBoxes || 0) >= 3 ? looseQty : 0;
+        const atRiskQty = Number(analysis?.completedBoxes || 0) >= 3 ? 0 : looseQty;
+        const totalQty = Number(customerBuckets.totalQty || qty || 0);
 
         return {
           product,
-          qty,
+          qty: totalQty,
           atRiskQty,
           likelySafeQty,
-          protectedQty: Math.max(qty - looseQty, 0),
+          protectedQty,
           pricePerVialUSD: Number(productsByName[product]?.pricePerVialUSD || 0),
-          completedBoxes,
-          plannedBoxes,
-          progressRatio,
-          progressPercent: Math.round(progressRatio * 100)
+          completedBoxes: Number(analysis?.completedBoxes || 0),
+          trimPriority: likelySafeQty > 0 ? 'likely-safe' : 'loose'
         };
       });
 
@@ -4553,9 +4637,7 @@ export default function App() {
         product: row.product,
         qty: row.likelySafeQty,
         pricePerVialUSD: row.pricePerVialUSD,
-        progressPercent: row.progressPercent,
-        completedBoxes: row.completedBoxes,
-        plannedBoxes: row.plannedBoxes
+        completedBoxes: row.completedBoxes
       }));
     const atRiskLooseProducts = protectionRows
       .filter((row) => row.atRiskQty > 0)
@@ -4563,9 +4645,7 @@ export default function App() {
         product: row.product,
         qty: row.atRiskQty,
         pricePerVialUSD: row.pricePerVialUSD,
-        progressPercent: row.progressPercent,
-        completedBoxes: row.completedBoxes,
-        plannedBoxes: row.plannedBoxes
+        completedBoxes: row.completedBoxes
       }));
 
     if (totalSaved === 0) return null;
@@ -4573,33 +4653,33 @@ export default function App() {
     const sections = [
       {
         key: 'protected',
-        title: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen ? 'Locked-in' : 'Currently protected',
+        title: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen ? 'Protected' : 'Protected',
         tone: 'emerald',
         description: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
-          ? 'This part of your order is locked in now. Buyers cannot reduce it anymore through the normal order flow.'
-          : 'This part of your order is in completed boxes right now. It is the safest part of your order, but changes are still possible until buyer edits are restricted.',
-        items: protectedKitProducts.map((row) => `${row.product} - ${row.protectedQty} vial${row.protectedQty === 1 ? '' : 's'} currently protected${row.protectedKits > 0 ? ` (${row.protectedKits} full kit${row.protectedKits === 1 ? '' : 's'})` : ''}`),
-        emptyText: 'Nothing is currently protected yet.',
+          ? 'Ito ang safe na part ng order mo. Hindi na ito ang unang gagalawin sa normal buyer edits.'
+          : 'Ito ang pinaka-safe na part ng order mo ngayon.',
+        items: protectedKitProducts.map((row) => `${row.product} - ${row.protectedQty} vial${row.protectedQty === 1 ? '' : 's'} safe na${row.protectedKits > 0 ? ` (${row.protectedKits} full kit${row.protectedKits === 1 ? '' : 's'})` : ''}`),
+        emptyText: 'Wala pang safe na protected qty dito.',
         subtotalPHP: getSectionSubtotalPHP(protectionRows, (row) => row.protectedQty),
-        subtotalLabel: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen ? 'Locked-in total' : 'Current protected total'
+        subtotalLabel: 'Protected total'
       },
       {
         key: 'likely-safe',
         title: 'Likely safe',
         tone: 'amber',
-        description: `These loose vials are in the unfinished box, but this product is already at least ${Math.round(LIKELY_SAFE_PROGRESS_THRESHOLD * 100)}% through its planned boxes. They are more stable, but not guaranteed until that box fully closes.`,
-        items: likelySafeProducts.map((row) => `${row.product} - ${row.qty} vial${row.qty === 1 ? '' : 's'} likely safe (${row.completedBoxes}/${row.plannedBoxes} boxes closed, ${row.progressPercent}% progress)`),
-        emptyText: 'Nothing has reached the likely-safe threshold yet.',
+        description: 'Loose pa ito, pero may 3 or more completed boxes na ang product na ito. Mukhang safe na, pero puwede pa rin gumalaw if may cancellations or bawas.',
+        items: likelySafeProducts.map((row) => `${row.product} - ${row.qty} vial${row.qty === 1 ? '' : 's'} mukhang safe (${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} closed)`),
+        emptyText: 'Walang qty na nasa likely safe lane ngayon.',
         subtotalPHP: getSectionSubtotalPHP(likelySafeProducts, (row) => row.qty),
-        subtotalLabel: 'Likely-safe total'
+        subtotalLabel: 'Likely safe total'
       },
       {
         key: 'waiting',
         title: 'At-risk loose vials',
         tone: 'rose',
-        description: 'These loose vials are still early in the run and still depend on the current open box, so they can move if buyers reduce or cancel before cutoff.',
-        items: atRiskLooseProducts.map((row) => `${row.product} - ${row.qty} vial${row.qty === 1 ? '' : 's'} at risk (${row.completedBoxes}/${row.plannedBoxes} boxes closed, ${row.progressPercent}% progress)`),
-        emptyText: 'No loose vials at risk right now.',
+        description: 'Loose pa ito sa current open box. If hindi mapuno ang box, ito ang puwedeng ma-trim.',
+        items: atRiskLooseProducts.map((row) => `${row.product} - ${row.qty} vial${row.qty === 1 ? '' : 's'} puwedeng ma-trim (${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} closed)`),
+        emptyText: 'Walang loose vials na at risk ngayon.',
         subtotalPHP: getSectionSubtotalPHP(atRiskLooseProducts, (row) => row.qty),
         subtotalLabel: 'At-risk total'
       }
@@ -4608,11 +4688,11 @@ export default function App() {
     if (totalLikelySafe <= 0 && totalAtRisk <= 0) {
       return {
         tone: 'emerald',
-        label: `${totalProtected} vial${totalProtected === 1 ? '' : 's'} currently protected`,
-        detail: 'Nothing in your saved order is on the loose-vial risk list right now.',
+        label: `${totalProtected} vial${totalProtected === 1 ? '' : 's'} safe na`,
+        detail: 'Safe ang saved qty mo ngayon. Full 10-vial kit lane ito.',
         note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
-          ? 'These section totals add up to your saved subtotal before admin fee.'
-          : 'Current estimate while ordering is still open. These section totals add up to your saved subtotal before admin fee.',
+          ? 'Meaning ng labels: Protected = safe na. Likely Safe = mukhang safe pero puwede pa gumalaw. At Risk = puwedeng ma-trim.'
+          : 'Meaning ng labels: Protected = safe na. Likely Safe = mukhang safe pero puwede pa gumalaw. At Risk = puwedeng ma-trim.',
         sections
       };
     }
@@ -4621,10 +4701,10 @@ export default function App() {
       return {
         tone: 'amber',
         label: `${totalProtected} protected, ${totalLikelySafe} likely safe, ${totalAtRisk} at risk`,
-        detail: `${looseProducts} product${looseProducts === 1 ? '' : 's'} in your saved order still depend on the current open box. Likely safe is a confidence tier, not a guarantee.`,
+        detail: `${looseProducts} product${looseProducts === 1 ? '' : 's'} mo nasa current open box pa. Full 10-vial kits stay protected. Loose qty becomes likely safe only after 3 completed boxes.`,
         note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
-          ? 'These section totals add up to your saved subtotal before admin fee.'
-          : 'Current estimate while ordering is still open. These section totals add up to your saved subtotal before admin fee.',
+          ? 'Example: if may old 4 ka na safe na, tapos nag-add ka later ng 3, yung new 3 ang mas puwedeng ma-trim if hindi mapuno ang box.'
+          : 'Example: if may old 4 ka na safe na, tapos nag-add ka later ng 3, yung new 3 ang mas puwedeng ma-trim if hindi mapuno ang box.',
         sections
       };
     }
@@ -4633,14 +4713,14 @@ export default function App() {
       tone: totalLikelySafe > 0 ? 'amber' : 'rose',
       label: `${totalLikelySafe} likely safe, ${totalAtRisk} at risk`,
       detail: totalLikelySafe > 0
-        ? 'Your saved order still has loose vials in the current box. Some look more stable now, but they are not guaranteed until the box fully closes.'
-        : 'Your saved order is currently on the loose-vial risk list and may still change before cutoff.',
+        ? 'Loose pa ang qty mo, pero may 3 or more completed boxes na ang product na ito. Mukhang safe na, pero hindi pa final.'
+        : 'Loose pa ang saved qty mo ngayon, so puwede pa ito ma-trim if hindi mapuno ang box.',
       note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
-        ? 'These section totals add up to your saved subtotal before admin fee.'
-        : 'Current estimate while ordering is still open. These section totals add up to your saved subtotal before admin fee.',
+        ? 'Simple rule: full 10-vial kits are protected. Loose orders become likely safe after 3 completed boxes. Before that, they stay at risk.'
+        : 'Simple rule: full 10-vial kits are protected. Loose orders become likely safe after 3 completed boxes. Before that, they stay at risk.',
       sections
     };
-  }, [enrichedProductsByName, existingMap, hasExistingOrder, normalizedCustomerEmail, productsByName, settings.addOnly, settings.fxRate, settings.paymentsOpen, settings.reviewStageOpen, trimmingHitList]);
+  }, [existingMap, hasExistingOrder, normalizedCustomerEmail, productPriorityAnalysis, productsByName, settings.addOnly, settings.fxRate, settings.paymentsOpen, settings.reviewStageOpen]);
   const isCartEditable = !settings.paymentsOpen && !settings.reviewStageOpen && settings.storeOpen !== false;
   const isHitListSaveReady = Boolean(
     customerName.trim() &&
@@ -4707,7 +4787,26 @@ export default function App() {
     : 'Save your address early from Profile & Address.';
   const orderCardProtectionCopy = settings.addOnly
     ? 'Only increases are allowed right now so loose kits do not get worse.'
-    : 'Every 10 vials makes 1 protected kit.';
+    : '10 vials = protected. Loose orders need 3 completed boxes first to become likely safe.';
+  const protectionAnnouncement = settings.addOnly
+    ? {
+      title: 'Add-Only Rule',
+      lines: [
+        'Old saved qty keeps its place.',
+        'If nag-add ka later, only the new add-on is treated as new.',
+        'You can add more, but you cannot reduce old saved qty right now.'
+      ]
+    }
+    : {
+      title: 'How Protection Works',
+      lines: [
+        'If you buy 10 of the same product, full kit yan, so protected yan.',
+        'If less than 10, loose order yan, so puwede pa gumalaw.',
+        'Loose orders become likely safe only after that product already has 3 completed boxes.',
+        'If may old qty ka na hindi ginalaw, it keeps its old place.',
+        'If nag-add ka later, yung new add-on ang mas puwedeng gumalaw first if hindi mapuno ang box.'
+      ]
+    };
   const orderCardStatus = settings.paymentsOpen
     ? 'Payments open'
     : isReviewStageOpen
@@ -5913,6 +6012,7 @@ export default function App() {
                   orderCardStatus={orderCardStatus}
                   orderCardTitle={orderCardTitle}
                   popularCategories={POPULAR_CATEGORIES}
+                  protectionAnnouncement={protectionAnnouncement}
                   products={products}
                   searchQuery={searchQuery}
                   selectedCategory={selectedCategory}

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ArrowRight, BookOpen, ClipboardList, Lock, Package, Search, ShieldCheck, Users } from 'lucide-react';
 
 export default function ShopWorkspaceMain({
@@ -56,6 +57,7 @@ export default function ShopWorkspaceMain({
   orderCardStatus,
   orderCardTitle,
   popularCategories,
+  protectionAnnouncement,
   products,
   searchQuery,
   selectedCategory,
@@ -68,6 +70,8 @@ export default function ShopWorkspaceMain({
   showToast,
   totalPHP,
 }) {
+  const [showProtectionAnnouncement, setShowProtectionAnnouncement] = useState(false);
+
   return (
     <div className="space-y-4 w-full min-w-0">
         {isCurrentUserAtRisk && (
@@ -223,9 +227,32 @@ export default function ShopWorkspaceMain({
                       <ShieldCheck size={16} />
                     </div>
                     <div>
-                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Current protection</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Current protection</p>
+                        {protectionAnnouncement ? (
+                          <button
+                            type="button"
+                            onClick={() => setShowProtectionAnnouncement((value) => !value)}
+                            className="inline-flex items-center rounded-full border border-pink-200 bg-white/92 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.18em] text-[#D6006E] shadow-sm transition-colors hover:bg-pink-50"
+                          >
+                            {showProtectionAnnouncement ? 'Hide Guide' : 'How This Works'}
+                          </button>
+                        ) : null}
+                      </div>
                       <p className="mt-1.5 text-sm font-black leading-snug text-[#4A042A]">{currentProtectionSummary.label}</p>
                       <p className="mt-1.5 max-w-[56rem] text-[11px] font-bold leading-relaxed text-[#8F2C5D]">{currentProtectionSummary.detail}</p>
+                      {showProtectionAnnouncement && protectionAnnouncement ? (
+                        <div className="mt-3 rounded-[18px] border border-pink-200 bg-white/90 px-3.5 py-3 shadow-[0_12px_24px_rgba(74,4,42,0.06)]">
+                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">{protectionAnnouncement.title}</p>
+                          <div className="mt-2 space-y-1.5">
+                            {protectionAnnouncement.lines.map((line) => (
+                              <p key={line} className="text-[11px] font-bold leading-relaxed text-[#4A042A]">
+                                {line}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                       {currentProtectionSummary.sections?.length ? (
                         <div className="mt-4 space-y-3">
                           {currentProtectionSummary.sections.map((section) => (
