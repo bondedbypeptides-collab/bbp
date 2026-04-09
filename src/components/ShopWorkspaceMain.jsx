@@ -289,10 +289,30 @@ export default function ShopWorkspaceMain({
                                 <div className="mt-3 flex flex-wrap gap-2">
                                   {section.items.map((item) => (
                                     <span
-                                      key={item}
-                                      className="inline-flex rounded-full border border-white/85 bg-white/88 px-2.5 py-1.5 text-[10px] font-black text-[#4A042A] shadow-[0_8px_18px_rgba(74,4,42,0.06)]"
+                                      key={typeof item === 'string' ? item : item.key}
+                                      className="inline-flex rounded-full border border-white/85 bg-white/88 px-2.5 py-1.5 text-[10px] font-semibold text-[#4A042A] shadow-[0_8px_18px_rgba(74,4,42,0.06)]"
                                     >
-                                      {item}
+                                      {typeof item === 'string' ? item : (
+                                        <>
+                                          <span className={`mr-1.5 ${
+                                            section.tone === 'emerald'
+                                              ? 'text-emerald-700'
+                                              : section.tone === 'amber'
+                                                ? 'text-amber-700'
+                                                : 'text-rose-700'
+                                          }`}>
+                                            {item.product}
+                                          </span>
+                                          {item.qtyText ? <span className="font-black text-[#2F0A1E]">{item.qtyText}</span> : null}
+                                          {item.boxText ? (
+                                            <>
+                                              <span className="mx-1">mo ay nasa</span>
+                                              <span className="font-black text-[#2F0A1E]">{item.boxText}</span>
+                                            </>
+                                          ) : null}
+                                          {item.suffix ? <span className="ml-1">{item.suffix}</span> : null}
+                                        </>
+                                      )}
                                     </span>
                                   ))}
                                 </div>

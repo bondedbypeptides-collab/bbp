@@ -461,7 +461,7 @@ const buildProductInfo = (productName) => {
   const tagBenefits = tags.flatMap(tag => TAG_BENEFIT_MAP[tag] || []);
   const benefits = Array.from(new Set([...(base.benefits || []), ...tagBenefits])).slice(0, 3);
   const shortDesc = base.desc.length > 120 ? `${base.desc.slice(0, 117)}...` : base.desc;
-  const protectionNote = "Full 10-vial kits are protected. Loose orders become likely safe only if may 3-box gap pa sa likod. If wala, puwede pa ma-trim.";
+  const protectionNote = "Full 10-vial kits are protected. Loose orders become likely safe only if may 2-box gap pa sa likod. If wala, puwede pa ma-trim.";
 
   const productInfo = {
     name: base.name || productName,
@@ -1476,9 +1476,9 @@ export default function App() {
             const usedSlots = slotCursor % SLOTS_PER_BATCH;
             const slotsAvailable = usedSlots === 0 ? SLOTS_PER_BATCH : (SLOTS_PER_BATCH - usedSlots);
             const allocatedQty = Math.min(looseRemaining, slotsAvailable);
-            const hasThreeBoxBuffer = (totalBoxes - boxNumber) >= 3;
+            const hasTwoBoxBuffer = (totalBoxes - boxNumber) >= 2;
 
-            if (hasThreeBoxBuffer) {
+            if (hasTwoBoxBuffer) {
               customerBuckets[email].likelySafeQty += allocatedQty;
               customerBuckets[email].likelySafeBoxes.push(boxNumber);
             } else {
@@ -4704,7 +4704,12 @@ export default function App() {
         description: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
           ? 'Ito ang safe na part ng order mo. Hindi na ito ang unang gagalawin sa normal buyer edits.'
           : 'Ito ang pinaka-safe na part ng order mo ngayon.',
-        items: protectedKitProducts.map((row) => `${row.product} - ${row.protectedQty} vial${row.protectedQty === 1 ? '' : 's'} safe na${row.protectedKits > 0 ? ` (${row.protectedKits} full kit${row.protectedKits === 1 ? '' : 's'})` : ''}`),
+        items: protectedKitProducts.map((row) => ({
+          key: `protected-${row.product}`,
+          product: row.product,
+          qtyText: `${row.protectedQty} vial${row.protectedQty === 1 ? '' : 's'}`,
+          suffix: `safe na${row.protectedKits > 0 ? ` (${row.protectedKits} full kit${row.protectedKits === 1 ? '' : 's'})` : ''}`
+        })),
         emptyText: 'Wala pang safe na protected qty dito.',
         subtotalPHP: getSectionSubtotalPHP(protectionRows, (row) => row.protectedQty),
         subtotalLabel: 'Protected total'
@@ -4713,13 +4718,19 @@ export default function App() {
         key: 'likely-safe',
         title: 'Likely safe',
         tone: 'amber',
-        description: 'Loose pa ito, pero may 3-box gap pa sa likod mo right now, so likely safe ka for now.',
+        description: 'Loose pa ito, pero may 2-box gap pa sa likod mo right now, so likely safe ka for now.',
         items: likelySafeProducts.map((row) => {
           const boxNumbers = Array.isArray(row.boxNumbers) ? row.boxNumbers.filter(Boolean) : [];
           const firstBox = boxNumbers[0] || row.openBoxNumber;
           const lastBox = boxNumbers[boxNumbers.length - 1] || firstBox;
           const boxLabel = firstBox === lastBox ? `Box ${firstBox}` : `Boxes ${firstBox}-${lastBox}`;
-          return `${row.product} - ${row.qty} vial${row.qty === 1 ? '' : 's'}: ${boxLabel} ka out of ${row.totalBoxes} completed boxes, so likely safe ka for now.`;
+          return {
+            key: `likely-safe-${row.product}-${boxLabel}`,
+            product: row.product,
+            qtyText: `${row.qty} vial${row.qty === 1 ? '' : 's'}`,
+            boxText: `${boxLabel} out of ${row.totalBoxes} completed boxes`,
+            suffix: 'likely safe ka for now.'
+          };
         }),
         emptyText: 'Walang qty na nasa likely safe lane ngayon.',
         subtotalPHP: getSectionSubtotalPHP(likelySafeProducts, (row) => row.qty),
@@ -4729,13 +4740,19 @@ export default function App() {
         key: 'waiting',
         title: 'At-risk loose vials',
         tone: 'rose',
-        description: 'Loose pa ito at wala pang 3-box gap sa likod mo. If may mag-cancel or magbawas sa likod, puwede ka pa ma-trim.',
+        description: 'Loose pa ito at wala pang 2-box gap sa likod mo. If may mag-cancel or magbawas sa likod, puwede ka pa ma-trim.',
         items: atRiskLooseProducts.map((row) => {
           const boxNumbers = Array.isArray(row.boxNumbers) ? row.boxNumbers.filter(Boolean) : [];
           const firstBox = boxNumbers[0] || Math.max(1, row.totalBoxes);
           const lastBox = boxNumbers[boxNumbers.length - 1] || firstBox;
           const boxLabel = firstBox === lastBox ? `Box ${firstBox}` : `Boxes ${firstBox}-${lastBox}`;
-          return `${row.product} - ${row.qty} vial${row.qty === 1 ? '' : 's'}: ${boxLabel} ka out of ${row.totalBoxes} completed boxes, so puwedeng ma-trim.`;
+          return {
+            key: `at-risk-${row.product}-${boxLabel}`,
+            product: row.product,
+            qtyText: `${row.qty} vial${row.qty === 1 ? '' : 's'}`,
+            boxText: `${boxLabel} out of ${row.totalBoxes} completed boxes`,
+            suffix: 'puwedeng ma-trim.'
+          };
         }),
         emptyText: 'Walang loose vials na at risk ngayon.',
         subtotalPHP: getSectionSubtotalPHP(atRiskLooseProducts, (row) => row.qty),
@@ -4749,8 +4766,8 @@ export default function App() {
         label: `${totalProtected} vial${totalProtected === 1 ? '' : 's'} safe na`,
         detail: 'Safe ang saved qty mo ngayon. Full 10-vial kit lane ito.',
         note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
-          ? 'Meaning ng labels: Protected = safe na. Likely Safe = mukhang safe pero puwede pa gumalaw. At Risk = puwedeng ma-trim.'
-          : 'Meaning ng labels: Protected = safe na. Likely Safe = mukhang safe pero puwede pa gumalaw. At Risk = puwedeng ma-trim.',
+          ? 'Meaning ng labels: status is based on box position, not just vial count. Same product can appear in both sections if part of your qty is earlier and part is near the tail.'
+          : 'Meaning ng labels: status is based on box position, not just vial count. Same product can appear in both sections if part of your qty is earlier and part is near the tail.',
         sections
       };
     }
@@ -4759,10 +4776,10 @@ export default function App() {
       return {
         tone: 'amber',
         label: `${totalProtected} protected, ${totalLikelySafe} likely safe, ${totalAtRisk} at risk`,
-        detail: `${looseProducts} product${looseProducts === 1 ? '' : 's'} mo may loose qty pa. Full 10-vial kits stay protected. Loose qty is likely safe only if may 3-box gap pa sa likod.`,
+        detail: `${looseProducts} product${looseProducts === 1 ? '' : 's'} mo may loose qty pa. Full 10-vial kits stay protected. Loose qty is likely safe only if may 2-box gap pa sa likod.`,
         note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
-          ? 'Example: if may old 4 ka na safe na, tapos nag-add ka later ng 3, yung new 3 ang mas puwedeng ma-trim if hindi mapuno ang box.'
-          : 'Example: if may old 4 ka na safe na, tapos nag-add ka later ng 3, yung new 3 ang mas puwedeng ma-trim if hindi mapuno ang box.',
+          ? 'Status is based on box position, not just vial count. Same product can appear in both sections if part of your qty is earlier and part is near the tail.'
+          : 'Status is based on box position, not just vial count. Same product can appear in both sections if part of your qty is earlier and part is near the tail.',
         sections
       };
     }
@@ -4771,11 +4788,11 @@ export default function App() {
       tone: totalLikelySafe > 0 ? 'amber' : 'rose',
       label: `${totalLikelySafe} likely safe, ${totalAtRisk} at risk`,
       detail: totalLikelySafe > 0
-        ? 'Loose pa ang qty mo, pero may 3-box gap pa sa likod mo right now, so likely safe ka for now.'
+        ? 'Loose pa ang qty mo, pero may 2-box gap pa sa likod mo right now, so likely safe ka for now.'
         : 'Saved qty mo is still near the tail, so puwede pa ma-trim if may mag-cancel, magbawas, or if hindi mapuno ang box.',
       note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
-        ? 'Simple rule: full 10-vial kits are protected. Loose qty becomes likely safe only if may 3-box gap pa sa likod. If wala, at risk pa rin.'
-        : 'Simple rule: full 10-vial kits are protected. Loose qty becomes likely safe only if may 3-box gap pa sa likod. If wala, at risk pa rin.',
+        ? 'Status is based on box position, not just vial count. Same product can appear in both sections if part of your qty is earlier and part is near the tail.'
+        : 'Status is based on box position, not just vial count. Same product can appear in both sections if part of your qty is earlier and part is near the tail.',
       sections
     };
   }, [existingMap, hasExistingOrder, normalizedCustomerEmail, productPriorityAnalysis, productsByName, settings.addOnly, settings.fxRate, settings.paymentsOpen, settings.reviewStageOpen]);
@@ -4845,7 +4862,7 @@ export default function App() {
     : 'Save your address early from Profile & Address.';
   const orderCardProtectionCopy = settings.addOnly
     ? 'Only increases are allowed right now so loose kits do not get worse.'
-    : '10 vials = protected. Loose orders need a 3-box gap behind them first to become likely safe.';
+    : '10 vials = protected. Loose orders need a 2-box gap behind them first to become likely safe.';
   const protectionAnnouncement = settings.addOnly
     ? {
       title: 'Add-Only Rule',
@@ -4860,7 +4877,9 @@ export default function App() {
       lines: [
         'If you buy 10 of the same product, full kit yan, so protected yan.',
         'If less than 10, loose order yan, so puwede pa gumalaw.',
-        'Loose orders become likely safe only if may 3-box gap pa sa likod nila.',
+        'Loose orders become likely safe only if may 2-box gap pa sa likod nila.',
+        'Status is based on box position, not just vial count.',
+        'Same product can appear in both sections if part of your qty is earlier and part is near the tail.',
         'If may old qty ka na hindi ginalaw, it keeps its old place.',
         'If nag-add ka later, yung new add-on ang mas puwedeng gumalaw first if hindi mapuno ang box.'
       ]
