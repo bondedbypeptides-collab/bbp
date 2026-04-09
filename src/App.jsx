@@ -4751,7 +4751,7 @@ export default function App() {
             product: row.product,
             qtyText: `${row.qty} vial${row.qty === 1 ? '' : 's'}`,
             boxText: `${boxLabel} right now`,
-            suffix: `${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} so far, so puwedeng ma-trim.`
+            suffix: `${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} so far.`
           };
         }),
         emptyText: 'Walang loose vials na at risk ngayon.',
