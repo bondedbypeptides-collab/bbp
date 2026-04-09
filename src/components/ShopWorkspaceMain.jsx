@@ -237,8 +237,16 @@ export default function ShopWorkspaceMain({
                                     : 'border-rose-200 bg-rose-50/80'
                               }`}
                             >
-                              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[#4A042A]">{section.title}</p>
-                              <p className="mt-1 text-[11px] font-bold leading-relaxed text-[#8F2C5D]">{section.description}</p>
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[#4A042A]">{section.title}</p>
+                                  <p className="mt-1 text-[11px] font-bold leading-relaxed text-[#8F2C5D]">{section.description}</p>
+                                </div>
+                                <div className="shrink-0 rounded-[14px] border border-white/90 bg-white/90 px-3 py-2 shadow-sm">
+                                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">{section.subtotalLabel}</p>
+                                  <p className="mt-1 text-sm font-black text-[#4A042A]">{"\u20B1"}{Number(section.subtotalPHP || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                </div>
+                              </div>
                               {section.items.length > 0 ? (
                                 <div className="mt-2 flex flex-wrap gap-1.5">
                                   {section.items.map((item) => (

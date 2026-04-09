@@ -4418,9 +4418,15 @@ export default function App() {
           product,
           qty,
           atRiskQty,
-          protectedQty: Math.max(qty - atRiskQty, 0)
+          protectedQty: Math.max(qty - atRiskQty, 0),
+          pricePerVialUSD: Number(productsByName[product]?.pricePerVialUSD || 0)
         };
       });
+
+    const getSectionSubtotalPHP = (rows, quantitySelector) => {
+      const subtotalUSD = rows.reduce((sum, row) => sum + (Number(quantitySelector(row) || 0) * Number(row.pricePerVialUSD || 0)), 0);
+      return Number((subtotalUSD * Number(settings.fxRate || 0)).toFixed(2));
+    };
 
     const totalSaved = protectedRows.reduce((sum, row) => sum + row.qty, 0);
     const totalAtRisk = protectedRows.reduce((sum, row) => sum + row.atRiskQty, 0);
@@ -4436,6 +4442,7 @@ export default function App() {
       .filter((row) => row.protectedQty > 0 && row.atRiskQty > 0)
       .map((row) => ({
         product: row.product,
+        slotsLeft: Number(enrichedProductsByName[row.product]?.slotsLeft || 0),
         protectedKits: Math.floor(row.protectedQty / 10),
         extraProtectedVials: row.protectedQty % 10,
         protectedQty: row.protectedQty,
@@ -4445,40 +4452,70 @@ export default function App() {
       .filter((row) => row.atRiskQty > 0)
       .map((row) => ({
         product: row.product,
+        slotsLeft: Number(enrichedProductsByName[row.product]?.slotsLeft || 0),
         atRiskQty: row.atRiskQty
       }));
+    const nearlyCompleteProducts = incompleteProducts.filter((row) => row.slotsLeft > 0 && row.slotsLeft <= 2);
+    const atRiskLooseProducts = incompleteProducts.filter((row) => row.slotsLeft === 0 || row.slotsLeft > 2);
 
     if (totalSaved === 0) return null;
 
     const sections = [
       {
         key: 'protected',
-        title: 'Protected kits',
+        title: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen ? 'Locked-in kits' : 'Currently protected',
         tone: 'emerald',
-        description: 'These full kits are already protected. They are the safe part of your saved order.',
+        description: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
+          ? 'These full kits are locked in now. Buyers cannot reduce them anymore through the normal order flow.'
+          : 'These full kits are in completed boxes right now. They are the safest part of your order, but changes are still possible until buyer edits are restricted.',
         items: protectedKitProducts.map((row) => `${row.product} - ${row.protectedKits} protected kit${row.protectedKits === 1 ? '' : 's'}`),
-        emptyText: 'No full protected kits yet.'
+        emptyText: 'No full protected kits yet.',
+        subtotalPHP: getSectionSubtotalPHP(protectedRows, (row) => Math.floor(row.protectedQty / 10) * 10),
+        subtotalLabel: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen ? 'Locked-in total' : 'Current protected total'
       },
       {
         key: 'partial',
-        title: 'Partially protected kits',
+        title: 'Almost complete',
         tone: 'amber',
-        description: 'These products already have some protected kits, but part of your saved quantity is still in an open box. If other buyers cancel or reduce from that same box, those loose vials can be affected. If the box fills instead, they become protected too.',
-        items: partialProtectionProducts.map((row) => {
+        description: 'These products are close to finishing the next box, so they are likely to stay. They are still not guaranteed yet, because other buyers in that same box can still reduce or cancel before cutoff.',
+        items: partialProtectionProducts
+          .filter((row) => row.slotsLeft > 0 && row.slotsLeft <= 2)
+          .map((row) => {
           const protectedLabel = row.protectedKits > 0
             ? `${row.protectedKits} protected kit${row.protectedKits === 1 ? '' : 's'}`
             : `${row.extraProtectedVials} protected vial${row.extraProtectedVials === 1 ? '' : 's'}`;
-          return `${row.product} - ${protectedLabel}, ${row.atRiskQty} still waiting`;
-        }),
-        emptyText: 'No partially protected kits right now.'
+          return `${row.product} - ${protectedLabel}, ${row.atRiskQty} more vial${row.atRiskQty === 1 ? '' : 's'} still waiting, ${row.slotsLeft} slot${row.slotsLeft === 1 ? '' : 's'} left`;
+        })
+          .concat(
+            nearlyCompleteProducts
+              .filter((row) => !partialProtectionProducts.some((partialRow) => partialRow.product === row.product))
+              .map((row) => `${row.product} - ${row.atRiskQty} vial${row.atRiskQty === 1 ? '' : 's'} still waiting, ${row.slotsLeft} slot${row.slotsLeft === 1 ? '' : 's'} left`)
+          ),
+        emptyText: 'Nothing is close enough to call almost complete right now.',
+        subtotalPHP: getSectionSubtotalPHP(
+          protectedRows.filter((row) => {
+            const slotsLeft = Number(enrichedProductsByName[row.product]?.slotsLeft || 0);
+            return row.atRiskQty > 0 && slotsLeft > 0 && slotsLeft <= 2;
+          }),
+          (row) => row.atRiskQty
+        ),
+        subtotalLabel: 'Likely-to-complete total'
       },
       {
         key: 'waiting',
         title: 'At-risk loose vials',
         tone: 'rose',
         description: 'These saved vials are not in a full protected kit yet, so they can still move while ordering is open.',
-        items: incompleteProducts.map((row) => `${row.product} - ${row.atRiskQty} still waiting`),
-        emptyText: 'No loose vials at risk right now.'
+        items: atRiskLooseProducts.map((row) => `${row.product} - ${row.atRiskQty} vial${row.atRiskQty === 1 ? '' : 's'} still waiting`),
+        emptyText: 'No loose vials at risk right now.',
+        subtotalPHP: getSectionSubtotalPHP(
+          protectedRows.filter((row) => {
+            const slotsLeft = Number(enrichedProductsByName[row.product]?.slotsLeft || 0);
+            return row.atRiskQty > 0 && (slotsLeft === 0 || slotsLeft > 2);
+          }),
+          (row) => row.atRiskQty
+        ),
+        subtotalLabel: 'At-risk total'
       }
     ];
 
@@ -4488,8 +4525,8 @@ export default function App() {
         label: `${totalProtected} saved vial${totalProtected === 1 ? '' : 's'} currently protected`,
         detail: 'Nothing in your saved order is on the loose-vial risk list right now.',
         note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
-          ? 'Based on the current saved batch.'
-          : 'Current estimate while ordering is still open.',
+          ? 'These numbers are locked to the current saved batch.'
+          : 'Current estimate while ordering is still open. Only completed kits are the safest part; the rest can still move until edits are restricted.',
         sections
       };
     }
@@ -4501,7 +4538,7 @@ export default function App() {
         detail: `${atRiskProducts} product${atRiskProducts === 1 ? '' : 's'} in your saved order still depend on the next box filling.`,
         note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
           ? 'Check the hit list before payments open.'
-          : 'Current estimate while ordering is still open.',
+          : 'Current estimate while ordering is still open. Only completed kits are the safest part; the rest can still move until edits are restricted.',
         sections
       };
     }
@@ -4512,10 +4549,10 @@ export default function App() {
       detail: 'Your saved order is currently on the loose-vial risk list and may still change before cutoff.',
       note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
         ? 'Check the hit list before payments open.'
-        : 'Current estimate while ordering is still open.',
+        : 'Current estimate while ordering is still open. Only completed kits are the safest part; the rest can still move until edits are restricted.',
       sections
     };
-  }, [existingMap, hasExistingOrder, normalizedCustomerEmail, settings.addOnly, settings.paymentsOpen, settings.reviewStageOpen, trimmingHitList]);
+  }, [enrichedProductsByName, existingMap, hasExistingOrder, normalizedCustomerEmail, productsByName, settings.addOnly, settings.fxRate, settings.paymentsOpen, settings.reviewStageOpen, trimmingHitList]);
   const isCartEditable = !settings.paymentsOpen && !settings.reviewStageOpen && settings.storeOpen !== false;
   const isHitListSaveReady = Boolean(
     customerName.trim() &&
