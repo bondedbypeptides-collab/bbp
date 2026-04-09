@@ -1,0 +1,42 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Local Codex / preview scratch files
+.artifacts/
+.npm-cache/
+.restore-points/
+.live-*.json
+.live-*.log
+.resume-*.log
+.resume-*.json
+.pilot-*.log
+.preview-*.log
+.preview-*.err.log
+.vite-dev*.log
+.live100-*.log
+.live50-*.log
+.livecheck-*.json
+.regression-*.json
+tmp-proof.png
