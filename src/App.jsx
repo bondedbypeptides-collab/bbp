@@ -461,7 +461,7 @@ const buildProductInfo = (productName) => {
   const tagBenefits = tags.flatMap(tag => TAG_BENEFIT_MAP[tag] || []);
   const benefits = Array.from(new Set([...(base.benefits || []), ...tagBenefits])).slice(0, 3);
   const shortDesc = base.desc.length > 120 ? `${base.desc.slice(0, 117)}...` : base.desc;
-  const protectionNote = "Full 10-vial kits are protected. Loose orders become likely safe after 3 completed boxes. Before that, puwede pa ma-trim.";
+  const protectionNote = "Full 10-vial kits are protected. Loose orders become likely safe only if may 3-box gap pa sa likod. If wala, puwede pa ma-trim.";
 
   const productInfo = {
     name: base.name || productName,
@@ -1390,6 +1390,11 @@ export default function App() {
           .sort(compareOrdersOldestFirst);
         const totalQty = normalizedRows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
         const completedBoxes = Math.floor(totalQty / SLOTS_PER_BATCH);
+        const totalBoxes = Math.max(
+          Math.ceil(totalQty / SLOTS_PER_BATCH),
+          Number(productsByName[product]?.maxBoxes || 0),
+          1
+        );
         const totalToTrim = totalQty % SLOTS_PER_BATCH;
         const missingSlots = totalToTrim > 0 ? SLOTS_PER_BATCH - totalToTrim : 0;
         const openBoxNumber = completedBoxes + 1;
@@ -1444,12 +1449,17 @@ export default function App() {
         });
 
         const customerBuckets = {};
+        let slotCursor = 0;
         fragments.forEach((fragment) => {
           const email = fragment.row.email;
           if (!customerBuckets[email]) {
             customerBuckets[email] = {
               protectedQty: 0,
               looseQty: 0,
+              likelySafeQty: 0,
+              atRiskQty: 0,
+              likelySafeBoxes: [],
+              atRiskBoxes: [],
               totalQty: 0
             };
           }
@@ -1457,12 +1467,35 @@ export default function App() {
           customerBuckets[email].protectedQty += Number(fragment.protectedQty || 0);
           customerBuckets[email].looseQty += Number(fragment.looseQty || 0);
           customerBuckets[email].totalQty += Number(fragment.row.qty || 0);
+
+          slotCursor += Number(fragment.protectedQty || 0);
+
+          let looseRemaining = Number(fragment.looseQty || 0);
+          while (looseRemaining > 0) {
+            const boxNumber = Math.floor(slotCursor / SLOTS_PER_BATCH) + 1;
+            const usedSlots = slotCursor % SLOTS_PER_BATCH;
+            const slotsAvailable = usedSlots === 0 ? SLOTS_PER_BATCH : (SLOTS_PER_BATCH - usedSlots);
+            const allocatedQty = Math.min(looseRemaining, slotsAvailable);
+            const hasThreeBoxBuffer = (totalBoxes - boxNumber) >= 3;
+
+            if (hasThreeBoxBuffer) {
+              customerBuckets[email].likelySafeQty += allocatedQty;
+              customerBuckets[email].likelySafeBoxes.push(boxNumber);
+            } else {
+              customerBuckets[email].atRiskQty += allocatedQty;
+              customerBuckets[email].atRiskBoxes.push(boxNumber);
+            }
+
+            looseRemaining -= allocatedQty;
+            slotCursor += allocatedQty;
+          }
         });
 
         return [product, {
           product,
           totalQty,
           completedBoxes,
+          totalBoxes,
           openBoxNumber,
           missingSlots,
           totalToTrim,
@@ -1472,7 +1505,7 @@ export default function App() {
         }];
       })
     );
-  }, [orders]);
+  }, [orders, productsByName]);
 
   const trimmingHitList = useMemo(() => {
     return Object.values(productPriorityAnalysis)
@@ -4598,8 +4631,8 @@ export default function App() {
         const customerBuckets = analysis?.customerBuckets?.[normalizedCustomerEmail] || {};
         const protectedQty = Number(customerBuckets.protectedQty || 0);
         const looseQty = Number(customerBuckets.looseQty || 0);
-        const likelySafeQty = Number(analysis?.completedBoxes || 0) >= 3 ? looseQty : 0;
-        const atRiskQty = Number(analysis?.completedBoxes || 0) >= 3 ? 0 : looseQty;
+        const likelySafeQty = Number(customerBuckets.likelySafeQty || 0);
+        const atRiskQty = Number(customerBuckets.atRiskQty || 0);
         const totalQty = Number(customerBuckets.totalQty || qty || 0);
 
         return {
@@ -4610,6 +4643,14 @@ export default function App() {
           protectedQty,
           pricePerVialUSD: Number(productsByName[product]?.pricePerVialUSD || 0),
           completedBoxes: Number(analysis?.completedBoxes || 0),
+          openBoxNumber: Number(analysis?.openBoxNumber || 1),
+          totalBoxes: Math.max(
+            Number(analysis?.totalBoxes || 0),
+            Number(productsByName[product]?.maxBoxes || 0),
+            Number(analysis?.openBoxNumber || 1)
+          ),
+          likelySafeBoxes: Array.from(new Set(customerBuckets.likelySafeBoxes || [])),
+          atRiskBoxes: Array.from(new Set(customerBuckets.atRiskBoxes || [])),
           trimPriority: likelySafeQty > 0 ? 'likely-safe' : 'loose'
         };
       });
@@ -4637,7 +4678,10 @@ export default function App() {
         product: row.product,
         qty: row.likelySafeQty,
         pricePerVialUSD: row.pricePerVialUSD,
-        completedBoxes: row.completedBoxes
+        completedBoxes: row.completedBoxes,
+        openBoxNumber: row.openBoxNumber,
+        totalBoxes: row.totalBoxes,
+        boxNumbers: row.likelySafeBoxes
       }));
     const atRiskLooseProducts = protectionRows
       .filter((row) => row.atRiskQty > 0)
@@ -4645,7 +4689,9 @@ export default function App() {
         product: row.product,
         qty: row.atRiskQty,
         pricePerVialUSD: row.pricePerVialUSD,
-        completedBoxes: row.completedBoxes
+        completedBoxes: row.completedBoxes,
+        boxNumbers: row.atRiskBoxes,
+        totalBoxes: row.totalBoxes
       }));
 
     if (totalSaved === 0) return null;
@@ -4667,8 +4713,14 @@ export default function App() {
         key: 'likely-safe',
         title: 'Likely safe',
         tone: 'amber',
-        description: 'Loose pa ito, pero may 3 or more completed boxes na ang product na ito. Mukhang safe na, pero puwede pa rin gumalaw if may cancellations or bawas.',
-        items: likelySafeProducts.map((row) => `${row.product} - ${row.qty} vial${row.qty === 1 ? '' : 's'} mukhang safe (${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} closed)`),
+        description: 'Loose pa ito, pero may 3-box gap pa sa likod mo right now, so likely safe ka for now.',
+        items: likelySafeProducts.map((row) => {
+          const boxNumbers = Array.isArray(row.boxNumbers) ? row.boxNumbers.filter(Boolean) : [];
+          const firstBox = boxNumbers[0] || row.openBoxNumber;
+          const lastBox = boxNumbers[boxNumbers.length - 1] || firstBox;
+          const boxLabel = firstBox === lastBox ? `Box ${firstBox}` : `Boxes ${firstBox}-${lastBox}`;
+          return `${row.product} - ${row.qty} vial${row.qty === 1 ? '' : 's'}: ${boxLabel} ka out of ${row.totalBoxes} completed boxes, so likely safe ka for now.`;
+        }),
         emptyText: 'Walang qty na nasa likely safe lane ngayon.',
         subtotalPHP: getSectionSubtotalPHP(likelySafeProducts, (row) => row.qty),
         subtotalLabel: 'Likely safe total'
@@ -4677,8 +4729,14 @@ export default function App() {
         key: 'waiting',
         title: 'At-risk loose vials',
         tone: 'rose',
-        description: 'Loose pa ito sa current open box. If hindi mapuno ang box, ito ang puwedeng ma-trim.',
-        items: atRiskLooseProducts.map((row) => `${row.product} - ${row.qty} vial${row.qty === 1 ? '' : 's'} puwedeng ma-trim (${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} closed)`),
+        description: 'Loose pa ito at wala pang 3-box gap sa likod mo. If may mag-cancel or magbawas sa likod, puwede ka pa ma-trim.',
+        items: atRiskLooseProducts.map((row) => {
+          const boxNumbers = Array.isArray(row.boxNumbers) ? row.boxNumbers.filter(Boolean) : [];
+          const firstBox = boxNumbers[0] || Math.max(1, row.totalBoxes);
+          const lastBox = boxNumbers[boxNumbers.length - 1] || firstBox;
+          const boxLabel = firstBox === lastBox ? `Box ${firstBox}` : `Boxes ${firstBox}-${lastBox}`;
+          return `${row.product} - ${row.qty} vial${row.qty === 1 ? '' : 's'}: ${boxLabel} ka out of ${row.totalBoxes} completed boxes, so puwedeng ma-trim.`;
+        }),
         emptyText: 'Walang loose vials na at risk ngayon.',
         subtotalPHP: getSectionSubtotalPHP(atRiskLooseProducts, (row) => row.qty),
         subtotalLabel: 'At-risk total'
@@ -4701,7 +4759,7 @@ export default function App() {
       return {
         tone: 'amber',
         label: `${totalProtected} protected, ${totalLikelySafe} likely safe, ${totalAtRisk} at risk`,
-        detail: `${looseProducts} product${looseProducts === 1 ? '' : 's'} mo nasa current open box pa. Full 10-vial kits stay protected. Loose qty becomes likely safe only after 3 completed boxes.`,
+        detail: `${looseProducts} product${looseProducts === 1 ? '' : 's'} mo may loose qty pa. Full 10-vial kits stay protected. Loose qty is likely safe only if may 3-box gap pa sa likod.`,
         note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
           ? 'Example: if may old 4 ka na safe na, tapos nag-add ka later ng 3, yung new 3 ang mas puwedeng ma-trim if hindi mapuno ang box.'
           : 'Example: if may old 4 ka na safe na, tapos nag-add ka later ng 3, yung new 3 ang mas puwedeng ma-trim if hindi mapuno ang box.',
@@ -4713,11 +4771,11 @@ export default function App() {
       tone: totalLikelySafe > 0 ? 'amber' : 'rose',
       label: `${totalLikelySafe} likely safe, ${totalAtRisk} at risk`,
       detail: totalLikelySafe > 0
-        ? 'Loose pa ang qty mo, pero may 3 or more completed boxes na ang product na ito. Mukhang safe na, pero hindi pa final.'
-        : 'Loose pa ang saved qty mo ngayon, so puwede pa ito ma-trim if hindi mapuno ang box.',
+        ? 'Loose pa ang qty mo, pero may 3-box gap pa sa likod mo right now, so likely safe ka for now.'
+        : 'Saved qty mo is still near the tail, so puwede pa ma-trim if may mag-cancel, magbawas, or if hindi mapuno ang box.',
       note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
-        ? 'Simple rule: full 10-vial kits are protected. Loose orders become likely safe after 3 completed boxes. Before that, they stay at risk.'
-        : 'Simple rule: full 10-vial kits are protected. Loose orders become likely safe after 3 completed boxes. Before that, they stay at risk.',
+        ? 'Simple rule: full 10-vial kits are protected. Loose qty becomes likely safe only if may 3-box gap pa sa likod. If wala, at risk pa rin.'
+        : 'Simple rule: full 10-vial kits are protected. Loose qty becomes likely safe only if may 3-box gap pa sa likod. If wala, at risk pa rin.',
       sections
     };
   }, [existingMap, hasExistingOrder, normalizedCustomerEmail, productPriorityAnalysis, productsByName, settings.addOnly, settings.fxRate, settings.paymentsOpen, settings.reviewStageOpen]);
@@ -4787,7 +4845,7 @@ export default function App() {
     : 'Save your address early from Profile & Address.';
   const orderCardProtectionCopy = settings.addOnly
     ? 'Only increases are allowed right now so loose kits do not get worse.'
-    : '10 vials = protected. Loose orders need 3 completed boxes first to become likely safe.';
+    : '10 vials = protected. Loose orders need a 3-box gap behind them first to become likely safe.';
   const protectionAnnouncement = settings.addOnly
     ? {
       title: 'Add-Only Rule',
@@ -4802,7 +4860,7 @@ export default function App() {
       lines: [
         'If you buy 10 of the same product, full kit yan, so protected yan.',
         'If less than 10, loose order yan, so puwede pa gumalaw.',
-        'Loose orders become likely safe only after that product already has 3 completed boxes.',
+        'Loose orders become likely safe only if may 3-box gap pa sa likod nila.',
         'If may old qty ka na hindi ginalaw, it keeps its old place.',
         'If nag-add ka later, yung new add-on ang mas puwedeng gumalaw first if hindi mapuno ang box.'
       ]
