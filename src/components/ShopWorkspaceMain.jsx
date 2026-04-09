@@ -77,8 +77,8 @@ export default function ShopWorkspaceMain({
         {isCurrentUserAtRisk && (
           <div className="glass-note border border-rose-300 p-4 rounded-[22px] shadow-sm animate-pulse flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <h3 className="text-rose-700 font-black text-sm mb-1">Your vials are at risk</h3>
-              <p className="text-xs text-rose-600 font-bold">You have loose vials on the hit list. If the box does not fill, those loose vials may be cut. Try to help fill the box first.</p>
+              <h3 className="text-rose-700 font-black text-sm mb-1">Your loose vials need buffer</h3>
+              <p className="text-xs text-rose-600 font-bold">Wala pang enough buffer ang loose vials mo. We encourage you to add more or find others para makumpleto ang box.</p>
             </div>
             <button onClick={onOpenHitList} className="bg-rose-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md hover:bg-rose-700 whitespace-nowrap transition-transform hover:scale-105">
               View hit list
