@@ -728,7 +728,7 @@ export default function App() {
   const isShopView = view === 'shop';
   const isAdminView = view === 'admin';
   const adminOrdersTabs = ['overview', 'active-orders', 'payments', 'audit', 'packing', 'trimming', 'customers', 'settings-core'];
-  const adminProductsTabs = ['overview', 'packing', 'trimming', 'settings-products', 'settings-core'];
+  const adminProductsTabs = ['overview', 'active-orders', 'payments', 'audit', 'packing', 'trimming', 'customers', 'settings-products', 'settings-core'];
   const adminUsersTabs = ['overview', 'active-orders', 'payments', 'audit', 'customers', 'settings-core'];
   const adminNeedsOrders = isAdminAuthenticated && adminOrdersTabs.includes(adminTab);
   const adminNeedsProducts = isAdminAuthenticated && adminProductsTabs.includes(adminTab);
