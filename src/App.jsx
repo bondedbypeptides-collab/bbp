@@ -461,7 +461,7 @@ const buildProductInfo = (productName) => {
   const tagBenefits = tags.flatMap(tag => TAG_BENEFIT_MAP[tag] || []);
   const benefits = Array.from(new Set([...(base.benefits || []), ...tagBenefits])).slice(0, 3);
   const shortDesc = base.desc.length > 120 ? `${base.desc.slice(0, 117)}...` : base.desc;
-  const protectionNote = "Full 10-vial kits are protected. Likely Safe means may 2 boxes pa sa likod mo, so hindi ka masyadong malapit sa tail.";
+  const protectionNote = "Full 10-vial kits are protected. If malayo na ang loose qty mo sa current open box, safe ka for now.";
 
   const productInfo = {
     name: base.name || productName,
@@ -1476,9 +1476,9 @@ export default function App() {
             const usedSlots = slotCursor % SLOTS_PER_BATCH;
             const slotsAvailable = usedSlots === 0 ? SLOTS_PER_BATCH : (SLOTS_PER_BATCH - usedSlots);
             const allocatedQty = Math.min(looseRemaining, slotsAvailable);
-            const hasTwoBoxBuffer = (totalBoxes - boxNumber) >= 2;
+            const isOutsideCurrentOpenBox = boxNumber < openBoxNumber;
 
-            if (hasTwoBoxBuffer) {
+            if (isOutsideCurrentOpenBox) {
               customerBuckets[email].likelySafeQty += allocatedQty;
               customerBuckets[email].likelySafeBoxes.push(boxNumber);
             } else {
@@ -1521,7 +1521,7 @@ export default function App() {
     if (!trimmingHitList.length) {
       return [
         'Loose Vial Hit List',
-        'No one currently needs trimming support.'
+        'No loose vials are currently sitting in the open box.'
       ].join('\n');
     }
 
@@ -1549,7 +1549,7 @@ export default function App() {
       lines.push(`${group.prod} - Box ${group.boxNum} needs ${group.missingSlots} more`);
       group.rows.forEach(row => {
         const label = row.handle ? `@${String(row.handle).replace(/^@+/, '')}` : row.email;
-        lines.push(`- ${label}: ${row.amountToRemove} vial${row.amountToRemove === 1 ? '' : 's'} needs buffer`);
+        lines.push(`- ${label}: ${row.amountToRemove} vial${row.amountToRemove === 1 ? '' : 's'} in open box`);
       });
       lines.push('');
     });
@@ -2596,7 +2596,7 @@ export default function App() {
 
     group.rows.forEach(row => {
       const label = row.handle ? `@${String(row.handle).replace(/^@+/, '')}` : row.email;
-      lines.push(`- ${label}: ${row.amountToRemove} vial${row.amountToRemove === 1 ? '' : 's'} needs buffer`);
+      lines.push(`- ${label}: ${row.amountToRemove} vial${row.amountToRemove === 1 ? '' : 's'} in open box`);
     });
 
     return lines.join('\n');
@@ -4718,18 +4718,20 @@ export default function App() {
         key: 'likely-safe',
         title: 'Likely safe',
         tone: 'amber',
-        description: 'Likely Safe means may 2 boxes pa sa likod mo, so hindi ka masyadong malapit sa tail right now.',
+        description: 'If malayo na ang loose qty mo sa current open box, safe ka for now.',
         items: likelySafeProducts.map((row) => {
           const boxNumbers = Array.isArray(row.boxNumbers) ? row.boxNumbers.filter(Boolean) : [];
           const firstBox = boxNumbers[0] || row.openBoxNumber;
           const lastBox = boxNumbers[boxNumbers.length - 1] || firstBox;
           const boxLabel = firstBox === lastBox ? `Box ${firstBox}` : `Boxes ${firstBox}-${lastBox}`;
+          const boxesAwayFromOpen = Math.max(Number(row.openBoxNumber || 1) - lastBox, 0);
+          const safetyText = boxesAwayFromOpen >= 3 ? 'safe na.' : 'safe ka for now.';
           return {
             key: `likely-safe-${row.product}-${boxLabel}`,
             product: row.product,
             qtyText: `${row.qty} vial${row.qty === 1 ? '' : 's'}`,
             boxText: `${boxLabel} right now`,
-            suffix: `${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} so far, so likely safe ka for now.`
+            suffix: `${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} so far, so ${safetyText}`
           };
         }),
         emptyText: 'Walang qty na nasa likely safe lane ngayon.',
@@ -4738,9 +4740,9 @@ export default function App() {
       },
       {
         key: 'waiting',
-        title: 'Needs Buffer',
+        title: 'Current Open Box',
         tone: 'rose',
-        description: 'Wala pang 2-box gap sa likod mo right now. Baka ma-trim ito, so we encourage you to add more or find others para makumpleto ang box.',
+        description: 'Nasa current open box pa ito right now. Baka ma-trim ito, so we encourage you to add more or find others para makumpleto ang box.',
         items: atRiskLooseProducts.map((row) => {
           const boxNumbers = Array.isArray(row.boxNumbers) ? row.boxNumbers.filter(Boolean) : [];
           const firstBox = boxNumbers[0] || Math.max(1, row.totalBoxes);
@@ -4754,9 +4756,9 @@ export default function App() {
             suffix: `${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} so far.`
           };
         }),
-        emptyText: 'Walang loose vials na kulang pa sa buffer ngayon.',
+        emptyText: 'Walang loose vials sa current open box ngayon.',
         subtotalPHP: getSectionSubtotalPHP(atRiskLooseProducts, (row) => row.qty),
-        subtotalLabel: 'Needs buffer total'
+        subtotalLabel: 'Current open box total'
       }
     ];
 
@@ -4775,8 +4777,8 @@ export default function App() {
     if (totalProtected > 0) {
       return {
         tone: 'amber',
-        label: `${totalProtected} protected, ${totalLikelySafe} likely safe, ${totalAtRisk} needs buffer`,
-        detail: `${looseProducts} product${looseProducts === 1 ? '' : 's'} mo may loose qty pa. Likely Safe means may 2 boxes pa sa likod mo, so hindi ka masyadong malapit sa tail.`,
+        label: `${totalProtected} protected, ${totalLikelySafe} likely safe, ${totalAtRisk} in open box`,
+        detail: `${looseProducts} product${looseProducts === 1 ? '' : 's'} mo may loose qty pa. If malayo na ang loose qty mo sa current open box, safe ka for now.`,
         note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
           ? 'Status is based on box position, not just vial count. Same product can appear in both sections if part of your qty is earlier and part is near the tail.'
           : 'Status is based on box position, not just vial count. Same product can appear in both sections if part of your qty is earlier and part is near the tail.',
@@ -4786,10 +4788,10 @@ export default function App() {
 
     return {
       tone: totalLikelySafe > 0 ? 'amber' : 'rose',
-      label: `${totalLikelySafe} likely safe, ${totalAtRisk} needs buffer`,
+        label: `${totalLikelySafe} likely safe, ${totalAtRisk} in open box`,
       detail: totalLikelySafe > 0
-        ? 'Likely Safe means may 2 boxes pa sa likod mo, so hindi ka masyadong malapit sa tail right now.'
-        : 'Wala pang 2-box gap sa likod mo right now. Baka ma-trim ito, so we encourage you to add more or find others para makumpleto ang box.',
+        ? 'If malayo na ang loose qty mo sa current open box, safe ka for now.'
+        : 'Nasa current open box pa ito right now. Baka ma-trim ito, so we encourage you to add more or find others para makumpleto ang box.',
       note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
         ? 'Status is based on box position, not just vial count. Same product can appear in both sections if part of your qty is earlier and part is near the tail.'
         : 'Status is based on box position, not just vial count. Same product can appear in both sections if part of your qty is earlier and part is near the tail.',
@@ -4862,7 +4864,7 @@ export default function App() {
     : 'Save your address early from Profile & Address.';
   const orderCardProtectionCopy = settings.addOnly
     ? 'Only increases are allowed right now so loose kits do not get worse.'
-    : '10 vials = protected. Likely Safe means may 2 boxes pa sa likod mo.';
+    : '10 vials = protected. If malayo na ang loose qty mo sa current open box, safe ka for now.';
   const protectionAnnouncement = settings.addOnly
     ? {
       title: 'Add-Only Rule',
@@ -4877,11 +4879,12 @@ export default function App() {
       lines: [
         'If you buy 10 of the same product, full kit yan, so protected yan.',
         'If less than 10, loose order yan, so puwede pa gumalaw.',
-        'Likely Safe means may 2 boxes pa sa likod mo, so hindi ka masyadong malapit sa tail.',
+        'If malayo na ang loose qty mo sa current open box, safe ka for now.',
         'Status is based on box position, not just vial count.',
         'Same product can appear in both sections if part of your qty is earlier and part is near the tail.',
         'If may old qty ka na hindi ginalaw, it keeps its old place.',
-        'If kulang pa sa buffer, we encourage you to add more or find others para makumpleto ang box.'
+        'If nasa current open box pa yung loose qty mo, puwede pa itong gumalaw if may mag-reduce or mag-cancel.',
+        'We encourage you to add more or find others para makumpleto ang box.'
       ]
     };
   const orderCardStatus = settings.paymentsOpen
@@ -6898,7 +6901,7 @@ export default function App() {
                         </div>
                       </div>
                       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-    {renderCompactAdminStat('Needs Buffer Rows', hitListSummary.rows, 'rose', 'Visible after search')}
+    {renderCompactAdminStat('Open Box Rows', hitListSummary.rows, 'rose', 'Visible after search')}
                         {renderCompactAdminStat('Products', hitListSummary.products, 'amber', 'Need fill help')}
                         {renderCompactAdminStat('Buyers', hitListSummary.customers, 'blue', 'Affected customers')}
                         {renderCompactAdminStat('Cut Risk', `${hitListSummary.riskyVials} vials`, 'pink', 'If not filled')}

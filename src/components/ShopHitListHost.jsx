@@ -114,7 +114,7 @@ export default function ShopHitListHost({
                               </span>
                               {group.myRisk && (
                                 <span className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[9px] uppercase tracking-widest text-rose-600">
-                                  yours needs buffer
+                                  yours in open box
                                 </span>
                               )}
                             </div>
@@ -151,7 +151,7 @@ export default function ShopHitListHost({
                       </summary>
                       <div className="mt-1.5 border-t border-rose-100 pt-1.5 space-y-1.5">
                         <p className="text-[10px] font-bold leading-relaxed text-slate-500">
-                          Wala pang enough buffer ang loose vials below. We encourage buyers to add more or find others para makumpleto ang box before any removals.
+                          Nasa current open box pa ang loose vials below. Puwede pa itong gumalaw if may mag-reduce or mag-cancel. We encourage buyers to add more or find others para makumpleto ang box before any removals.
                         </p>
                         {group.rows.map((row) => {
                           const isMyItem = row.email === userEmailTrimmed;
@@ -162,7 +162,7 @@ export default function ShopHitListHost({
                                 {isMyItem ? ' | yours' : ''}
                               </div>
                               <div className="shrink-0 font-black text-slate-500">
-                                needs buffer {row.amountToRemove}
+                                open box {row.amountToRemove}
                               </div>
                             </div>
                           );
