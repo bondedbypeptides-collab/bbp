@@ -18,7 +18,12 @@ export default function ProfileViewerModal({
     <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[300] flex items-center justify-center p-4">
       <div className="bg-white rounded-[32px] w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
         <div className="bg-[#FFF0F5] p-4 sm:p-5 flex justify-between items-center border-b-2 border-[#FFC0CB]">
-          <h2 className="brand-title text-2xl text-[#D6006E]">Profile & History</h2>
+          <div>
+            <h2 className="brand-title text-2xl text-[#D6006E]">Profile & History</h2>
+            <p className="mt-1 text-[10px] font-black uppercase tracking-[0.18em] text-pink-400">
+              You can save shipping details here before payments open.
+            </p>
+          </div>
           <button onClick={onClose} className="text-pink-600 font-black text-2xl hover:text-pink-800 transition-colors hover:scale-110">&times;</button>
         </div>
         <div className="p-4 sm:p-5 overflow-y-auto space-y-4 bg-slate-50 hide-scroll">
@@ -50,12 +55,13 @@ export default function ProfileViewerModal({
                       {partialShipOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </select>
                   </div>
-                  <input type="text" value={editAddressForm.street} onChange={e => setEditAddressForm({ ...editAddressForm, street: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Street & Barangay" />
+                  <input type="text" value={editAddressForm.street} onChange={e => setEditAddressForm({ ...editAddressForm, street: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Street / Lot / Bldg" />
                   <div className="grid grid-cols-2 gap-2">
+                    <input type="text" value={editAddressForm.brgy} onChange={e => setEditAddressForm({ ...editAddressForm, brgy: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Barangay" />
                     <input type="text" value={editAddressForm.city} onChange={e => setEditAddressForm({ ...editAddressForm, city: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="City" />
                     <input type="text" value={editAddressForm.prov} onChange={e => setEditAddressForm({ ...editAddressForm, prov: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Province" />
                     <input type="text" value={editAddressForm.zip} onChange={e => setEditAddressForm({ ...editAddressForm, zip: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Zip Code" />
-                    <input type="text" value={editAddressForm.contact} onChange={e => setEditAddressForm({ ...editAddressForm, contact: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Contact #" />
+                    <input type="text" value={editAddressForm.contact} onChange={e => setEditAddressForm({ ...editAddressForm, contact: e.target.value })} className="col-span-2 w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Contact #" />
                   </div>
                   <div className="flex gap-2 mt-3">
                     <button onClick={saveEditedAddress} disabled={isBtnLoading} className="flex-1 bg-[#D6006E] text-white text-[10px] font-black uppercase tracking-widest py-2 rounded-xl hover:bg-pink-700">{isBtnLoading ? 'Saving...' : 'Save'}</button>
