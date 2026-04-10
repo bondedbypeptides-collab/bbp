@@ -3731,6 +3731,84 @@ export default function App() {
     exportCustomersCSVRows(customerList);
   };
 
+  const escapeCSVCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+
+  const exportManufacturerOrderCSV = () => {
+    const headers = [
+      "Product",
+      "Total Vials Ordered",
+      "Full 10-Vial Kits",
+      "Boxes/Kits to Order",
+      "Loose Vials In Last Box",
+      "Missing To Fill Last Box",
+      "Should Order",
+      "Availability",
+      "Status",
+      "Max Boxes",
+      "Cap Type",
+      "Notes"
+    ];
+
+    let csvContent = headers.join(",") + "\n";
+
+    enrichedProducts.forEach((product) => {
+      const totalVials = Number(product.totalVials || 0);
+      const expectedBoxes = Math.ceil(totalVials / SLOTS_PER_BATCH);
+      const fullBoxes = Math.floor(totalVials / SLOTS_PER_BATCH);
+      const looseVials = totalVials % SLOTS_PER_BATCH;
+      const missingSlots = totalVials === 0 ? 0 : (looseVials === 0 ? 0 : (SLOTS_PER_BATCH - looseVials));
+      const availability = product.locked ? 'Locked' : ((product.maxBoxes || 0) > 0 ? 'Capped' : 'Open');
+      const capType = (product.maxBoxes || 0) > 0 ? (product.syncCapped ? 'Synced' : 'Manual') : '';
+
+      const notes = [];
+      if (totalVials === 0) {
+        notes.push('No current demand. Do not place a manufacturer order for this product.');
+      } else if (looseVials > 0) {
+        notes.push(`Order rounds up to ${expectedBoxes} box(es). The last box is partial with ${looseVials} vial(s) filled and ${missingSlots} slot(s) still open.`);
+      } else {
+        notes.push('Exact full-box demand. No partial box risk right now.');
+      }
+
+      if (product.locked) {
+        notes.push('Product is locked to new orders.');
+      } else if ((product.maxBoxes || 0) > 0) {
+        notes.push(`Product is capped at ${product.maxBoxes} box(es) via ${capType.toLowerCase()} cap.`);
+      }
+
+      if (product.statusText === 'Payments Open') {
+        notes.push('Payments are open, so edits are frozen.');
+      }
+
+      const row = [
+        product.name,
+        totalVials,
+        fullBoxes,
+        expectedBoxes,
+        looseVials,
+        missingSlots,
+        expectedBoxes > 0 ? 'YES' : 'NO',
+        availability,
+        product.statusText,
+        Number(product.maxBoxes || 0),
+        capType,
+        notes.join(' ')
+      ];
+
+      csvContent += row.map(escapeCSVCell).join(",") + "\n";
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `BBP_Manufacturer_Order_Summary_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    showToast(`Exported manufacturer order summary. Total physical boxes: ${totalPhysicalBoxesToReceive}.`);
+  };
+
   const clearActivityLogs = async () => {
     if (!sortedLogs.length) {
       showToast('No activity logs to clear.');
@@ -6480,6 +6558,9 @@ export default function App() {
                           <div className="mt-3 rounded-2xl border border-pink-100 bg-pink-50/70 px-3 py-3 text-[11px] font-bold text-slate-600 leading-relaxed">
                             Example: 0 vials = locked. 2 vials = cap at 1 box. 12 vials = cap at 2 boxes.
                           </div>
+                          <button onClick={exportManufacturerOrderCSV} className="mt-4 w-full rounded-2xl bg-indigo-50 text-indigo-700 font-black uppercase text-[10px] tracking-widest border border-indigo-200 py-3 hover:border-indigo-300 hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2">
+                            <ScrollText size={14} /> Export Manufacturer CSV
+                          </button>
                           <p className="mt-3 text-[11px] font-bold text-amber-700 leading-relaxed">If you need to reopen one product beyond that synced cap, click its amber <span className="uppercase tracking-widest">Capped</span> button in the table. Future syncs are now tagged so they can be undone safely.</p>
                           <button onClick={syncCurrentBoxCaps} className="mt-4 w-full rounded-2xl bg-pink-100 text-pink-600 font-black uppercase text-[10px] tracking-widest border border-pink-200 py-4 hover:bg-pink-200 transition-colors">
                             Sync Current Box Caps
@@ -6913,9 +6994,14 @@ export default function App() {
                         <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Packing Logistics Guide</h2>
                         <p className="text-sm font-black text-indigo-600 mt-1 bg-indigo-50 inline-block px-3 py-1 rounded-lg border border-indigo-100">Total Physical Boxes to Receive: {totalPhysicalBoxesToReceive}</p>
                       </div>
-                      <button onClick={generateBulkLabels} className="bg-white border-2 border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-[#D6006E] hover:text-[#D6006E] transition-colors flex items-center gap-2">
-                        <Printer size={16} /> Bulk Print Labels
-                      </button>
+                      <div className="flex gap-2 flex-wrap">
+                        <button onClick={exportManufacturerOrderCSV} className="bg-indigo-50 border-2 border-indigo-200 text-indigo-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-indigo-400 transition-colors flex items-center gap-2">
+                          <ScrollText size={16} /> Export Manufacturer CSV
+                        </button>
+                        <button onClick={generateBulkLabels} className="bg-white border-2 border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-[#D6006E] hover:text-[#D6006E] transition-colors flex items-center gap-2">
+                          <Printer size={16} /> Bulk Print Labels
+                        </button>
+                      </div>
                     </div>
                     <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
                       {renderCompactAdminStat('Pack Rows', packingSummary.rows, 'pink', 'Visible assignments')}
