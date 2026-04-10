@@ -4804,18 +4804,18 @@ export default function App() {
             qtyText: `${row.qty} vial${row.qty === 1 ? '' : 's'}`,
             boxText: `${boxLabel} right now`,
             suffix: `${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} so far.`,
-            sentenceText: `${row.qty} vial${row.qty === 1 ? '' : 's'} mo ay nasa ${boxLabel} right now. Only ${completedBoxesText} pa before this, and ${row.missingSlots} na lang ang kulang para makumpleto ang ${boxLabel}. Let’s hope and pray na may mag-add para di ma-ano 😢😢😢`,
+            sentenceText: `${row.qty} vial${row.qty === 1 ? '' : 's'} mo ay nasa ${boxLabel} right now. Only ${completedBoxesText} pa before this. ${row.missingSlots} na lang ang kulang para makumpleto ang ${boxLabel}. Sana may mag-add pa para di ma-ano 😢😢😢`,
             sentenceParts: [
               { text: `${row.qty} vial${row.qty === 1 ? '' : 's'}`, strong: true },
               { text: ' mo ay nasa ' },
               { text: `${boxLabel}`, strong: true },
               { text: ' right now. Only ' },
               { text: `${completedBoxesText}`, strong: true },
-              { text: ' pa before this, and ' },
+              { text: ' pa before this. ' },
               { text: `${row.missingSlots}`, strong: true },
               { text: ' na lang ang kulang para makumpleto ang ' },
               { text: `${boxLabel}`, strong: true },
-              { text: '. Let’s hope and pray na may mag-add para di ma-ano 😢😢😢' }
+              { text: '. Sana may mag-add pa para di ma-ano 😢😢😢' }
             ]
           };
         }),
