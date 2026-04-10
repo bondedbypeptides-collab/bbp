@@ -1316,6 +1316,42 @@ export default function App() {
     };
   };
 
+  const getCustomerPaymentRouteForExport = (customer) => {
+    if (!customer) return null;
+
+    const snapshotBankIndex = Number(customer?.paymentSnapshot?.bankIndex);
+    const hasSavedRoute = Boolean(
+      String(customer?.paymentBankDetails || '').trim()
+      || String(customer?.paymentBankQr || '').trim()
+      || (Number.isInteger(snapshotBankIndex) && snapshotBankIndex >= 0)
+    );
+
+    if (hasSavedRoute) {
+      return {
+        adminAssigned: customer?.paymentSnapshot?.adminAssigned || customer?.adminAssigned || 'Unassigned',
+        bankIndex: Number.isInteger(snapshotBankIndex) ? snapshotBankIndex : -1,
+        bankDetails: String(customer?.paymentBankDetails || ''),
+        bankQr: String(customer?.paymentBankQr || ''),
+        hasRoute: Boolean(String(customer?.paymentBankDetails || '').trim() || String(customer?.paymentBankQr || '').trim())
+      };
+    }
+
+    return getSelectedAdminBankRoute(customer?.adminAssigned, customer?.email);
+  };
+
+  const formatCustomerPaymentRouteLabel = (customer) => {
+    const route = getCustomerPaymentRouteForExport(customer);
+    const bankDetails = String(route?.bankDetails || '').trim();
+    if (bankDetails) return bankDetails;
+
+    const bankIndex = Number(route?.bankIndex);
+    if (Number.isInteger(bankIndex) && bankIndex >= 0 && String(route?.bankQr || '').trim()) {
+      return `qr${bankIndex + 1}`;
+    }
+
+    return '';
+  };
+
   const buildPaymentSnapshot = (items, adminName, email, capturedAt = Date.now()) => {
     let subtotalUSD = 0;
     Object.entries(items || {}).forEach(([prod, qty]) => {
@@ -3584,7 +3620,7 @@ export default function App() {
           "Total PHP": c.totalPHP,
           "Proof Link": c.proofUrl || '',
           "Assigned Admin": c.adminAssigned || '',
-          "Bank Account": c.paymentBankDetails || '',
+          "Bank Account": formatCustomerPaymentRouteLabel(c),
           "Label Link": "N/A (Generated on Demand)",
           Street: c.address?.street || '',
           Barangay: c.address?.brgy || '',
@@ -3674,7 +3710,7 @@ export default function App() {
     customers.forEach(c => {
       const row = [
         `"${c.email}"`, `"${c.name}"`, `"${c.handle || ''}"`, `"${c.subtotalUSD.toFixed(2)}"`, `"${c.totalUSD.toFixed(2)}"`, `"${c.totalPHP}"`,
-        `"${c.proofUrl || ''}"`, `"${c.adminAssigned || ''}"`, `"${c.paymentBankDetails || ''}"`, `"N/A (Generated on Demand)"`,
+        `"${c.proofUrl || ''}"`, `"${c.adminAssigned || ''}"`, `"${formatCustomerPaymentRouteLabel(c)}"`, `"N/A (Generated on Demand)"`,
         `"${c.address?.street || ''}"`, `"${c.address?.brgy || ''}"`, `"${c.address?.city || ''}"`, `"${c.address?.prov || ''}"`,
         `"${c.address?.zip || ''}"`, `"${c.address?.contact || ''}"`, `"${c.address?.shipOpt || ''}"`, `"${getPartialShipPreferenceLabel(c.address?.partialShipPref) || ''}"`, `"${c.isPaid ? 'TRUE' : 'FALSE'}"`
       ];
@@ -7379,8 +7415,22 @@ export default function App() {
                                   <div key={bIdx} className="bg-white p-3 rounded-lg border border-pink-50 shadow-sm">
                                     <span className="text-[9px] font-black text-pink-400 uppercase">Option {bIdx + 1}</span>
                                     <div className="text-[10px] text-gray-600 break-words mt-1">
-                                      {bank.qr ? <span className="text-emerald-600 font-bold flex items-center gap-1 mb-1"><ImageIcon size={10} /> QR Uploaded</span> : null}
-                                      {bank.details ? <span className={bank.qr ? 'block' : ''}>{bank.details}</span> : null}
+                                      {bank.qr ? (
+                                        <div className="mb-2">
+                                          <span className="text-emerald-600 font-bold flex items-center gap-1 mb-2">
+                                            <ImageIcon size={10} />
+                                            QR Preview
+                                          </span>
+                                          <a href={bank.qr} target="_blank" rel="noreferrer" className="block">
+                                            <img
+                                              src={bank.qr}
+                                              alt={`${a.name} payment option ${bIdx + 1} QR`}
+                                              className="w-full max-w-[220px] rounded-lg border border-emerald-100 bg-white object-contain"
+                                            />
+                                          </a>
+                                        </div>
+                                      ) : null}
+                                      {bank.details ? <span className={bank.qr ? 'block mt-1' : ''}>{bank.details}</span> : null}
                                     </div>
                                   </div>
                                 ))}
