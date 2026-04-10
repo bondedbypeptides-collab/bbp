@@ -240,7 +240,7 @@ export default function ShopWorkspaceMain({
                         ) : null}
                       </div>
                       <p className="mt-1.5 text-sm font-black leading-snug text-[#4A042A]">{currentProtectionSummary.label}</p>
-                      <p className="mt-1.5 max-w-[56rem] text-[11px] font-bold leading-relaxed text-[#8F2C5D]">{currentProtectionSummary.detail}</p>
+                      <p className="mt-1.5 text-[11px] font-bold leading-relaxed text-[#8F2C5D] xl:max-w-none">{currentProtectionSummary.detail}</p>
                       {showProtectionAnnouncement && protectionAnnouncement ? (
                         <div className="mt-3 rounded-[18px] border border-pink-200 bg-white/90 px-3.5 py-3 shadow-[0_12px_24px_rgba(74,4,42,0.06)]">
                           <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">{protectionAnnouncement.title}</p>
@@ -275,45 +275,64 @@ export default function ShopWorkspaceMain({
                                     ? 'bg-amber-400/80'
                                     : 'bg-rose-400/80'
                               }`} />
-                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                                <div>
+                              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_190px] lg:items-start">
+                                <div className="min-w-0">
                                   <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#4A042A]">{section.title}</p>
-                                  <p className="mt-1.5 max-w-[42rem] text-[11px] font-bold leading-relaxed text-[#8F2C5D]">{section.description}</p>
+                                  <p className="mt-1.5 text-[11px] font-bold leading-relaxed text-[#8F2C5D] xl:max-w-none">{section.description}</p>
                                 </div>
-                                <div className="shrink-0 rounded-[16px] border border-white/90 bg-white/92 px-3 py-2.5 shadow-[0_12px_24px_rgba(74,4,42,0.08)]">
+                                <div className="shrink-0 rounded-[16px] border border-white/90 bg-white/92 px-3 py-2.5 shadow-[0_12px_24px_rgba(74,4,42,0.08)] lg:justify-self-end lg:min-w-[190px]">
                                   <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">{section.subtotalLabel}</p>
                                   <p className="mt-1 text-base font-black text-[#4A042A]">{"\u20B1"}{Number(section.subtotalPHP || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                                 </div>
                               </div>
                               {section.items.length > 0 ? (
-                                <div className="mt-3 flex flex-wrap gap-2">
+                                <div className="mt-3 grid gap-2 xl:grid-cols-2">
                                   {section.items.map((item) => (
-                                    <span
+                                    <div
                                       key={typeof item === 'string' ? item : item.key}
-                                      className="inline-flex rounded-full border border-white/85 bg-white/88 px-2.5 py-1.5 text-[10px] font-semibold text-[#4A042A] shadow-[0_8px_18px_rgba(74,4,42,0.06)]"
+                                      className="rounded-[16px] border border-white/85 bg-white/88 px-3 py-2 text-[10px] font-semibold text-[#4A042A] shadow-[0_8px_18px_rgba(74,4,42,0.06)]"
                                     >
                                       {typeof item === 'string' ? item : (
-                                        <>
-                                          <span className={`mr-1.5 ${
-                                            section.tone === 'emerald'
-                                              ? 'text-emerald-700'
-                                              : section.tone === 'amber'
-                                                ? 'text-amber-700'
-                                                : 'text-rose-700'
-                                          }`}>
-                                            {item.product}
-                                          </span>
-                                          {item.qtyText ? <span className="font-black text-[#2F0A1E]">{item.qtyText}</span> : null}
-                                          {item.boxText ? (
-                                            <>
-                                              <span className="mx-1">mo ay nasa</span>
-                                              <span className="font-black text-[#2F0A1E]">{item.boxText}</span>
-                                            </>
+                                        <div className="min-w-0">
+                                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                            <span className={`${
+                                              section.tone === 'emerald'
+                                                ? 'text-emerald-700'
+                                                : section.tone === 'amber'
+                                                  ? 'text-amber-700'
+                                                  : 'text-rose-700'
+                                            }`}>
+                                              {item.product}
+                                            </span>
+                                            {item.qtyText ? <span className="font-black text-[#2F0A1E]">{item.qtyText}</span> : null}
+                                          </div>
+                                          {(item.sentenceParts || item.sentenceText || item.detailText || item.boxText || item.suffix) ? (
+                                            <p className="mt-1 text-[10px] leading-relaxed text-[#6B1F44]">
+                                              {item.sentenceParts ? (
+                                                item.sentenceParts.map((part, index) => (
+                                                  <span
+                                                    key={`${item.key || item.product || 'sentence'}-${index}`}
+                                                    className={part.strong ? 'font-black text-[#2F0A1E]' : undefined}
+                                                  >
+                                                    {part.text}
+                                                  </span>
+                                                ))
+                                              ) : item.sentenceText || item.detailText || (
+                                                <>
+                                                  {item.boxText ? (
+                                                    <>
+                                                      Currently in <span className="font-black text-[#2F0A1E]">{item.boxText}</span>
+                                                      {item.suffix ? ' ' : ''}
+                                                    </>
+                                                  ) : null}
+                                                  {item.suffix ? <span>{item.suffix}</span> : null}
+                                                </>
+                                              )}
+                                            </p>
                                           ) : null}
-                                          {item.suffix ? <span className="ml-1">{item.suffix}</span> : null}
-                                        </>
+                                        </div>
                                       )}
-                                    </span>
+                                    </div>
                                   ))}
                                 </div>
                               ) : (

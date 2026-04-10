@@ -4744,7 +4744,8 @@ export default function App() {
           key: `protected-${row.product}`,
           product: row.product,
           qtyText: `${row.protectedQty} vial${row.protectedQty === 1 ? '' : 's'}`,
-          suffix: `safe na${row.protectedKits > 0 ? ` (${row.protectedKits} full kit${row.protectedKits === 1 ? '' : 's'})` : ''}`
+          suffix: `safe na${row.protectedKits > 0 ? ` (${row.protectedKits} full kit${row.protectedKits === 1 ? '' : 's'})` : ''}`,
+          sentenceText: `${row.protectedQty} vial${row.protectedQty === 1 ? '' : 's'} mo safe na${row.protectedKits > 0 ? ` (${row.protectedKits} full kit${row.protectedKits === 1 ? '' : 's'})` : ''}.`
         })),
         emptyText: 'Wala pang safe na protected qty dito.',
         subtotalPHP: getSectionSubtotalPHP(protectionRows, (row) => row.protectedQty),
@@ -4762,12 +4763,22 @@ export default function App() {
           const boxLabel = firstBox === lastBox ? `Box ${firstBox}` : `Boxes ${firstBox}-${lastBox}`;
           const boxesAwayFromOpen = Math.max(Number(row.openBoxNumber || 1) - lastBox, 0);
           const safetyText = boxesAwayFromOpen >= 3 ? 'safe na.' : 'safe ka for now.';
+          const completedBoxesText = `${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'}`;
           return {
             key: `likely-safe-${row.product}-${boxLabel}`,
             product: row.product,
             qtyText: `${row.qty} vial${row.qty === 1 ? '' : 's'}`,
             boxText: `${boxLabel} right now`,
-            suffix: `${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} so far, so ${safetyText}`
+            suffix: `${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} so far, so ${safetyText}`,
+            sentenceText: `${row.qty} vial${row.qty === 1 ? '' : 's'} mo ay nasa ${boxLabel} right now. ${completedBoxesText} na before the open box, so ${safetyText}`,
+            sentenceParts: [
+              { text: `${row.qty} vial${row.qty === 1 ? '' : 's'}`, strong: true },
+              { text: ' mo ay nasa ' },
+              { text: `${boxLabel}`, strong: true },
+              { text: ' right now. ' },
+              { text: `${completedBoxesText}`, strong: true },
+              { text: ` na before the open box, so ${safetyText}` }
+            ]
           };
         }),
         emptyText: 'Walang qty na nasa likely safe lane ngayon.',
@@ -4784,12 +4795,22 @@ export default function App() {
           const firstBox = boxNumbers[0] || Math.max(1, row.totalBoxes);
           const lastBox = boxNumbers[boxNumbers.length - 1] || firstBox;
           const boxLabel = firstBox === lastBox ? `Box ${firstBox}` : `Boxes ${firstBox}-${lastBox}`;
+          const completedBoxesText = `${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'}`;
           return {
             key: `at-risk-${row.product}-${boxLabel}`,
             product: row.product,
             qtyText: `${row.qty} vial${row.qty === 1 ? '' : 's'}`,
             boxText: `${boxLabel} right now`,
-            suffix: `${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} so far.`
+            suffix: `${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} so far.`,
+            sentenceText: `${row.qty} vial${row.qty === 1 ? '' : 's'} mo ay nasa ${boxLabel} right now. Only ${completedBoxesText} pa, so baka ma-ano :(`,
+            sentenceParts: [
+              { text: `${row.qty} vial${row.qty === 1 ? '' : 's'}`, strong: true },
+              { text: ' mo ay nasa ' },
+              { text: `${boxLabel}`, strong: true },
+              { text: ' right now. Only ' },
+              { text: `${completedBoxesText}`, strong: true },
+              { text: ' pa, so baka ma-ano 😢' }
+            ]
           };
         }),
         emptyText: 'Walang loose vials sa current open box ngayon.',
