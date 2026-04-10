@@ -4677,6 +4677,7 @@ export default function App() {
           atRiskQty,
           likelySafeQty,
           protectedQty,
+          missingSlots: Number(analysis?.missingSlots || 0),
           pricePerVialUSD: Number(productsByName[product]?.pricePerVialUSD || 0),
           completedBoxes: Number(analysis?.completedBoxes || 0),
           openBoxNumber: Number(analysis?.openBoxNumber || 1),
@@ -4726,6 +4727,7 @@ export default function App() {
         qty: row.atRiskQty,
         pricePerVialUSD: row.pricePerVialUSD,
         completedBoxes: row.completedBoxes,
+        missingSlots: row.missingSlots,
         boxNumbers: row.atRiskBoxes,
         totalBoxes: row.totalBoxes
       }));
@@ -4802,14 +4804,18 @@ export default function App() {
             qtyText: `${row.qty} vial${row.qty === 1 ? '' : 's'}`,
             boxText: `${boxLabel} right now`,
             suffix: `${row.completedBoxes} completed box${row.completedBoxes === 1 ? '' : 'es'} so far.`,
-            sentenceText: `${row.qty} vial${row.qty === 1 ? '' : 's'} mo ay nasa ${boxLabel} right now. Only ${completedBoxesText} pa, so baka ma-ano :(`,
+            sentenceText: `${row.qty} vial${row.qty === 1 ? '' : 's'} mo ay nasa ${boxLabel} right now. Only ${completedBoxesText} pa before this, and ${row.missingSlots} na lang ang kulang para makumpleto ang ${boxLabel}. Let’s hope and pray na may mag-add para di ma-ano 😢😢😢`,
             sentenceParts: [
               { text: `${row.qty} vial${row.qty === 1 ? '' : 's'}`, strong: true },
               { text: ' mo ay nasa ' },
               { text: `${boxLabel}`, strong: true },
               { text: ' right now. Only ' },
               { text: `${completedBoxesText}`, strong: true },
-              { text: ' pa, so baka ma-ano 😢' }
+              { text: ' pa before this, and ' },
+              { text: `${row.missingSlots}`, strong: true },
+              { text: ' na lang ang kulang para makumpleto ang ' },
+              { text: `${boxLabel}`, strong: true },
+              { text: '. Let’s hope and pray na may mag-add para di ma-ano 😢😢😢' }
             ]
           };
         }),
