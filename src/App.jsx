@@ -3733,6 +3733,78 @@ export default function App() {
 
   const escapeCSVCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
 
+  const exportCustomerOrderSheetRows = (customers, filenamePrefix = 'BBP_Customer_Order_Sheet') => {
+    const headers = [
+      "Name",
+      "Handle",
+      "Email",
+      "Assigned Admin",
+      "Is Paid",
+      "Has Proof",
+      "Subtotal USD",
+      "Total USD",
+      "Total PHP",
+      "Total Vials",
+      "Item Count",
+      "Order Contents",
+      "Shipping Option",
+      "Partial Ship",
+      "Street",
+      "Barangay",
+      "City",
+      "Province",
+      "Zip",
+      "Contact",
+      "Latest Order Update"
+    ];
+
+    let csvContent = headers.join(",") + "\n";
+
+    customers.forEach((customer) => {
+      const itemEntries = Object.entries(customer.products || {}).sort((a, b) => a[0].localeCompare(b[0]));
+      const orderContents = itemEntries.length
+        ? itemEntries.map(([product, qty]) => `${qty}x ${product}`).join(" | ")
+        : '';
+
+      const row = [
+        customer.name || '',
+        customer.handle || '',
+        customer.email || '',
+        customer.adminAssigned || '',
+        customer.isPaid ? 'TRUE' : 'FALSE',
+        customer.hasProof ? 'TRUE' : 'FALSE',
+        Number(customer.subtotalUSD || 0).toFixed(2),
+        Number(customer.totalUSD || 0).toFixed(2),
+        Number(customer.totalPHP || 0),
+        Number(customer.totalVials || 0),
+        Number(customer.itemCount || 0),
+        orderContents,
+        customer.address?.shipOpt || '',
+        getPartialShipPreferenceLabel(customer.address?.partialShipPref) || '',
+        customer.address?.street || '',
+        customer.address?.brgy || '',
+        customer.address?.city || '',
+        customer.address?.prov || '',
+        customer.address?.zip || '',
+        customer.address?.contact || '',
+        customer.latestTimestamp ? new Date(customer.latestTimestamp).toLocaleString() : ''
+      ];
+
+      csvContent += row.map(escapeCSVCell).join(",") + "\n";
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${filenamePrefix}_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    showToast(`Exported ${customers.length} customer order row${customers.length === 1 ? '' : 's'}.`);
+  };
+
   const exportManufacturerOrderCSV = () => {
     const headers = [
       "Product",
@@ -6625,6 +6697,9 @@ export default function App() {
                         </button>
                         <button onClick={exportCustomersCSV} className="bg-white border-2 border-emerald-200 text-emerald-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-emerald-500 transition-colors">
                           Export CSV
+                        </button>
+                        <button onClick={() => exportCustomerOrderSheetRows(activeOrdersList, 'BBP_Order_Sheet')} className="bg-white border-2 border-sky-200 text-sky-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-sky-500 transition-colors">
+                          Export Order Sheet
                         </button>
                         <label className={`bg-emerald-50 border-2 border-emerald-200 text-emerald-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-emerald-500 transition-colors cursor-pointer ${isBtnLoading ? 'opacity-50 pointer-events-none' : ''}`}>
                           {isBtnLoading ? 'Syncing...' : 'Sync Changes from CSV'}
