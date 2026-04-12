@@ -3763,7 +3763,7 @@ export default function App() {
     customers.forEach((customer) => {
       const itemEntries = Object.entries(customer.products || {}).sort((a, b) => a[0].localeCompare(b[0]));
       const orderContents = itemEntries.length
-        ? itemEntries.map(([product, qty]) => `${qty}x ${product}`).join(" | ")
+        ? itemEntries.map(([product, qty]) => `- ${qty}x ${product}`).join("\n")
         : '';
 
       const row = [
