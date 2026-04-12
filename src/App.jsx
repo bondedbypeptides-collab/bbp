@@ -3732,6 +3732,7 @@ export default function App() {
   };
 
   const escapeCSVCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const formatUSD = (value) => `$${Number(value || 0).toFixed(2)}`;
   const escapeSpreadsheetCell = (value) => String(value ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -3881,6 +3882,10 @@ ${rowsXML.join("\n")}
       "Total Vials Ordered",
       "Full 10-Vial Kits",
       "Boxes/Kits to Order",
+      "Kit Price USD",
+      "Vial Price USD",
+      "Ordered Vials Value USD",
+      "Manufacturer Order Total USD",
       "Loose Vials In Last Box",
       "Missing To Fill Last Box",
       "Should Order",
@@ -3892,6 +3897,11 @@ ${rowsXML.join("\n")}
     ];
 
     let csvContent = headers.join(",") + "\n";
+    let grandTotalVials = 0;
+    let grandTotalFullBoxes = 0;
+    let grandTotalExpectedBoxes = 0;
+    let grandTotalOrderedVialsValueUSD = 0;
+    let grandTotalManufacturerOrderUSD = 0;
 
     enrichedProducts.forEach((product) => {
       const totalVials = Number(product.totalVials || 0);
@@ -3899,6 +3909,10 @@ ${rowsXML.join("\n")}
       const fullBoxes = Math.floor(totalVials / SLOTS_PER_BATCH);
       const looseVials = totalVials % SLOTS_PER_BATCH;
       const missingSlots = totalVials === 0 ? 0 : (looseVials === 0 ? 0 : (SLOTS_PER_BATCH - looseVials));
+      const vialPriceUSD = Number(product.pricePerVialUSD || 0);
+      const kitPriceUSD = Number(product.pricePerKitUSD || 0) || (vialPriceUSD * SLOTS_PER_BATCH);
+      const orderedVialsValueUSD = totalVials * vialPriceUSD;
+      const manufacturerOrderTotalUSD = expectedBoxes * kitPriceUSD;
       const availability = product.locked ? 'Locked' : ((product.maxBoxes || 0) > 0 ? 'Capped' : 'Open');
       const capType = (product.maxBoxes || 0) > 0 ? (product.syncCapped ? 'Synced' : 'Manual') : '';
 
@@ -3921,11 +3935,21 @@ ${rowsXML.join("\n")}
         notes.push('Payments are open, so edits are frozen.');
       }
 
+      grandTotalVials += totalVials;
+      grandTotalFullBoxes += fullBoxes;
+      grandTotalExpectedBoxes += expectedBoxes;
+      grandTotalOrderedVialsValueUSD += orderedVialsValueUSD;
+      grandTotalManufacturerOrderUSD += manufacturerOrderTotalUSD;
+
       const row = [
         product.name,
         totalVials,
         fullBoxes,
         expectedBoxes,
+        formatUSD(kitPriceUSD),
+        formatUSD(vialPriceUSD),
+        formatUSD(orderedVialsValueUSD),
+        formatUSD(manufacturerOrderTotalUSD),
         looseVials,
         missingSlots,
         expectedBoxes > 0 ? 'YES' : 'NO',
@@ -3939,6 +3963,25 @@ ${rowsXML.join("\n")}
       csvContent += row.map(escapeCSVCell).join(",") + "\n";
     });
 
+    csvContent += new Array(headers.length).fill('').map(escapeCSVCell).join(",") + "\n";
+    csvContent += [
+      "TOTAL",
+      grandTotalVials,
+      grandTotalFullBoxes,
+      grandTotalExpectedBoxes,
+      '',
+      '',
+      formatUSD(grandTotalOrderedVialsValueUSD),
+      formatUSD(grandTotalManufacturerOrderUSD),
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      'Grand total based on current product price list and rounded manufacturer box counts.'
+    ].map(escapeCSVCell).join(",") + "\n";
+
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -3948,7 +3991,7 @@ ${rowsXML.join("\n")}
     link.click();
     document.body.removeChild(link);
 
-    showToast(`Exported manufacturer order summary. Total physical boxes: ${totalPhysicalBoxesToReceive}.`);
+    showToast(`Exported manufacturer order summary. Total physical boxes: ${totalPhysicalBoxesToReceive}. Estimated order total: $${grandTotalManufacturerOrderUSD.toFixed(2)}.`);
   };
 
   const clearActivityLogs = async () => {
