@@ -3732,6 +3732,13 @@ export default function App() {
   };
 
   const escapeCSVCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const escapeSpreadsheetCell = (value) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+    .replace(/\r\n|\r|\n/g, '&#10;');
 
   const exportCustomerOrderSheetRows = (customers, filenamePrefix = 'BBP_Customer_Order_Sheet') => {
     const headers = [
@@ -3758,12 +3765,18 @@ export default function App() {
       "Latest Order Update"
     ];
 
-    let csvContent = headers.join(",") + "\n";
+    const wrapColumnIndexes = new Set([11]);
+    const buildRowXML = (values, { isHeader = false } = {}) => `      <Row>\n${values.map((value, index) => {
+      const styleId = isHeader ? 'header' : (wrapColumnIndexes.has(index) ? 'wrapText' : 'default');
+      return `        <Cell ss:StyleID="${styleId}"><Data ss:Type="String" xml:space="preserve">${escapeSpreadsheetCell(value)}</Data></Cell>`;
+    }).join("\n")}\n      </Row>`;
+
+    const rowsXML = [buildRowXML(headers, { isHeader: true })];
 
     customers.forEach((customer) => {
       const itemEntries = Object.entries(customer.products || {}).sort((a, b) => a[0].localeCompare(b[0]));
       const orderContents = itemEntries.length
-        ? itemEntries.map(([product, qty]) => `- ${qty}x ${product}`).join("\n")
+        ? itemEntries.map(([product, qty]) => `• ${qty}x ${product}`).join("\n")
         : '';
 
       const row = [
@@ -3790,19 +3803,76 @@ export default function App() {
         customer.latestTimestamp ? new Date(customer.latestTimestamp).toLocaleString() : ''
       ];
 
-      csvContent += row.map(escapeCSVCell).join(",") + "\n";
+      rowsXML.push(buildRowXML(row));
     });
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const workbookXml = `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+ <Styles>
+  <Style ss:ID="default">
+   <Alignment ss:Vertical="Top"/>
+  </Style>
+  <Style ss:ID="header">
+   <Font ss:Bold="1"/>
+   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+   <Interior ss:Color="#EAF3FF" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="wrapText">
+   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+  </Style>
+ </Styles>
+ <Worksheet ss:Name="Order Sheet">
+  <Table>
+   <Column ss:Width="120"/>
+   <Column ss:Width="90"/>
+   <Column ss:Width="180"/>
+   <Column ss:Width="110"/>
+   <Column ss:Width="55"/>
+   <Column ss:Width="65"/>
+   <Column ss:Width="80"/>
+   <Column ss:Width="80"/>
+   <Column ss:Width="80"/>
+   <Column ss:Width="70"/>
+   <Column ss:Width="65"/>
+   <Column ss:Width="260"/>
+   <Column ss:Width="95"/>
+   <Column ss:Width="95"/>
+   <Column ss:Width="150"/>
+   <Column ss:Width="110"/>
+   <Column ss:Width="110"/>
+   <Column ss:Width="110"/>
+   <Column ss:Width="70"/>
+   <Column ss:Width="100"/>
+   <Column ss:Width="120"/>
+${rowsXML.join("\n")}
+  </Table>
+  <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">
+   <Selected/>
+   <FreezePanes/>
+   <FrozenNoSplit/>
+   <SplitHorizontal>1</SplitHorizontal>
+   <TopRowBottomPane>1</TopRowBottomPane>
+   <ActivePane>2</ActivePane>
+  </WorksheetOptions>
+ </Worksheet>
+</Workbook>`;
+
+    const blob = new Blob([workbookXml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `${filenamePrefix}_${Date.now()}.csv`);
+    link.setAttribute("download", `${filenamePrefix}_${Date.now()}.xls`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 
-    showToast(`Exported ${customers.length} customer order row${customers.length === 1 ? '' : 's'}.`);
+    showToast(`Exported ${customers.length} customer order row${customers.length === 1 ? '' : 's'} as a spreadsheet.`);
   };
 
   const exportManufacturerOrderCSV = () => {
