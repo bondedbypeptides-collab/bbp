@@ -47,7 +47,13 @@ export default function AdminOrderEditModal({
                 <div key={product.id} className={`flex items-center justify-between p-3 rounded-xl border-2 transition-colors ${isSelected ? 'bg-pink-50 border-pink-400 shadow-sm' : 'bg-white border-slate-200 hover:border-pink-300'}`}>
                   <div className="flex-1 min-w-0 pr-2">
                     <h4 className={`font-black text-sm truncate ${isSelected ? 'text-[#D6006E]' : 'text-slate-700'}`}>{product.name}</h4>
-                    <p className="text-[10px] font-bold text-slate-400">${product.pricePerVialUSD.toFixed(2)} / vial</p>
+                    {product.isLegacyMissing ? (
+                      <p className="text-[10px] font-bold text-amber-600">
+                        Removed from live catalog. Only shown here so you can clean up old orders.
+                      </p>
+                    ) : (
+                      <p className="text-[10px] font-bold text-slate-400">${product.pricePerVialUSD.toFixed(2)} / vial</p>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <button onClick={() => onChangeQty(product.name, Math.max(0, currentQty - 1))} className="w-8 h-8 rounded-lg bg-white border border-slate-300 text-slate-600 font-black flex items-center justify-center hover:bg-slate-100 active:scale-95">-</button>

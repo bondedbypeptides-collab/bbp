@@ -12,6 +12,7 @@ import {
   MessageCircle, Send, ScrollText, Edit3, Trash, ShoppingCart, RotateCcw, Save
 } from 'lucide-react';
 import ShopWorkspaceMain from './components/ShopWorkspaceMain';
+import { buildAdminEditedUserPatch } from './admin-order-edit-helpers.js';
 import { buildArchiveMetadata, buildCustomerBatchHistoryRecords, buildGroupedHistoryView, buildHistoryArchiveRows } from './history-helpers';
 
 const AdminOrderEditHost = lazy(() => import('./components/AdminOrderEditHost'));
@@ -4824,7 +4825,20 @@ ${rowsXML.join("\n")}
         nextItems[product] = (nextItems[product] || 0) + qty;
       });
       const existingSnapshot = getFrozenPaymentSnapshot(targetProfile);
-      const nextSnapshot = settings.paymentsOpen
+      const hasSavedPaymentState = Boolean(
+        existingSnapshot
+        || targetProfile.isPaid
+        || targetProfile.proofUrl
+        || targetProfile.paymentSubmittedAt
+        || targetProfile.proofReview
+      );
+      const hasLegacyProductsInNextItems = Object.keys(nextItems).some((product) => !productsByName[product]);
+
+      if (hasSavedPaymentState && hasLegacyProductsInNextItems) {
+        throw new Error('Remove the deleted legacy product from this paid order before saving so totals stay accurate.');
+      }
+
+      const nextSnapshot = (settings.paymentsOpen || hasSavedPaymentState)
         ? (() => {
           const rebuilt = buildPaymentSnapshot(nextItems, existingSnapshot?.adminAssigned || targetProfile.adminAssigned, targetEmail);
           if (!existingSnapshot) return rebuilt;
@@ -4838,14 +4852,14 @@ ${rowsXML.join("\n")}
         })()
         : null;
 
-      await safeAwait(setDoc(doc(db, colPath('users'), targetEmail), {
-        paymentSnapshot: nextSnapshot,
-        proofReview: '',
-        proofUrl: null,
-        isPaid: false,
-        paymentSubmittedAt: null,
-        buyerReviewConfirmedAt: null
-      }, { merge: true }));
+      await safeAwait(setDoc(
+        doc(db, colPath('users'), targetEmail),
+        buildAdminEditedUserPatch({
+          targetProfile,
+          nextSnapshot
+        }),
+        { merge: true }
+      ));
 
       await safeAwait(addDoc(collection(db, colPath('logs')), { timestamp: Date.now(), email: targetEmail, name: targetProfile.name || 'Unknown', action: "Admin Edited Order", details: `Cart updated via Admin Panel` }));
 
@@ -7946,6 +7960,7 @@ ${rowsXML.join("\n")}
             adminInputSm={adminInputSm}
             adminModalSearchQuery={adminModalSearchQuery}
             adminOrderEditTarget={adminOrderEditTarget}
+            adminOrderRows={ordersByEmail[adminOrderEditTarget] || []}
             enrichedProducts={enrichedProducts}
             isBtnLoading={isBtnLoading}
             normalizedAdminModalSearchQuery={normalizedAdminModalSearchQuery}
