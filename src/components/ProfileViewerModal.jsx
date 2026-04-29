@@ -129,10 +129,10 @@ export default function ProfileViewerModal({
                           <p className="text-lg font-black text-[#D6006E]">{group.totalQty || 0}</p>
                           {group.totalPHP > 0 ? (
                             <p className="text-[11px] font-bold text-emerald-600">
-                              {group.amountSource === 'estimated' ? 'Est. ' : ''}PHP {Number(group.totalPHP).toLocaleString()}
+                              PHP {Number(group.totalPHP).toLocaleString()}
                             </p>
                           ) : (
-                            <p className="text-[11px] font-bold text-slate-400">Amount unavailable</p>
+                            <p className="text-[11px] font-bold text-slate-400">Historical amount unavailable</p>
                           )}
                         </div>
                       </div>

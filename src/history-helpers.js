@@ -166,33 +166,3 @@ export function buildGroupedHistoryView({ customerBatchHistory = [], historyOrde
     };
   }).sort((left, right) => Number(right.archivedAt || 0) - Number(left.archivedAt || 0));
 }
-
-export function attachEstimatedHistoryAmounts(groups = [], productsByName = {}, pricing = {}) {
-  const fxRate = Number(pricing.fxRate || 0);
-  const adminFeePhp = Number(pricing.adminFeePhp || 0);
-
-  return groups.map((group) => {
-    if (Number(group.totalPHP || 0) > 0) return group;
-    if (!Array.isArray(group.items) || group.items.length === 0) return group;
-    if (!Number.isFinite(fxRate) || fxRate <= 0 || !Number.isFinite(adminFeePhp)) return group;
-
-    let subtotalUSD = 0;
-    let hasMatchedPrices = false;
-    for (const item of group.items) {
-      const product = productsByName[item.product];
-      const pricePerVialUSD = Number(product?.pricePerVialUSD || 0);
-      if (!Number.isFinite(pricePerVialUSD) || pricePerVialUSD <= 0) continue;
-      subtotalUSD += Number(item.qty || 0) * pricePerVialUSD;
-      hasMatchedPrices = true;
-    }
-
-    if (!hasMatchedPrices) return group;
-
-    const estimatedTotalPHP = Number(((subtotalUSD * fxRate) + adminFeePhp).toFixed(2));
-    return {
-      ...group,
-      totalPHP: estimatedTotalPHP,
-      amountSource: 'estimated',
-    };
-  });
-}

@@ -12,7 +12,7 @@ import {
   MessageCircle, Send, ScrollText, Edit3, Trash, ShoppingCart, RotateCcw, Save
 } from 'lucide-react';
 import ShopWorkspaceMain from './components/ShopWorkspaceMain';
-import { attachEstimatedHistoryAmounts, buildArchiveMetadata, buildCustomerBatchHistoryRecords, buildGroupedHistoryView, buildHistoryArchiveRows } from './history-helpers';
+import { buildArchiveMetadata, buildCustomerBatchHistoryRecords, buildGroupedHistoryView, buildHistoryArchiveRows } from './history-helpers';
 
 const AdminOrderEditHost = lazy(() => import('./components/AdminOrderEditHost'));
 const ProfileViewerHost = lazy(() => import('./components/ProfileViewerHost'));
@@ -2428,15 +2428,11 @@ export default function App() {
   );
 
   const groupedSelectedHistory = useMemo(
-    () => attachEstimatedHistoryAmounts(
-      buildGroupedHistoryView({
-        customerBatchHistory: selectedCustomerBatchHistory,
-        historyOrders: selectedHistoryOrders,
-      }),
-      productsByName,
-      { fxRate: settings.fxRate, adminFeePhp: settings.adminFeePhp }
-    ),
-    [selectedCustomerBatchHistory, selectedHistoryOrders, productsByName, settings.fxRate, settings.adminFeePhp]
+    () => buildGroupedHistoryView({
+      customerBatchHistory: selectedCustomerBatchHistory,
+      historyOrders: selectedHistoryOrders,
+    }),
+    [selectedCustomerBatchHistory, selectedHistoryOrders]
   );
 
 

@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  attachEstimatedHistoryAmounts,
   buildArchiveMetadata,
   buildCustomerBatchHistoryRecords,
   buildGroupedHistoryView,
@@ -144,26 +143,4 @@ test('buildGroupedHistoryView clusters legacy history rows from the same reset e
     { product: 'DSIP 5mg', qty: 5 },
     { product: 'Tesamorelin 5mg', qty: 5 },
   ]);
-});
-
-test('attachEstimatedHistoryAmounts uses current product prices as a labeled fallback for legacy groups', () => {
-  const groups = attachEstimatedHistoryAmounts([
-    {
-      id: 'legacy',
-      items: [
-        { product: 'Retatrutide 10mg', qty: 2 },
-        { product: 'BAC Water', qty: 1 },
-      ],
-      totalPHP: 0,
-    },
-  ], {
-    'Retatrutide 10mg': { pricePerVialUSD: 9 },
-    'BAC Water': { pricePerVialUSD: 1 },
-  }, {
-    fxRate: 60,
-    adminFeePhp: 150,
-  });
-
-  assert.equal(groups[0].amountSource, 'estimated');
-  assert.equal(groups[0].totalPHP, 1290);
 });
