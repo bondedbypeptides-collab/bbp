@@ -3,6 +3,7 @@ import ProfileViewerModal from './ProfileViewerModal';
 export default function ProfileViewerHost({
   editAddressForm,
   getPartialShipPreferenceLabel,
+  groupedHistory,
   historyOrders,
   isBtnLoading,
   isEditingAddress,
@@ -21,6 +22,7 @@ export default function ProfileViewerHost({
       currentOrders={currentOrders}
       editAddressForm={editAddressForm}
       getPartialShipPreferenceLabel={getPartialShipPreferenceLabel}
+      groupedHistory={groupedHistory}
       historyOrders={historyOrders}
       isBtnLoading={isBtnLoading}
       isEditingAddress={isEditingAddress}

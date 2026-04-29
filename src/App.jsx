@@ -2,7 +2,7 @@ import React, { startTransition, useDeferredValue, useEffect, useMemo, useRef, u
 import { initializeApp } from 'firebase/app';
 import { lazy, Suspense } from 'react';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, writeBatch } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, writeBatch, query, where } from 'firebase/firestore';
 import {
   ShieldCheck, Store, Settings, LayoutDashboard,
   BadgeDollarSign, Scissors, ClipboardList, Users,
@@ -12,6 +12,7 @@ import {
   MessageCircle, Send, ScrollText, Edit3, Trash, ShoppingCart, RotateCcw, Save
 } from 'lucide-react';
 import ShopWorkspaceMain from './components/ShopWorkspaceMain';
+import { attachEstimatedHistoryAmounts, buildArchiveMetadata, buildCustomerBatchHistoryRecords, buildGroupedHistoryView, buildHistoryArchiveRows } from './history-helpers';
 
 const AdminOrderEditHost = lazy(() => import('./components/AdminOrderEditHost'));
 const ProfileViewerHost = lazy(() => import('./components/ProfileViewerHost'));
@@ -664,12 +665,14 @@ export default function App() {
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
   const [history, setHistory] = useState([]);
+  const [customerBatchHistory, setCustomerBatchHistory] = useState([]);
   const [logs, setLogs] = useState([]);
   const [safetyRecords, setSafetyRecords] = useState([]);
 
   // Initializing with an empty array for admins
   const [settings, setSettings] = useState({
     batchName: 'Sample Group Buy Batch',
+    chainLabel: '',
     fxRate: 60,
     adminFeePhp: 150,
     minOrder: 3,
@@ -902,14 +905,31 @@ export default function App() {
       return undefined;
     }
 
-    const unsubHistory = onSnapshot(collection(db, colPath('history')), (snap) => {
+    const historyQuery = query(collection(db, colPath('history')), where('email', '==', normalizedSelectedProfileEmail));
+    const unsubHistory = onSnapshot(historyQuery, (snap) => {
       const arr = [];
       snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
       setHistory(arr);
     });
 
     return () => unsubHistory();
-  }, [user, shouldSubscribeHistory]);
+  }, [user, shouldSubscribeHistory, normalizedSelectedProfileEmail]);
+
+  useEffect(() => {
+    if (!user || !shouldSubscribeHistory) {
+      setCustomerBatchHistory([]);
+      return undefined;
+    }
+
+    const customerBatchHistoryQuery = query(collection(db, colPath('customerBatchHistory')), where('email', '==', normalizedSelectedProfileEmail));
+    const unsubCustomerBatchHistory = onSnapshot(customerBatchHistoryQuery, (snap) => {
+      const arr = [];
+      snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
+      setCustomerBatchHistory(arr);
+    });
+
+    return () => unsubCustomerBatchHistory();
+  }, [user, shouldSubscribeHistory, normalizedSelectedProfileEmail]);
 
   useEffect(() => {
     if (!user || !adminNeedsLogs) {
@@ -2396,6 +2416,28 @@ export default function App() {
     }
     return usersById[normalizedSelectedProfileEmail] || { id: selectedProfileEmail, name: 'Unknown Customer' };
   }, [customerProfile, normalizedCustomerEmail, normalizedSelectedProfileEmail, selectedProfileEmail, usersById]);
+
+  const selectedHistoryOrders = useMemo(
+    () => history.filter((order) => order.email === normalizedSelectedProfileEmail),
+    [history, normalizedSelectedProfileEmail]
+  );
+
+  const selectedCustomerBatchHistory = useMemo(
+    () => customerBatchHistory.filter((entry) => entry.email === normalizedSelectedProfileEmail),
+    [customerBatchHistory, normalizedSelectedProfileEmail]
+  );
+
+  const groupedSelectedHistory = useMemo(
+    () => attachEstimatedHistoryAmounts(
+      buildGroupedHistoryView({
+        customerBatchHistory: selectedCustomerBatchHistory,
+        historyOrders: selectedHistoryOrders,
+      }),
+      productsByName,
+      { fxRate: settings.fxRate, adminFeePhp: settings.adminFeePhp }
+    ),
+    [selectedCustomerBatchHistory, selectedHistoryOrders, productsByName, settings.fxRate, settings.adminFeePhp]
+  );
 
 
   useEffect(() => {
@@ -4412,13 +4454,24 @@ ${rowsXML.join("\n")}
     try {
       await createBatchSnapshot('Before system reset', { action: 'reset-system' });
       const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+      const archiveMetadata = buildArchiveMetadata(settings, Date.now());
+      const archivedHistoryRows = buildHistoryArchiveRows(orders, archiveMetadata);
+      const archivedCustomerBatchRecords = buildCustomerBatchHistoryRecords(orders, usersById, archiveMetadata);
 
-      for (const chunk of chunkArray(orders, 200)) {
+      for (const chunk of chunkArray(archivedHistoryRows, 200)) {
         const batch = writeBatch(db);
-        chunk.forEach(o => {
+        chunk.forEach((o) => {
           const histRef = doc(collection(db, colPath('history')));
-          batch.set(histRef, { ...o, batchName: settings.batchName, archivedAt: Date.now() });
+          batch.set(histRef, o);
           batch.delete(doc(db, colPath('orders'), o.id));
+        });
+        await safeAwait(batch.commit());
+      }
+
+      for (const chunk of chunkArray(archivedCustomerBatchRecords, 200)) {
+        const batch = writeBatch(db);
+        chunk.forEach((record) => {
+          batch.set(doc(db, colPath('customerBatchHistory'), record.id), record, { merge: true });
         });
         await safeAwait(batch.commit());
       }
@@ -7511,6 +7564,18 @@ ${rowsXML.join("\n")}
 
                         <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Batch Name</label><input type="text" className={lockedAdminInput} value={settings.batchName} onChange={e => updateSetting('batchName', e.target.value)} disabled={settings.paymentsOpen} /></div>
                         <div>
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Chain Label</label>
+                          <input
+                            type="text"
+                            className={lockedAdminInput}
+                            value={settings.chainLabel || ''}
+                            onChange={e => updateSetting('chainLabel', e.target.value)}
+                            placeholder="Optional: April Chain 7"
+                            disabled={settings.paymentsOpen}
+                          />
+                          <p className="mt-1 text-[10px] font-bold text-slate-400">Use this when several batches belong to one bigger chain so customer history stays grouped cleanly.</p>
+                        </div>
+                        <div>
                           <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Discord Batch Code</label>
                           <input
                             type="text"
@@ -7920,6 +7985,7 @@ ${rowsXML.join("\n")}
             currentOrders={aggregateOrderRowsByProduct(ordersByEmail[normalizedSelectedProfileEmail] || [])}
             editAddressForm={editAddressForm}
             getPartialShipPreferenceLabel={getPartialShipPreferenceLabel}
+            groupedHistory={groupedSelectedHistory}
             historyOrders={history.filter(o => o.email === normalizedSelectedProfileEmail)}
             isBtnLoading={isBtnLoading}
             isEditingAddress={isEditingAddress}

@@ -2,6 +2,7 @@ export default function ProfileViewerModal({
   currentOrders,
   editAddressForm,
   getPartialShipPreferenceLabel,
+  groupedHistory,
   historyOrders,
   isBtnLoading,
   isEditingAddress,
@@ -14,6 +15,15 @@ export default function ProfileViewerModal({
   partialShipOptions,
   startEditingAddress,
 }) {
+  const formatHistoryDate = (value) => {
+    if (!value) return '';
+    try {
+      return new Date(value).toLocaleString();
+    } catch {
+      return '';
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[300] flex items-center justify-center p-4">
       <div className="bg-white rounded-[32px] w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
@@ -99,14 +109,57 @@ export default function ProfileViewerModal({
 
           <div>
             <h3 className="font-black text-sm text-slate-500 uppercase tracking-widest mb-2 border-b-2 border-slate-200 pb-1">Past Order History</h3>
-            {historyOrders.length === 0 ? <p className="text-xs text-slate-400 italic bg-white p-3 rounded-lg border border-slate-200">No past orders found.</p> : (
-              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-100 text-slate-500 text-[10px] uppercase"><tr><th className="p-2 sm:p-3">Batch</th><th className="p-2 sm:p-3">Product</th><th className="p-2 sm:p-3 text-center">Qty</th></tr></thead>
-                  <tbody>
-                    {historyOrders.map(order => <tr key={order.id} className="border-t border-slate-100"><td className="p-2 sm:p-3 text-[10px] sm:text-xs text-slate-500 font-bold">{order.batchName || 'Unknown'}</td><td className="p-2 sm:p-3 font-bold text-slate-700 text-xs sm:text-sm">{order.product}</td><td className="p-2 sm:p-3 text-center font-black text-slate-500 text-sm">{order.qty}</td></tr>)}
-                  </tbody>
-                </table>
+            {groupedHistory.length === 0 && historyOrders.length === 0 ? <p className="text-xs text-slate-400 italic bg-white p-3 rounded-lg border border-slate-200">No past orders found.</p> : (
+              <div className="space-y-3">
+                {groupedHistory.map((group) => (
+                  <div key={group.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                    <div className="bg-slate-100 px-4 py-3 border-b border-slate-200">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+                            {group.subtitle || 'Archived Batch'}
+                          </p>
+                          <h4 className="text-sm font-black text-slate-800">{group.title}</h4>
+                          {formatHistoryDate(group.archivedAt) ? (
+                            <p className="mt-1 text-[11px] font-bold text-slate-500">{formatHistoryDate(group.archivedAt)}</p>
+                          ) : null}
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Items</p>
+                          <p className="text-lg font-black text-[#D6006E]">{group.totalQty || 0}</p>
+                          {group.totalPHP > 0 ? (
+                            <p className="text-[11px] font-bold text-emerald-600">
+                              {group.amountSource === 'estimated' ? 'Est. ' : ''}PHP {Number(group.totalPHP).toLocaleString()}
+                            </p>
+                          ) : (
+                            <p className="text-[11px] font-bold text-slate-400">Amount unavailable</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4">
+                      <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase">
+                            <tr>
+                              <th className="p-2 sm:p-3">Product</th>
+                              <th className="p-2 sm:p-3 text-center">Qty</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(group.items || []).map((item) => (
+                              <tr key={`${group.id}-${item.product}`} className="border-t border-slate-100">
+                                <td className="p-2 sm:p-3 font-bold text-slate-700 text-xs sm:text-sm">{item.product}</td>
+                                <td className="p-2 sm:p-3 text-center font-black text-slate-500 text-sm">{item.qty}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
