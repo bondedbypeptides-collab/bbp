@@ -2,7 +2,7 @@ import React, { startTransition, useDeferredValue, useEffect, useMemo, useRef, u
 import { initializeApp } from 'firebase/app';
 import { lazy, Suspense } from 'react';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, writeBatch, query, where } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, writeBatch, query, where, updateDoc, deleteField, FieldPath } from 'firebase/firestore';
 import {
   ShieldCheck, Store, Settings, LayoutDashboard,
   BadgeDollarSign, Scissors, ClipboardList, Users,
@@ -1788,6 +1788,41 @@ export default function App() {
       });
   }, [isAdminAuthenticated, settings, users]);
 
+  const adminFeeSummary = useMemo(() => (
+    adminFeeAccessCustomers.reduce((summary, customer) => {
+      const amount = Number(customer.adminFeeAmountPhp || 0);
+      summary.totalPHP += amount;
+      summary.totalCount += 1;
+
+      if (customer.status === 'approved') {
+        summary.approvedPHP += amount;
+        summary.approvedCount += 1;
+      } else if (customer.status === 'proof_sent') {
+        summary.proofSentPHP += amount;
+        summary.proofSentCount += 1;
+      } else if (customer.status === 'rejected') {
+        summary.recheckPHP += amount;
+        summary.recheckCount += 1;
+      } else {
+        summary.pendingPHP += amount;
+        summary.pendingCount += 1;
+      }
+
+      return summary;
+    }, {
+      totalPHP: 0,
+      totalCount: 0,
+      proofSentPHP: 0,
+      proofSentCount: 0,
+      approvedPHP: 0,
+      approvedCount: 0,
+      pendingPHP: 0,
+      pendingCount: 0,
+      recheckPHP: 0,
+      recheckCount: 0,
+    })
+  ), [adminFeeAccessCustomers]);
+
   const filteredAdminProducts = useMemo(() => {
     if (!needsInventoryData) return [];
     return [...enrichedProducts]
@@ -2916,6 +2951,32 @@ export default function App() {
     } catch (err) {
       console.error(err);
       showToast('Could not update admin fee status.');
+    }
+  }
+
+  async function deleteAdminFeeAccess(customer) {
+    if (!customer?.email) return;
+    const profile = usersById[customer.email] || {};
+    const existingRecord = getChainAccessRecord(profile, settings);
+    if (!existingRecord) {
+      showToast('No admin fee record found for this customer.');
+      return;
+    }
+
+    try {
+      await safeAwait(updateDoc(doc(db, colPath('users'), customer.email), new FieldPath('chainAccess', currentChainId), deleteField()));
+      await safeAwait(addDoc(collection(db, colPath('logs')), {
+        timestamp: Date.now(),
+        email: customer.email,
+        name: customer.name || '',
+        action: 'Deleted Admin Fee Request',
+        details: `Chain: ${currentChainId}`,
+      }));
+      setConfirmAction({ type: null, id: null });
+      showToast('Admin fee request deleted.');
+    } catch (err) {
+      console.error(err);
+      showToast('Could not delete admin fee request.');
     }
   }
 
@@ -5867,16 +5928,27 @@ ${rowsXML.join("\n")}
   );
 
   const renderAdminFeeDashboard = () => (
-    <section className="bg-white rounded-[24px] shadow-sm border-2 border-pink-50 overflow-hidden">
+    <section className="bg-white rounded-[24px] shadow-sm border-2 border-pink-50 overflow-hidden relative">
+      {hoveredProof?.url && (
+        <div
+          className="fixed z-[1000] pointer-events-none bg-white p-2 rounded-xl shadow-2xl border-4 border-pink-200"
+          style={{ left: `${hoveredProof.left}px`, top: `${hoveredProof.top}px` }}
+        >
+          <img src={hoveredProof.url} alt="Proof Preview" className="w-[340px] max-h-[420px] object-contain rounded-lg bg-white" />
+          <p className="text-center text-xs font-bold text-pink-500 mt-2">Click to View Full Screen</p>
+        </div>
+      )}
       <div className="flex flex-col gap-2 border-b border-pink-50 bg-[#FFF8FC] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Current Chain Admin Fee</p>
           <p className="mt-1 text-xs font-bold text-slate-500">{currentChainId} access approvals</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {renderCompactAdminStat('Proof Sent', adminFeeAccessCustomers.filter(c => c.status === 'proof_sent').length, 'violet', 'Needs admin check')}
-          {renderCompactAdminStat('Approved', adminFeeAccessCustomers.filter(c => c.status === 'approved').length, 'emerald', 'Can enter chain')}
-          {renderCompactAdminStat('Pending', adminFeeAccessCustomers.filter(c => c.status === 'pending').length, 'amber', 'No proof yet')}
+          {renderCompactAdminStat('Total', `\u20B1${adminFeeSummary.totalPHP.toLocaleString()}`, 'pink', `${adminFeeSummary.totalCount} requests`)}
+          {renderCompactAdminStat('Proof Sent', `\u20B1${adminFeeSummary.proofSentPHP.toLocaleString()}`, 'violet', `${adminFeeSummary.proofSentCount} need check`)}
+          {renderCompactAdminStat('Approved', `\u20B1${adminFeeSummary.approvedPHP.toLocaleString()}`, 'emerald', `${adminFeeSummary.approvedCount} can enter`)}
+          {renderCompactAdminStat('Pending', `\u20B1${adminFeeSummary.pendingPHP.toLocaleString()}`, 'amber', `${adminFeeSummary.pendingCount} no proof`)}
+          {adminFeeSummary.recheckCount > 0 && renderCompactAdminStat('Recheck', `\u20B1${adminFeeSummary.recheckPHP.toLocaleString()}`, 'rose', `${adminFeeSummary.recheckCount} resend`)}
         </div>
       </div>
       <div className="overflow-x-auto">
@@ -5909,6 +5981,10 @@ ${rowsXML.join("\n")}
                       onClick={() => setFullScreenProof(customer.proofUrl)}
                       onMouseEnter={(event) => showHoveredProofPreview(customer.proofUrl, event)}
                       onMouseLeave={hideHoveredProofPreview}
+                      onPointerEnter={(event) => showHoveredProofPreview(customer.proofUrl, event)}
+                      onPointerLeave={hideHoveredProofPreview}
+                      onFocus={(event) => showHoveredProofPreview(customer.proofUrl, event)}
+                      onBlur={hideHoveredProofPreview}
                       className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-violet-700 transition-colors hover:border-violet-300"
                     >
                       View
@@ -5931,21 +6007,48 @@ ${rowsXML.join("\n")}
                   </span>
                 </td>
                 <td className="text-center">
-                  <div className="flex flex-col items-center gap-1.5">
-                    <button
-                      onClick={() => updateAdminFeeStatus(customer, 'approved')}
-                      disabled={!customer.proofUrl || customer.status === 'approved'}
-                      className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition-colors hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Approve Fee
-                    </button>
-                    <button
-                      onClick={() => updateAdminFeeStatus(customer, 'rejected')}
-                      disabled={!customer.proofUrl}
-                      className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Recheck
-                    </button>
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="flex flex-col items-center gap-1.5">
+                      <button
+                        onClick={() => updateAdminFeeStatus(customer, 'approved')}
+                        disabled={!customer.proofUrl || customer.status === 'approved'}
+                        className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition-colors hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Approve Fee
+                      </button>
+                      <button
+                        onClick={() => updateAdminFeeStatus(customer, 'rejected')}
+                        disabled={!customer.proofUrl}
+                        className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Recheck
+                      </button>
+                    </div>
+                    {confirmAction.type === 'deleteAdminFee' && confirmAction.id === customer.email ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => deleteAdminFeeAccess(customer)}
+                          className="rounded-full bg-rose-500 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-white hover:bg-rose-600"
+                        >
+                          Yes
+                        </button>
+                        <button
+                          onClick={() => setConfirmAction({ type: null, id: null })}
+                          className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:border-slate-300"
+                        >
+                          No
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmAction({ type: 'deleteAdminFee', id: customer.email })}
+                        className="ml-auto rounded-full border border-transparent bg-transparent p-1 text-slate-300 transition-colors hover:border-rose-100 hover:bg-rose-50 hover:text-rose-600"
+                        title="Delete admin fee request"
+                        aria-label="Delete admin fee request"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>

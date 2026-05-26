@@ -62,6 +62,13 @@ export function getChainAccessRecord(profile = {}, settings = {}) {
   return profile?.chainAccess?.[chainId] || null;
 }
 
+export function removeCurrentChainAccess(profile = {}, settings = {}) {
+  const chainId = getCurrentChainId(settings);
+  const nextChainAccess = { ...(profile?.chainAccess || {}) };
+  delete nextChainAccess[chainId];
+  return nextChainAccess;
+}
+
 export function hasApprovedChainAccess(profile = {}, settings = {}) {
   return getChainAccessRecord(profile, settings)?.status === 'approved';
 }

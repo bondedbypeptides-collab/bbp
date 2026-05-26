@@ -11,6 +11,7 @@ import {
   getCurrentChainId,
   hasApprovedChainAccess,
   pickLowestLoadAdmin,
+  removeCurrentChainAccess,
   resolveOrderAdminFeePhp,
   mergeAdminEditProducts,
 } from '../src/admin-order-edit-helpers.js';
@@ -148,6 +149,19 @@ test('resolveOrderAdminFeePhp removes admin fee after current chain approval', (
   assert.equal(resolveOrderAdminFeePhp({ profile, settings }), 0);
   assert.equal(resolveOrderAdminFeePhp({ profile: {}, settings }), 150);
   assert.deepEqual(getChainAccessRecord(profile, settings), { status: 'approved', adminFeeAmountPhp: 150 });
+});
+
+test('removeCurrentChainAccess removes only the selected chain approval record', () => {
+  const profile = {
+    chainAccess: {
+      'April Chain': { status: 'approved', adminFeeAmountPhp: 400 },
+      'May Chain': { status: 'proof_sent', adminFeeAmountPhp: 400 },
+    },
+  };
+
+  assert.deepEqual(removeCurrentChainAccess(profile, { chainLabel: 'May Chain' }), {
+    'April Chain': { status: 'approved', adminFeeAmountPhp: 400 },
+  });
 });
 
 test('buildAmountBalancedAdminAssignments assigns largest mutable orders to lowest total admin', () => {
