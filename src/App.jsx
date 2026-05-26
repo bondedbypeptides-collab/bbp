@@ -12,7 +12,18 @@ import {
   MessageCircle, Send, ScrollText, Edit3, Trash, ShoppingCart, RotateCcw, Save
 } from 'lucide-react';
 import ShopWorkspaceMain from './components/ShopWorkspaceMain';
-import { buildAdminEditedUserPatch } from './admin-order-edit-helpers.js';
+import {
+  buildAdminEditedUserPatch,
+  buildAmountBalancedAdminAssignments,
+  buildChainAccessRecord,
+  buildLegacyProductPriceLookup,
+  getChainAccessRecord,
+  getCurrentChainId,
+  hasApprovedChainAccess,
+  pickLowestAdminFeeRoute,
+  pickLowestLoadAdmin,
+  resolveOrderAdminFeePhp,
+} from './admin-order-edit-helpers.js';
 import { buildArchiveMetadata, buildCustomerBatchHistoryRecords, buildGroupedHistoryView, buildHistoryArchiveRows } from './history-helpers';
 
 const AdminOrderEditHost = lazy(() => import('./components/AdminOrderEditHost'));
@@ -594,6 +605,8 @@ export default function App() {
   const [selectedProfileEmail, setSelectedProfileEmail] = useState(null);
   const [isBtnLoading, setIsBtnLoading] = useState(false);
   const [proofFile, setProofFile] = useState(null);
+  const [adminFeeProofFile, setAdminFeeProofFile] = useState(null);
+  const [showAdminFeeResend, setShowAdminFeeResend] = useState(false);
   const [shopAccessCodeInput, setShopAccessCodeInput] = useState('');
   const [hasShopAccess, setHasShopAccess] = useState(false);
   const [pendingHitListAdd, setPendingHitListAdd] = useState(null);
@@ -680,6 +693,7 @@ export default function App() {
     storeOpen: true,
     reviewStageOpen: false,
     paymentsOpen: false,
+    adminFeeGateOpen: true,
     paymentRoutesVisible: true,
     addOnly: false,
     gasWebAppUrl: '',
@@ -739,15 +753,15 @@ export default function App() {
   const isAdminView = view === 'admin';
   const adminOrdersTabs = ['overview', 'active-orders', 'payments', 'audit', 'packing', 'trimming', 'customers', 'settings-core'];
   const adminProductsTabs = ['overview', 'active-orders', 'payments', 'audit', 'packing', 'trimming', 'customers', 'settings-products', 'settings-core'];
-  const adminUsersTabs = ['overview', 'active-orders', 'payments', 'audit', 'customers', 'settings-core'];
+  const adminUsersTabs = ['overview', 'active-orders', 'payments', 'admin-fees', 'audit', 'customers', 'settings-core'];
   const adminNeedsOrders = isAdminAuthenticated && adminOrdersTabs.includes(adminTab);
   const adminNeedsProducts = isAdminAuthenticated && adminProductsTabs.includes(adminTab);
   const adminNeedsUsers = isAdminAuthenticated && adminUsersTabs.includes(adminTab);
   const adminNeedsLogs = isAdminAuthenticated && ['overview', 'logs'].includes(adminTab);
-  const adminNeedsSafety = isAdminAuthenticated && adminTab === 'safety';
+  const adminNeedsSafety = isAdminAuthenticated && ['overview', 'active-orders', 'payments', 'audit', 'customers', 'safety'].includes(adminTab);
   const needsInventoryData = isAdminAuthenticated && ['overview', 'settings-products'].includes(adminTab);
   const needsActiveOrdersData = isAdminAuthenticated && ['overview', 'active-orders'].includes(adminTab);
-  const needsPaymentData = isAdminAuthenticated && ['overview', 'payments', 'audit'].includes(adminTab);
+  const needsPaymentData = isAdminAuthenticated && ['overview', 'payments', 'admin-fees', 'audit'].includes(adminTab);
   const needsCustomerDirectoryData = isAdminAuthenticated && ['overview', 'customers'].includes(adminTab);
   const needsPackingData = isAdminAuthenticated && ['overview', 'packing'].includes(adminTab);
   const needsAdminHitListData = isAdminAuthenticated && ['overview', 'trimming'].includes(adminTab);
@@ -975,6 +989,14 @@ export default function App() {
   ), [customerEmail, customerHandle, customerName]);
 
   const productsByName = useMemo(() => Object.fromEntries(products.map((product) => [product.name, product])), [products]);
+  const legacyProductPriceLookup = useMemo(() => buildLegacyProductPriceLookup(safetyRecords), [safetyRecords]);
+  const getUnitPriceUSD = (productName) => {
+    const livePrice = Number(productsByName[productName]?.pricePerVialUSD);
+    if (Number.isFinite(livePrice) && livePrice > 0) return livePrice;
+    const legacyPrice = Number(legacyProductPriceLookup[productName]);
+    if (Number.isFinite(legacyPrice) && legacyPrice > 0) return legacyPrice;
+    return 0;
+  };
 
   const usersById = useMemo(() => Object.fromEntries(users.map((profile) => [profile.id, profile])), [users]);
 
@@ -1080,6 +1102,53 @@ export default function App() {
       return { name: a.name, banks };
     });
   }, [settings.admins]);
+
+  const adminFeeChainRecords = useMemo(() => {
+    const records = [];
+    users.forEach((profile) => {
+      const record = getChainAccessRecord(profile, settings);
+      if (record) records.push(record);
+    });
+    return records;
+  }, [settings, users]);
+
+  const getAdminFeePaymentRoute = (adminName = '') => {
+    const preferredAdmin = String(adminName || '').trim();
+    const orderedAdmins = [
+      ...normalizedAdmins.filter(admin => admin.name === preferredAdmin),
+      ...normalizedAdmins.filter(admin => admin.name !== preferredAdmin),
+    ];
+
+    for (const admin of orderedAdmins) {
+      const bank = (admin.banks || []).find(option => option?.details || option?.qr);
+      if (bank) {
+        return {
+          adminName: admin.name || 'Admin',
+          bankDetails: bank.details || '',
+          bankQr: bank.qr || '',
+          hasRoute: true,
+        };
+      }
+    }
+
+    return {
+      adminName: 'Admin',
+      bankDetails: '',
+      bankQr: '',
+      hasRoute: false,
+    };
+  };
+
+  const adminFeePaymentRoute = useMemo(() => {
+    const eligibleAdminNames = normalizedAdmins
+      .filter(admin => getAdminFeePaymentRoute(admin.name).hasRoute)
+      .map(admin => admin.name);
+    const balancedAdminName = pickLowestAdminFeeRoute({
+      adminNames: eligibleAdminNames,
+      chainAccessRecords: adminFeeChainRecords,
+    });
+    return getAdminFeePaymentRoute(balancedAdminName);
+  }, [adminFeeChainRecords, normalizedAdmins]);
 
   useEffect(() => {
     if (!configuredShopAccessCode) {
@@ -1373,14 +1442,17 @@ export default function App() {
     return '';
   };
 
-  const buildPaymentSnapshot = (items, adminName, email, capturedAt = Date.now()) => {
+  const buildPaymentSnapshot = (items, adminName, email, capturedAt = Date.now(), profileOverride = null) => {
     let subtotalUSD = 0;
     Object.entries(items || {}).forEach(([prod, qty]) => {
-      const product = productsByName[prod];
-      if (product && qty > 0) subtotalUSD += qty * Number(product.pricePerVialUSD || 0);
+      if (qty > 0) subtotalUSD += qty * getUnitPriceUSD(prod);
     });
 
-    const { totalUSD, totalPHP, fxRate, adminFeePhp } = calculateOrderTotals(subtotalUSD);
+    const adminFeePhpForOrder = resolveOrderAdminFeePhp({
+      profile: profileOverride || usersById[String(email || '').toLowerCase().trim()] || {},
+      settings,
+    });
+    const { totalUSD, totalPHP, fxRate, adminFeePhp } = calculateOrderTotals(subtotalUSD, Number(settings.fxRate || 0), adminFeePhpForOrder);
     const route = getSelectedAdminBankRoute(adminName, email);
 
     return {
@@ -1390,6 +1462,7 @@ export default function App() {
       totalPHP,
       fxRate,
       adminFeePhp,
+      adminFeePrepaid: adminFeePhp === 0,
       adminAssigned: route.adminAssigned,
       bankIndex: route.bankIndex,
       bankDetails: route.bankDetails,
@@ -1636,12 +1709,12 @@ export default function App() {
       let sub = 0;
       const itemEntries = Object.entries(c.products).sort((a, b) => a[0].localeCompare(b[0]));
       itemEntries.forEach(([pName, qty]) => {
-        const pData = productsByName[pName];
-        if (pData) sub += qty * pData.pricePerVialUSD;
+        sub += qty * getUnitPriceUSD(pName);
       });
       const profile = usersById[c.email] || {};
       const frozenPaymentSnapshot = getFrozenPaymentSnapshot(profile);
-      const { totalUSD: liveTotalUSD, totalPHP: liveTotalPHP } = calculateOrderTotals(sub);
+      const orderAdminFeePhp = resolveOrderAdminFeePhp({ profile, settings });
+      const { totalUSD: liveTotalUSD, totalPHP: liveTotalPHP } = calculateOrderTotals(sub, Number(settings.fxRate || 0), orderAdminFeePhp);
       const address = profile.address || null;
       const adminAssigned = frozenPaymentSnapshot?.adminAssigned || profile.adminAssigned || "Unassigned";
       const hasAddress = Boolean(address?.street && address?.city && address?.contact);
@@ -1667,6 +1740,9 @@ export default function App() {
         paymentSnapshot: frozenPaymentSnapshot,
         paymentBankDetails: frozenPaymentSnapshot?.bankDetails || '',
         paymentBankQr: frozenPaymentSnapshot?.bankQr || '',
+        chainAccess: profile.chainAccess || {},
+        currentChainAccess: getChainAccessRecord(profile, settings),
+        adminFeePrepaid: orderAdminFeePhp === 0,
         buyerReviewConfirmedAt,
         reviewReady: Boolean(buyerReviewConfirmedAt),
         adminNotes: profile.adminNotes || '',
@@ -1684,6 +1760,33 @@ export default function App() {
     () => Object.fromEntries(customerList.map((customer) => [customer.email, customer])),
     [customerList]
   );
+
+  const adminFeeAccessCustomers = useMemo(() => {
+    if (!isAdminAuthenticated) return [];
+    return users
+      .map(profile => {
+        const email = String(profile.id || profile.email || '').toLowerCase().trim();
+        const record = getChainAccessRecord(profile, settings);
+        if (!email || !record) return null;
+
+        return {
+          email,
+          name: profile.name || email,
+          handle: record.handle || profile.handle || '',
+          record,
+          status: record.status || 'pending',
+          routeAdmin: record.routeAdmin || '',
+          proofUrl: record.proofUrl || '',
+          adminFeeAmountPhp: Number(record.adminFeeAmountPhp || settings.adminFeePhp || 0),
+          submittedAt: Number(record.proofSubmittedAt || record.updatedAt || record.createdAt || 0),
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => {
+        const rank = { proof_sent: 0, pending: 1, rejected: 2, approved: 3 };
+        return (rank[left.status] ?? 9) - (rank[right.status] ?? 9) || right.submittedAt - left.submittedAt;
+      });
+  }, [isAdminAuthenticated, settings, users]);
 
   const filteredAdminProducts = useMemo(() => {
     if (!needsInventoryData) return [];
@@ -2394,6 +2497,27 @@ export default function App() {
   }, [calculatorDoseMg, calculatorStrengthMg, calculatorWaterMl]);
 
   const customerProfile = useMemo(() => usersById[normalizedCustomerEmail] || null, [usersById, normalizedCustomerEmail]);
+  const currentChainId = getCurrentChainId(settings);
+  const currentChainAccessRecord = getChainAccessRecord(customerProfile, settings);
+  const currentAdminFeePaymentRoute = currentChainAccessRecord?.routeAdmin
+    ? getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin)
+    : adminFeePaymentRoute;
+  const hasCurrentChainFeeApproval = hasApprovedChainAccess(customerProfile, settings);
+  const currentChainFeeStatus = currentChainAccessRecord?.status || 'pending';
+  const shouldShowAdminFeePaymentForm = Boolean(
+    currentChainAccessRecord
+    && (
+      showAdminFeeResend
+      || currentChainFeeStatus === 'pending'
+      || currentChainFeeStatus === 'rejected'
+    )
+  );
+  const isCurrentChainLoginUnlocked = Boolean(normalizedCustomerEmail && hasCurrentChainFeeApproval);
+
+  useEffect(() => {
+    setShowAdminFeeResend(false);
+    setAdminFeeProofFile(null);
+  }, [currentChainFeeStatus, normalizedCustomerEmail]);
 
   const existingOrderData = useMemo(() => {
     const userOrders = ordersByEmail[normalizedCustomerEmail] || [];
@@ -2628,6 +2752,173 @@ export default function App() {
     showToast('Batch code accepted.');
   }
 
+  const buildChainAccessPatch = (profile, nextRecord) => ({
+    chainAccess: {
+      ...(profile?.chainAccess || {}),
+      [currentChainId]: nextRecord,
+    },
+  });
+
+  async function startAdminFeeAccess(e) {
+    if (e) e.preventDefault();
+    const emailLower = normalizedCustomerEmail;
+    const cleanHandle = String(customerHandle || '').trim();
+
+    if (!emailLower || !emailLower.includes('@')) {
+      triggerShake('email');
+      showToast('Enter a valid email first.');
+      return;
+    }
+
+    if (emailLower !== customerEmailConfirm.toLowerCase().trim()) {
+      triggerShake('emailConfirm');
+      showToast('Email confirmation does not match.');
+      return;
+    }
+
+    if (!cleanHandle) {
+      triggerShake('handle');
+      showToast('Enter your handle first.');
+      return;
+    }
+
+    if (!adminFeePaymentRoute.hasRoute) {
+      showToast('Admin fee route is not ready yet. Ask admin to add a bank or QR first.');
+      return;
+    }
+
+    const existingProfile = usersById[emailLower] || {};
+    const existingRecord = getChainAccessRecord(existingProfile, settings);
+    const nextRecord = buildChainAccessRecord({
+      existingRecord,
+      handle: cleanHandle,
+      adminFeePhp: settings.adminFeePhp,
+      now: Date.now(),
+    });
+    nextRecord.routeAdmin = adminFeePaymentRoute.adminName;
+    nextRecord.routeBankDetails = adminFeePaymentRoute.bankDetails;
+    nextRecord.routeBankQr = adminFeePaymentRoute.bankQr;
+
+    setIsBtnLoading(true);
+    try {
+      await safeAwait(setDoc(doc(db, colPath('users'), emailLower), {
+        id: emailLower,
+        email: emailLower,
+        handle: cleanHandle,
+        name: customerName || existingProfile.name || '',
+        ...buildChainAccessPatch(existingProfile, nextRecord),
+      }, { merge: true }));
+      showToast('Admin fee access created. Pay the fee, upload proof, then wait for approval.');
+    } catch (err) {
+      console.error(err);
+      showToast('Could not start admin fee access right now.');
+    }
+    setIsBtnLoading(false);
+  }
+
+  async function submitAdminFeeProof(e) {
+    if (e) e.preventDefault();
+    const emailLower = normalizedCustomerEmail;
+    if (!emailLower) {
+      triggerShake('email');
+      showToast('Enter your email first.');
+      return;
+    }
+
+    if (!currentChainAccessRecord) {
+      showToast('Tap Ready Pay first so your admin fee record is created.');
+      return;
+    }
+
+    if (!adminFeeProofFile) {
+      triggerShake('adminFeeProof');
+      showToast('Upload the admin fee receipt.');
+      return;
+    }
+
+    setIsBtnLoading(true);
+    try {
+      const fileExt = adminFeeProofFile.name.split('.').pop();
+      const fileName = `${emailLower}_admin_fee_${Date.now()}.${fileExt}`;
+      const sRefPath = isCanvas ? `artifacts/${appId}/public/proofs/${fileName}` : `proofs/${fileName}`;
+      const { storage, storageRef, uploadBytesResumable, getDownloadURL } = await getStorageServices();
+      const sRef = storageRef(storage, sRefPath);
+
+      showToast('Uploading admin fee proof...');
+      await uploadBytesResumable(sRef, adminFeeProofFile);
+      const downloadUrl = await getDownloadURL(sRef);
+
+      const existingProfile = usersById[emailLower] || {};
+      const nextRecord = {
+        ...currentChainAccessRecord,
+        status: 'proof_sent',
+        proofUrl: downloadUrl,
+        proofSubmittedAt: Date.now(),
+        adminFeeAmountPhp: Number(settings.adminFeePhp || 0),
+        routeAdmin: currentAdminFeePaymentRoute.adminName,
+        routeBankDetails: currentAdminFeePaymentRoute.bankDetails,
+        routeBankQr: currentAdminFeePaymentRoute.bankQr,
+        updatedAt: Date.now(),
+      };
+
+      await safeAwait(setDoc(doc(db, colPath('users'), emailLower), {
+        id: emailLower,
+        email: emailLower,
+        handle: customerHandle || existingProfile.handle || '',
+        ...buildChainAccessPatch(existingProfile, nextRecord),
+      }, { merge: true }));
+      await safeAwait(addDoc(collection(db, colPath('logs')), {
+        timestamp: Date.now(),
+        email: emailLower,
+        name: customerName || existingProfile.name || '',
+        action: 'Submitted Admin Fee Proof',
+        details: `Chain: ${currentChainId}`,
+      }));
+
+      setAdminFeeProofFile(null);
+      showToast('Admin fee proof sent. Admin will verify it before access unlocks.');
+    } catch (err) {
+      console.error(err);
+      showToast('Error uploading admin fee proof.');
+    }
+    setIsBtnLoading(false);
+  }
+
+  async function updateAdminFeeStatus(customer, nextStatus) {
+    if (!customer?.email) return;
+    const profile = usersById[customer.email] || {};
+    const existingRecord = getChainAccessRecord(profile, settings);
+    if (!existingRecord) {
+      showToast('No admin fee record found for this customer.');
+      return;
+    }
+
+    const now = Date.now();
+    const nextRecord = {
+      ...existingRecord,
+      status: nextStatus,
+      updatedAt: now,
+      adminFeeAmountPhp: Number(existingRecord.adminFeeAmountPhp || settings.adminFeePhp || 0),
+      ...(nextStatus === 'approved' ? { adminFeePaidAt: now, approvedAt: now, approvedBy: 'Admin' } : {}),
+      ...(nextStatus === 'rejected' ? { rejectedAt: now } : {}),
+    };
+
+    try {
+      await safeAwait(setDoc(doc(db, colPath('users'), customer.email), buildChainAccessPatch(profile, nextRecord), { merge: true }));
+      await safeAwait(addDoc(collection(db, colPath('logs')), {
+        timestamp: now,
+        email: customer.email,
+        name: customer.name || '',
+        action: nextStatus === 'approved' ? 'Approved Admin Fee' : 'Rejected Admin Fee',
+        details: `Chain: ${currentChainId}`,
+      }));
+      showToast(nextStatus === 'approved' ? 'Admin fee approved. Buyer can log in now.' : 'Admin fee marked for recheck.');
+    } catch (err) {
+      console.error(err);
+      showToast('Could not update admin fee status.');
+    }
+  }
+
   function triggerAmbulance() {
     setShowAmbulance(true);
     setTimeout(() => setShowAmbulance(false), 800);
@@ -2701,15 +2992,15 @@ export default function App() {
     const currentQty = cartItems[productName]?.v || existingOrderData.items[productName] || 0;
     const addQty = Math.max(1, parseInt(requestedAddQty, 10) || 1);
     const nextQty = currentQty + addQty;
-    const nextSubtotalUSD = subtotalUSD + (Number(product.pricePerVialUSD || 0) * addQty);
-    const nextTotalPHP = lockedPaymentSnapshot?.totalPHP ?? calculateOrderTotals(nextSubtotalUSD).totalPHP;
+    const nextSubtotalUSD = subtotalUSD + (getUnitPriceUSD(productName) * addQty);
+    const nextTotalPHP = lockedPaymentSnapshot?.totalPHP ?? calculateOrderTotals(nextSubtotalUSD, Number(settings.fxRate || 0), currentOrderAdminFeePhp).totalPHP;
 
     setPendingHitListAdd({
       productName,
       currentQty,
       addQty,
       nextQty,
-      pricePerVialUSD: Number(product.pricePerVialUSD || 0),
+      pricePerVialUSD: getUnitPriceUSD(productName),
       baseSubtotalUSD: subtotalUSD,
       missingSlots: Number(hitListContext.missingSlots || 0),
       boxNum: Number(hitListContext.boxNum || 0) || null,
@@ -2727,7 +3018,7 @@ export default function App() {
         ...prev,
         addQty: safeQty,
         nextQty,
-        nextTotalPHP: lockedPaymentSnapshot?.totalPHP ?? calculateOrderTotals(nextSubtotalUSD).totalPHP
+        nextTotalPHP: lockedPaymentSnapshot?.totalPHP ?? calculateOrderTotals(nextSubtotalUSD, Number(settings.fxRate || 0), currentOrderAdminFeePhp).totalPHP
       };
     });
   }
@@ -3362,6 +3653,7 @@ export default function App() {
 
   async function submitOrder() {
     if (isShopAccessLocked) { showToast("Enter the batch code from Discord first."); return; }
+    if (showCurrentChainFeeGate) { showToast("Admin fee approval is required before entering this chain."); return; }
     if (!customerEmail) { triggerAmbulance(); showToast("Email address is required."); return; }
     if (customerEmail.toLowerCase().trim() !== customerEmailConfirm.toLowerCase().trim()) {
       triggerAmbulance(); showToast("Email addresses do not match."); return;
@@ -3452,7 +3744,13 @@ export default function App() {
         buyerReviewConfirmedAt: null
       };
       if (!existingUser || !existingUser.adminAssigned) {
-        userUpdatePayload.adminAssigned = normalizedAdmins[Math.floor(Math.random() * normalizedAdmins.length)]?.name || "Admin";
+        const eligibleAdminNames = normalizedAdmins
+          .filter((admin) => getSelectedAdminBankRoute(admin.name, `${admin.name}@routing.local`).hasRoute)
+          .map((admin) => admin.name);
+        userUpdatePayload.adminAssigned = pickLowestLoadAdmin({
+          adminNames: eligibleAdminNames.length ? eligibleAdminNames : normalizedAdmins.map((admin) => admin.name),
+          customers: customerList.filter(customer => customer.email !== emailLower && customer.itemCount > 0),
+        }) || "Admin";
       }
       if (!existingUser?.proofUrl && !existingUser?.isPaid) {
         userUpdatePayload.paymentSnapshot = null;
@@ -3474,6 +3772,7 @@ export default function App() {
 
   async function submitPayment() {
     if (showShopAccessGate) { showToast("Enter the batch code from Discord first."); return; }
+    if (showCurrentChainFeeGate) { showToast("Admin fee approval is required before final payment."); return; }
     if (!hasValidPaymentRoute) {
       showToast("Payment is blocked until a real admin with a bank or QR route is assigned to your order.");
       return;
@@ -3511,7 +3810,7 @@ export default function App() {
       const sRef = storageRef(storage, sRefPath);
       const currentProfile = emailLower === normalizedCustomerEmail ? (customerProfile || {}) : (usersById[emailLower] || {});
       const existingSnapshot = getFrozenPaymentSnapshot(currentProfile);
-      const frozenSnapshot = existingSnapshot || buildPaymentSnapshot(existingOrderData.items, currentProfile.adminAssigned || currentCustomerRecord?.adminAssigned, emailLower);
+      const frozenSnapshot = existingSnapshot || buildPaymentSnapshot(existingOrderData.items, currentProfile.adminAssigned || currentCustomerRecord?.adminAssigned, emailLower, Date.now(), currentProfile);
 
       showToast("Uploading proof...");
       await uploadBytesResumable(sRef, proofFile);
@@ -4267,7 +4566,7 @@ ${rowsXML.join("\n")}
           const shouldPreserveExistingSnapshot = Boolean(userProfile.proofUrl || userProfile.isPaid);
           const paymentSnapshot = shouldPreserveExistingSnapshot && getFrozenPaymentSnapshot(userProfile)
             ? getFrozenPaymentSnapshot(userProfile)
-            : buildPaymentSnapshot(customer.products, customer.adminAssigned, customer.email);
+            : buildPaymentSnapshot(customer.products, customer.adminAssigned, customer.email, Date.now(), userProfile);
           batch.set(doc(db, colPath('users'), customer.email), { paymentSnapshot }, { merge: true });
         });
         await safeAwait(batch.commit());
@@ -4721,13 +5020,7 @@ ${rowsXML.join("\n")}
       return;
     }
 
-    const mutableCustomers = activeCustomers
-      .filter(customer => !customer.isPaid && !customer.hasProof)
-      .sort((a, b) => {
-        const totalDiff = b.totalPHP - a.totalPHP;
-        if (totalDiff !== 0) return totalDiff;
-        return a.email.localeCompare(b.email);
-      });
+    const mutableCustomers = activeCustomers.filter(customer => !customer.isPaid && !customer.hasProof);
 
     if (mutableCustomers.length === 0) {
       showToast("All active customers are already payment-locked.");
@@ -4750,12 +5043,19 @@ ${rowsXML.join("\n")}
         meta: { admins: eligibleAdmins.map(admin => admin.name) }
       });
 
-      for (const [index, chunk] of chunkArray(mutableCustomers, 250).entries()) {
+      const adminAssignments = buildAmountBalancedAdminAssignments({
+        adminNames: eligibleAdmins.map(admin => admin.name),
+        lockedCustomers: activeCustomers.filter(customer => customer.isPaid || customer.hasProof),
+        mutableCustomers,
+      });
+
+      for (const chunk of chunkArray(mutableCustomers, 250)) {
         const batch = writeBatch(db);
-        chunk.forEach((customer, chunkIndex) => {
-          const admin = eligibleAdmins[(index * 250 + chunkIndex) % eligibleAdmins.length];
+        chunk.forEach((customer) => {
+          const adminName = adminAssignments[customer.email];
+          if (!adminName) return;
           batch.set(doc(db, colPath('users'), customer.email), {
-            adminAssigned: admin.name,
+            adminAssigned: adminName,
             paymentSnapshot: null
           }, { merge: true });
         });
@@ -4840,7 +5140,7 @@ ${rowsXML.join("\n")}
 
       const nextSnapshot = (settings.paymentsOpen || hasSavedPaymentState)
         ? (() => {
-          const rebuilt = buildPaymentSnapshot(nextItems, existingSnapshot?.adminAssigned || targetProfile.adminAssigned, targetEmail);
+          const rebuilt = buildPaymentSnapshot(nextItems, existingSnapshot?.adminAssigned || targetProfile.adminAssigned, targetEmail, Date.now(), targetProfile);
           if (!existingSnapshot) return rebuilt;
           return {
             ...rebuilt,
@@ -4899,10 +5199,10 @@ ${rowsXML.join("\n")}
   const cartList = [];
 
   Object.entries(finalItems).forEach(([prod, qty]) => {
-    const pData = productsByName[prod];
-    if (pData && qty > 0) {
-      subtotalUSD += qty * pData.pricePerVialUSD;
-      cartList.push({ product: prod, qty, price: pData.pricePerVialUSD, total: qty * pData.pricePerVialUSD });
+    const unitPriceUSD = getUnitPriceUSD(prod);
+    if (unitPriceUSD > 0 && qty > 0) {
+      subtotalUSD += qty * unitPriceUSD;
+      cartList.push({ product: prod, qty, price: unitPriceUSD, total: qty * unitPriceUSD });
     }
   });
 
@@ -4927,7 +5227,10 @@ ${rowsXML.join("\n")}
   );
   const arePaymentRoutesVisible = settings.paymentRoutesVisible !== false;
   const canShowPaymentRoute = hasValidPaymentRoute && arePaymentRoutesVisible;
-  const totalPHP = lockedPaymentSnapshot?.totalPHP ?? calculateOrderTotals(subtotalUSD).totalPHP;
+  const currentOrderAdminFeePhp = resolveOrderAdminFeePhp({ profile: currentProfile || {}, settings });
+  const liveOrderTotals = calculateOrderTotals(subtotalUSD, Number(settings.fxRate || 0), currentOrderAdminFeePhp);
+  const totalPHP = lockedPaymentSnapshot?.totalPHP ?? liveOrderTotals.totalPHP;
+  const buyerPaymentSettings = { ...settings, adminFeePhp: currentOrderAdminFeePhp };
   const selectedVialCount = cartList.reduce((sum, item) => sum + item.qty, 0);
   const availableCatalogCount = filteredShopProducts.filter(p => !p.isClosed).length;
   const nearlyFullCount = filteredShopProducts.filter(p => !p.isClosed && p.slotsLeft > 0 && p.slotsLeft <= 3).length;
@@ -4976,10 +5279,12 @@ ${rowsXML.join("\n")}
   ];
   const liveResultsLabel = filteredShopProducts.length === 1 ? '1 product' : `${filteredShopProducts.length} products`;
   const isStoreClosed = settings.storeOpen === false;
-  const isShopAccessLocked = requiresShopAccessCode && !hasShopAccess;
+  const requiresCurrentChainFee = settings.storeOpen !== false && settings.adminFeeGateOpen !== false && Number(settings.adminFeePhp || 0) > 0;
   const isReviewStageOpen = Boolean(settings.reviewStageOpen) && !settings.paymentsOpen;
-  const canBypassShopGate = isReviewStageOpen || settings.paymentsOpen;
-  const showShopAccessGate = isShopAccessLocked && !canBypassShopGate;
+  const canBypassShopGate = isReviewStageOpen || settings.paymentsOpen || isCurrentChainLoginUnlocked;
+  const showCurrentChainFeeGate = requiresCurrentChainFee && !isCurrentChainLoginUnlocked;
+  const isShopAccessLocked = requiresShopAccessCode && !hasShopAccess;
+  const showShopAccessGate = isShopAccessLocked && !canBypassShopGate && !showCurrentChainFeeGate;
   const showCatalogReference = !settings.paymentsOpen && (!isReviewStageOpen || hasShopAccess);
   const isOrderOnlyMode = settings.paymentsOpen || (isReviewStageOpen && !hasShopAccess);
   const hasExistingOrder = Object.keys(existingMap).length > 0;
@@ -5559,6 +5864,99 @@ ${rowsXML.join("\n")}
         </div>
       </div>
     </>
+  );
+
+  const renderAdminFeeDashboard = () => (
+    <section className="bg-white rounded-[24px] shadow-sm border-2 border-pink-50 overflow-hidden">
+      <div className="flex flex-col gap-2 border-b border-pink-50 bg-[#FFF8FC] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Current Chain Admin Fee</p>
+          <p className="mt-1 text-xs font-bold text-slate-500">{currentChainId} access approvals</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {renderCompactAdminStat('Proof Sent', adminFeeAccessCustomers.filter(c => c.status === 'proof_sent').length, 'violet', 'Needs admin check')}
+          {renderCompactAdminStat('Approved', adminFeeAccessCustomers.filter(c => c.status === 'approved').length, 'emerald', 'Can enter chain')}
+          {renderCompactAdminStat('Pending', adminFeeAccessCustomers.filter(c => c.status === 'pending').length, 'amber', 'No proof yet')}
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left custom-table">
+          <thead>
+            <tr>
+              <th>Buyer</th>
+              <th>Route Admin</th>
+              <th>Amount</th>
+              <th>Proof</th>
+              <th>Status</th>
+              <th className="text-center">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-pink-50">
+            {adminFeeAccessCustomers.map(customer => (
+              <tr key={customer.email} className={customer.status === 'approved' ? 'bg-emerald-50/40' : customer.status === 'proof_sent' ? 'bg-violet-50/45' : customer.status === 'rejected' ? 'bg-rose-50/45' : 'bg-white'}>
+                <td>
+                  <button onClick={() => { setSelectedProfileEmail(customer.email); setIsEditingAddress(false); }} className="font-bold text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">
+                    {customer.name}
+                  </button>
+                  <p className="text-[10px] text-slate-400">{customer.email}</p>
+                  {customer.handle && <p className="text-[10px] font-black uppercase tracking-widest text-[#D6006E]">{customer.handle}</p>}
+                </td>
+                <td className="text-xs font-black text-slate-700">{customer.routeAdmin || 'Unassigned'}</td>
+                <td className="font-black text-[#D6006E]">{"\u20B1"}{customer.adminFeeAmountPhp.toLocaleString()}</td>
+                <td>
+                  {customer.proofUrl ? (
+                    <button
+                      onClick={() => setFullScreenProof(customer.proofUrl)}
+                      onMouseEnter={(event) => showHoveredProofPreview(customer.proofUrl, event)}
+                      onMouseLeave={hideHoveredProofPreview}
+                      className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-violet-700 transition-colors hover:border-violet-300"
+                    >
+                      View
+                    </button>
+                  ) : (
+                    <span className="text-[10px] font-bold italic text-slate-400">No proof</span>
+                  )}
+                </td>
+                <td>
+                  <span className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${
+                    customer.status === 'approved'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : customer.status === 'proof_sent'
+                        ? 'border-violet-200 bg-violet-50 text-violet-700'
+                        : customer.status === 'rejected'
+                          ? 'border-rose-200 bg-rose-50 text-rose-700'
+                          : 'border-amber-200 bg-amber-50 text-amber-700'
+                  }`}>
+                    {customer.status === 'proof_sent' ? 'Proof Sent' : customer.status}
+                  </span>
+                </td>
+                <td className="text-center">
+                  <div className="flex flex-col items-center gap-1.5">
+                    <button
+                      onClick={() => updateAdminFeeStatus(customer, 'approved')}
+                      disabled={!customer.proofUrl || customer.status === 'approved'}
+                      className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition-colors hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Approve Fee
+                    </button>
+                    <button
+                      onClick={() => updateAdminFeeStatus(customer, 'rejected')}
+                      disabled={!customer.proofUrl}
+                      className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Recheck
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {adminFeeAccessCustomers.length === 0 && (
+              <tr><td colSpan="6" className="text-center p-8 text-pink-300 font-bold italic">No admin fee access requests yet.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 
   const renderPaymentsDashboard = () => (
@@ -6174,7 +6572,7 @@ ${rowsXML.join("\n")}
       )}
 
       {/* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW: Floating Live Chat Button & Panel */}
-      {view === 'shop' && hasShopAccess && (
+      {view === 'shop' && hasShopAccess && !showCurrentChainFeeGate && (
         <div className="fixed bottom-24 lg:bottom-8 right-4 lg:right-8 z-[70] flex flex-col items-end">
 
           {/* Transparent Preview Bubble (Shows when chat is closed and a new message arrives) */}
@@ -6360,6 +6758,137 @@ ${rowsXML.join("\n")}
                   </p>
                 </div>
               </div>
+            ) : showCurrentChainFeeGate ? (
+              <div className="shop-surface rounded-[30px] p-5 sm:p-6 shadow-sm relative z-10">
+                <div className={`mx-auto grid max-w-5xl gap-5 ${currentChainAccessRecord ? 'lg:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]' : 'lg:grid-cols-1 lg:max-w-2xl'}`}>
+                  <section className="rounded-[28px] border-2 border-pink-100 bg-white/94 p-5 sm:p-7 shadow-[0_18px_40px_rgba(214,0,110,0.08)]">
+                    <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#D6006E]">Current Chain Access</p>
+                    <h2 className="mt-3 text-[1.8rem] sm:text-[2.25rem] font-black text-[#4A042A] leading-[1.03]">
+                      Pay admin fee first
+                    </h2>
+                    <p className="mt-3 text-sm font-bold leading-relaxed text-[#8F2C5D]">
+                      Admin fee unlocks this chain only. After admin approves your email, this chain will open automatically when you enter the same email.
+                    </p>
+
+                    <form onSubmit={startAdminFeeAccess} className="mt-5 space-y-3">
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <input
+                          type="email"
+                          value={customerEmail}
+                          onChange={(e) => setCustomerEmail(e.target.value)}
+                          placeholder="Email"
+                          className={getCustomerFormInputClass('email')}
+                        />
+                        <input
+                          type="email"
+                          value={customerEmailConfirm}
+                          onChange={(e) => setCustomerEmailConfirm(e.target.value)}
+                          placeholder="Confirm email"
+                          className={getCustomerFormInputClass('emailConfirm')}
+                        />
+                        <input
+                          type="text"
+                          value={customerHandle}
+                          onChange={(e) => setCustomerHandle(e.target.value)}
+                          placeholder="@handle"
+                          className={`${getCustomerFormInputClass('handle')} sm:col-span-2`}
+                        />
+                      </div>
+                      <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold leading-relaxed text-amber-700">
+                        Use the same email every time. Admin approval unlocks this chain for this email only.
+                      </p>
+                      <button type="submit" disabled={isBtnLoading || !adminFeePaymentRoute.hasRoute} className={`${originalBtn} w-full justify-center disabled:cursor-not-allowed disabled:opacity-50`}>
+                        {currentChainAccessRecord ? 'Refresh Access Info' : 'Ready Pay'}
+                      </button>
+                    </form>
+
+                    {currentChainFeeStatus === 'approved' && (
+                      <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                        <p className="text-sm font-black text-emerald-800">This email is approved for the current chain.</p>
+                        <p className="mt-1 text-xs font-bold leading-relaxed text-emerald-700">Your profile and order details will load from this email.</p>
+                      </div>
+                    )}
+                  </section>
+
+                  {currentChainAccessRecord && (
+                  <section className="rounded-[28px] border-2 border-pink-100 bg-white/94 p-5 sm:p-7 shadow-[0_18px_40px_rgba(214,0,110,0.08)]">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#D6006E]">Admin Fee</p>
+                        <p className="mt-2 text-3xl font-black text-[#4A042A]">{"\u20B1"}{Number(settings.adminFeePhp || 0).toLocaleString()}</p>
+                      </div>
+                      <span className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${
+                        currentChainAccessRecord?.status === 'approved'
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                          : currentChainAccessRecord?.status === 'proof_sent'
+                            ? 'border-violet-200 bg-violet-50 text-violet-700'
+                            : currentChainAccessRecord?.status === 'rejected'
+                              ? 'border-rose-200 bg-rose-50 text-rose-700'
+                              : 'border-amber-200 bg-amber-50 text-amber-700'
+                      }`}>
+                        {currentChainAccessRecord?.status === 'approved'
+                          ? 'Approved'
+                          : currentChainAccessRecord?.status === 'proof_sent'
+                            ? 'Proof Sent'
+                            : currentChainAccessRecord?.status === 'rejected'
+                              ? 'Recheck'
+                              : 'Unpaid'}
+                      </span>
+                    </div>
+
+                    {currentChainFeeStatus === 'proof_sent' && !showAdminFeeResend ? (
+                      <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                        <p className="text-sm font-black text-violet-800">Proof sent, waiting for admin approval.</p>
+                        <p className="mt-2 text-xs font-bold leading-relaxed text-violet-700">Admin will verify your receipt. This may take some time. Come back later and enter the same email to check access.</p>
+                        <button type="button" onClick={() => setShowAdminFeeResend(true)} className="mt-4 rounded-full border border-violet-200 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-violet-700 transition-colors hover:border-violet-300">Resend Proof</button>
+                      </div>
+                    ) : currentChainFeeStatus === 'approved' ? (
+                      <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                        <p className="text-sm font-black text-emerald-800">Admin fee approved.</p>
+                        <p className="mt-2 text-xs font-bold leading-relaxed text-emerald-700">Use this same email to enter this chain. Final product payment will not charge admin fee again.</p>
+                      </div>
+                    ) : null}
+
+                    {shouldShowAdminFeePaymentForm && (
+                      <>
+                        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-2">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Send To</p>
+                            <p className="text-xs font-black text-[#D6006E]">{currentAdminFeePaymentRoute.adminName}</p>
+                          </div>
+                          {currentAdminFeePaymentRoute.hasRoute ? (
+                            <div className="mt-3 space-y-3">
+                              {currentAdminFeePaymentRoute.bankQr && (
+                                <img src={currentAdminFeePaymentRoute.bankQr} alt="Admin fee QR" className="mx-auto w-full max-w-[180px] rounded-xl border border-slate-200 bg-white" />
+                              )}
+                              {currentAdminFeePaymentRoute.bankDetails && (
+                                <pre className="whitespace-pre-wrap rounded-xl border border-slate-200 bg-white p-3 text-xs font-bold text-slate-700">{currentAdminFeePaymentRoute.bankDetails}</pre>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-600">Admin needs to add a bank or QR before buyers can pay.</p>
+                          )}
+                        </div>
+                        {currentChainFeeStatus === 'rejected' && (
+                          <p className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-bold leading-relaxed text-rose-700">Admin needs you to recheck this proof. Upload the correct receipt below.</p>
+                        )}
+                        {showAdminFeeResend && currentChainFeeStatus === 'proof_sent' && (
+                          <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold leading-relaxed text-amber-700">Bank details are shown again for resend only. Upload a new receipt if the first one was wrong.</p>
+                        )}
+                        <form onSubmit={submitAdminFeeProof} className="mt-4 space-y-3">
+                          <div className={`rounded-2xl border bg-slate-50 p-3 ${shakingField === 'adminFeeProof' ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200'}`}>
+                            <input type="file" accept="image/*" onChange={(e) => setAdminFeeProofFile(e.target?.files?.[0] || null)} className="w-full text-xs font-bold file:mr-3 file:rounded-lg file:border-0 file:bg-[#FF1493] file:px-3 file:py-1.5 file:text-[10px] file:font-black file:text-white" />
+                          </div>
+                          <button type="submit" disabled={isBtnLoading || !currentChainAccessRecord} className={`${originalBtn} w-full justify-center disabled:cursor-not-allowed disabled:opacity-50`}>
+                            {isBtnLoading ? 'Sending...' : currentChainFeeStatus === 'proof_sent' ? 'Resubmit Admin Fee Proof' : 'Submit Admin Fee Proof'}
+                          </button>
+                        </form>
+                      </>
+                    )}
+                  </section>
+                  )}
+                </div>
+              </div>
             ) : (
               <>
                 {settings.paymentsOpen && (
@@ -6510,7 +7039,7 @@ ${rowsXML.join("\n")}
                       onOpenPreview={() => setShowPreviewModal(true)}
                       onSubmitOrder={submitOrder}
                       originalBtn={originalBtn}
-                      settings={settings}
+                      settings={buyerPaymentSettings}
                       shakingProd={shakingProd}
                     subtotalUSD={subtotalUSD}
                     totalPHP={totalPHP}
@@ -6548,7 +7077,7 @@ ${rowsXML.join("\n")}
               onSubmitPayment={submitPayment}
               originalBtn={originalBtn}
               partialShipOptions={PARTIAL_SHIP_OPTIONS}
-              settings={settings}
+              settings={buyerPaymentSettings}
               shakingProd={shakingProd}
               showPayModal={showPayModal}
               showPreviewModal={showPreviewModal}
@@ -6649,6 +7178,7 @@ ${rowsXML.join("\n")}
                   { id: 'overview', icon: <LayoutDashboard size={18} />, label: 'Inventory' },
                   { id: 'active-orders', icon: <ShoppingCart size={18} />, label: 'Active Orders' }, // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW
                   { id: 'payments', icon: <BadgeDollarSign size={18} />, label: 'Payments' },
+                  { id: 'admin-fees', icon: <CreditCard size={18} />, label: 'Admin Fees' },
                   { id: 'audit', icon: <AlertTriangle size={18} />, label: 'Audit' },
                   { id: 'packing', icon: <ClipboardList size={18} />, label: 'Packing Guide' },
                   { id: 'trimming', icon: <Scissors size={18} />, label: 'Hit List' },
@@ -6701,6 +7231,7 @@ ${rowsXML.join("\n")}
                   <option value="overview">Inventory</option>
                   <option value="active-orders">Active Orders</option>
                   <option value="payments">Payments</option>
+                  <option value="admin-fees">Admin Fees</option>
                   <option value="audit">Audit</option>
                   <option value="packing">Packing</option>
                   <option value="trimming">Hit List</option>
@@ -7193,6 +7724,19 @@ ${rowsXML.join("\n")}
                   </div>
                 )}
 
+                {adminTab === 'admin-fees' && (
+                  <div className="space-y-6 defer-render-xl">
+                    <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
+                      <div>
+                        <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Admin Fee Payments</h2>
+                        <p className="text-sm font-bold text-slate-500 mt-1">Current-chain access fees only. Product payment approvals stay in Payments.</p>
+                      </div>
+                    </div>
+
+                    {renderAdminFeeDashboard()}
+                  </div>
+                )}
+
                 {adminTab === 'payments' && (
                   <div className="space-y-6 defer-render-xl">
                     <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
@@ -7213,6 +7757,99 @@ ${rowsXML.join("\n")}
                         )}
                       </div>
                     </div>
+
+                    {false && (
+                    <section className="bg-white rounded-[24px] shadow-sm border-2 border-pink-50 overflow-hidden">
+                      <div className="flex flex-col gap-2 border-b border-pink-50 bg-[#FFF8FC] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Current Chain Admin Fee</p>
+                          <p className="mt-1 text-xs font-bold text-slate-500">{currentChainId} access approvals</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {renderCompactAdminStat('Proof Sent', adminFeeAccessCustomers.filter(c => c.status === 'proof_sent').length, 'violet', 'Needs admin check')}
+                          {renderCompactAdminStat('Approved', adminFeeAccessCustomers.filter(c => c.status === 'approved').length, 'emerald', 'Can enter chain')}
+                          {renderCompactAdminStat('Pending', adminFeeAccessCustomers.filter(c => c.status === 'pending').length, 'amber', 'No proof yet')}
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left custom-table">
+                          <thead>
+                            <tr>
+                              <th>Buyer</th>
+                              <th>Amount</th>
+                              <th>Proof</th>
+                              <th>Status</th>
+                              <th className="text-center">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-pink-50">
+                            {adminFeeAccessCustomers.map(customer => {
+                              return (
+                                <tr key={customer.email} className={customer.status === 'approved' ? 'bg-emerald-50/40' : customer.status === 'proof_sent' ? 'bg-violet-50/45' : customer.status === 'rejected' ? 'bg-rose-50/45' : 'bg-white'}>
+                                  <td>
+                                    <button onClick={() => { setSelectedProfileEmail(customer.email); setIsEditingAddress(false); }} className="font-bold text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">
+                                      {customer.name}
+                                    </button>
+                                    <p className="text-[10px] text-slate-400">{customer.email}</p>
+                                    {customer.handle && <p className="text-[10px] font-black uppercase tracking-widest text-[#D6006E]">{customer.handle}</p>}
+                                  </td>
+                                  <td className="font-black text-[#D6006E]">{"\u20B1"}{customer.adminFeeAmountPhp.toLocaleString()}</td>
+                                  <td>
+                                    {customer.proofUrl ? (
+                                      <button
+                                        onClick={() => setFullScreenProof(customer.proofUrl)}
+                                        onMouseEnter={(event) => showHoveredProofPreview(customer.proofUrl, event)}
+                                        onMouseLeave={hideHoveredProofPreview}
+                                        className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-violet-700 transition-colors hover:border-violet-300"
+                                      >
+                                        View
+                                      </button>
+                                    ) : (
+                                      <span className="text-[10px] font-bold italic text-slate-400">No proof</span>
+                                    )}
+                                  </td>
+                                  <td>
+                                    <span className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${
+                                      customer.status === 'approved'
+                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                        : customer.status === 'proof_sent'
+                                          ? 'border-violet-200 bg-violet-50 text-violet-700'
+                                          : customer.status === 'rejected'
+                                            ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                            : 'border-amber-200 bg-amber-50 text-amber-700'
+                                    }`}>
+                                      {customer.status === 'proof_sent' ? 'Proof Sent' : customer.status}
+                                    </span>
+                                  </td>
+                                  <td className="text-center">
+                                    <div className="flex flex-col items-center gap-1.5">
+                                      <button
+                                        onClick={() => updateAdminFeeStatus(customer, 'approved')}
+                                        disabled={!customer.proofUrl || customer.status === 'approved'}
+                                        className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition-colors hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        Approve Fee
+                                      </button>
+                                      <button
+                                        onClick={() => updateAdminFeeStatus(customer, 'rejected')}
+                                        disabled={!customer.proofUrl}
+                                        className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        Recheck
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {adminFeeAccessCustomers.length === 0 && (
+                              <tr><td colSpan="5" className="text-center p-8 text-pink-300 font-bold italic">No admin fee access requests yet.</td></tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                    )}
 
                     {renderPaymentsDashboard()}
                   </div>
@@ -7682,6 +8319,25 @@ ${rowsXML.join("\n")}
                           })}
 
                           {renderAdminToggle({
+                            label: 'Admin Fee Gate',
+                            description: 'Requires approved chain admin fee before buyers can enter the current chain.',
+                            active: settings.adminFeeGateOpen !== false,
+                            activeText: 'Enabled',
+                            inactiveText: 'Disabled',
+                            onToggle: () => updateSetting('adminFeeGateOpen', settings.adminFeeGateOpen === false),
+                            activeTone: {
+                              panel: 'bg-violet-50 border-violet-200',
+                              badge: 'bg-violet-100 text-violet-700',
+                              track: 'border-violet-400 bg-violet-500'
+                            },
+                            inactiveTone: {
+                              panel: 'bg-slate-50 border-slate-200',
+                              badge: 'bg-slate-100 text-slate-600',
+                              track: 'border-slate-300 bg-slate-200'
+                            }
+                          })}
+
+                          {renderAdminToggle({
                             label: 'Show Payment Routes',
                             description: 'Shows or hides bank and QR instructions while the payment window is open.',
                             active: settings.paymentRoutesVisible !== false,
@@ -7967,6 +8623,7 @@ ${rowsXML.join("\n")}
             onChangeQty={handleAdminCartChange}
             onClose={() => { setAdminOrderEditTarget(null); setAdminModalSearchQuery(''); }}
             onSave={saveAdminOrderEdit}
+            safetyRecords={safetyRecords}
             setSearchQuery={setAdminModalSearchQuery}
             targetProfile={usersById[adminOrderEditTarget] || { name: 'Unknown User' }}
           />

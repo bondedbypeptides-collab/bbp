@@ -50,6 +50,7 @@ export default function AdminOrderEditModal({
                     {product.isLegacyMissing ? (
                       <p className="text-[10px] font-bold text-amber-600">
                         Removed from live catalog. Only shown here so you can clean up old orders.
+                        {Number(product.pricePerVialUSD || 0) > 0 ? ` Last known price: $${Number(product.pricePerVialUSD).toFixed(2)} / vial.` : ''}
                       </p>
                     ) : (
                       <p className="text-[10px] font-bold text-slate-400">${product.pricePerVialUSD.toFixed(2)} / vial</p>

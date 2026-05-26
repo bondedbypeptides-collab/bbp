@@ -17,6 +17,8 @@ export default function ShopDesktopCart({
   subtotalUSD,
   totalPHP,
 }) {
+  const adminFeePaidAlready = Number(settings.adminFeePhp || 0) === 0;
+
   return (
     <aside className={desktopCartAsideClass}>
       <div className={desktopCartShellClass}>
@@ -71,7 +73,7 @@ export default function ShopDesktopCart({
         </div>
         <div className="pt-4 border-t-2 border-pink-100 space-y-1 text-sm xl:text-base">
           <div className="flex justify-between text-xs font-bold text-gray-500 uppercase"><span>Subtotal</span><span>${subtotalUSD.toFixed(2)}</span></div>
-          <div className="flex justify-between text-xs font-bold text-gray-500 uppercase"><span>Admin Fee</span><span>{`\u20B1${settings.adminFeePhp}`}</span></div>
+          <div className="flex justify-between text-xs font-bold text-gray-500 uppercase"><span>Admin Fee</span><span>{adminFeePaidAlready ? 'Paid already' : `\u20B1${settings.adminFeePhp}`}</span></div>
           <div className="flex flex-col items-end pt-2">
             <span className="text-3xl xl:text-4xl font-black text-[#D6006E]">{`\u20B1${totalPHP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}</span>
           </div>

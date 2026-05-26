@@ -27,6 +27,8 @@ export default function ShopCheckoutHost({
   totalUSDSubtotal,
   currentPaymentRoute,
 }) {
+  const adminFeePaidAlready = Number(settings.adminFeePhp || 0) === 0;
+
   return (
     <>
       {showPayModal && (
@@ -111,7 +113,7 @@ export default function ShopCheckoutHost({
                 ))}
                 <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 pt-2 border-t border-slate-200 mt-2">
                   <span>Admin Fee</span>
-                  <span>{'\u20B1'}{settings.adminFeePhp}</span>
+                  <span>{adminFeePaidAlready ? 'Paid already' : `${'\u20B1'}${settings.adminFeePhp}`}</span>
                 </div>
               </div>
             </div>
@@ -193,7 +195,7 @@ export default function ShopCheckoutHost({
               )}
               <div className="pt-4 space-y-2 text-sm border-t-2 border-pink-100">
                 <div className="flex justify-between font-bold text-gray-500 uppercase"><span>Subtotal</span><span>${totalUSDSubtotal.toFixed(2)}</span></div>
-                <div className="flex justify-between font-bold text-gray-500 uppercase"><span>Admin Fee</span><span>{'\u20B1'}{settings.adminFeePhp}</span></div>
+                <div className="flex justify-between font-bold text-gray-500 uppercase"><span>Admin Fee</span><span>{adminFeePaidAlready ? 'Paid already' : `${'\u20B1'}${settings.adminFeePhp}`}</span></div>
               </div>
             </div>
             <div className="p-6 border-t-2 border-pink-50 bg-[#FFF0F5]">
