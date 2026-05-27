@@ -784,7 +784,7 @@ export default function App() {
   const POPULAR_CATEGORIES = ["All", "Weight Loss", "Healing", "Anti-Aging", "Muscle Growth", "Brain Health", "Skin"];
 
   const [newProd, setNewProd] = useState({ name: '', kit: '', vial: '', max: '' });
-  const [newAdmin, setNewAdmin] = useState({ name: '', banks: [{ details: '', qrFile: null }] });
+  const [newAdmin, setNewAdmin] = useState({ name: '', banks: [{ label: '', details: '', qrFile: null }] });
   const [isScrolled, setIsScrolled] = useState(false);
   const configuredShopAccessCode = normalizeAccessCode(settings.shopAccessCode);
   const requiresShopAccessCode = settings.storeOpen !== false && Boolean(configuredShopAccessCode);
@@ -1101,13 +1101,32 @@ export default function App() {
     cleanup();
   }, [user, chats]);
 
+  const normalizeAdminBankOption = (bank = {}, index = 0) => {
+    const details = String(bank?.details || '').trim();
+    const qr = String(bank?.qr || '').trim();
+    const label = String(bank?.label || '').trim();
+    const fallbackLabel = !label && qr && !details ? `QR ${index + 1}` : '';
+    return {
+      label: label || fallbackLabel,
+      details,
+      qr,
+    };
+  };
+
   const normalizedAdmins = useMemo(() => {
     return (settings.admins || []).map(a => {
-      if (a.banks) return a;
-      const banks = [];
-      if (a.bank1 || a.qr1) banks.push({ details: a.bank1 || '', qr: a.qr1 || '' });
-      if (a.bank2 || a.qr2) banks.push({ details: a.bank2 || '', qr: a.qr2 || '' });
-      return { name: a.name, banks };
+      const rawBanks = Array.isArray(a?.banks)
+        ? a.banks
+        : [
+          (a.bank1 || a.qr1) ? { details: a.bank1 || '', qr: a.qr1 || '' } : null,
+          (a.bank2 || a.qr2) ? { details: a.bank2 || '', qr: a.qr2 || '' } : null,
+        ].filter(Boolean);
+
+      return {
+        ...a,
+        name: String(a?.name || '').trim(),
+        banks: rawBanks.map((bank, index) => normalizeAdminBankOption(bank, index)),
+      };
     });
   }, [settings.admins]);
 
@@ -1132,6 +1151,7 @@ export default function App() {
       if (bank) {
         return {
           adminName: admin.name || 'Admin',
+          bankLabel: bank.label || '',
           bankDetails: bank.details || '',
           bankQr: bank.qr || '',
           hasRoute: true,
@@ -1141,6 +1161,7 @@ export default function App() {
 
     return {
       adminName: 'Admin',
+      bankLabel: '',
       bankDetails: '',
       bankQr: '',
       hasRoute: false,
@@ -1397,6 +1418,7 @@ export default function App() {
       return {
         adminAssigned: resolvedAdminName,
         bankIndex: -1,
+        bankLabel: '',
         bankDetails: '',
         bankQr: '',
         hasRoute: false
@@ -1408,6 +1430,7 @@ export default function App() {
     return {
       adminAssigned: resolvedAdminName,
       bankIndex,
+      bankLabel: selectedBank?.label || '',
       bankDetails: selectedBank?.details || '',
       bankQr: selectedBank?.qr || '',
       hasRoute: true
@@ -1428,9 +1451,10 @@ export default function App() {
       return {
         adminAssigned: customer?.paymentSnapshot?.adminAssigned || customer?.adminAssigned || 'Unassigned',
         bankIndex: Number.isInteger(snapshotBankIndex) ? snapshotBankIndex : -1,
+        bankLabel: String(customer?.paymentSnapshot?.bankLabel || ''),
         bankDetails: String(customer?.paymentBankDetails || ''),
         bankQr: String(customer?.paymentBankQr || ''),
-        hasRoute: Boolean(String(customer?.paymentBankDetails || '').trim() || String(customer?.paymentBankQr || '').trim())
+        hasRoute: Boolean(String(customer?.paymentBankDetails || '').trim() || String(customer?.paymentBankQr || '').trim() || String(customer?.paymentSnapshot?.bankLabel || '').trim())
       };
     }
 
@@ -1441,6 +1465,9 @@ export default function App() {
     const route = getCustomerPaymentRouteForExport(customer);
     const bankDetails = String(route?.bankDetails || '').trim();
     if (bankDetails) return bankDetails;
+
+    const bankLabel = String(route?.bankLabel || '').trim();
+    if (bankLabel) return bankLabel;
 
     const bankIndex = Number(route?.bankIndex);
     if (Number.isInteger(bankIndex) && bankIndex >= 0 && String(route?.bankQr || '').trim()) {
@@ -1473,6 +1500,7 @@ export default function App() {
       adminFeePrepaid: adminFeePhp === 0,
       adminAssigned: route.adminAssigned,
       bankIndex: route.bankIndex,
+      bankLabel: route.bankLabel,
       bankDetails: route.bankDetails,
       bankQr: route.bankQr
     };
@@ -1746,6 +1774,7 @@ export default function App() {
         proofUrl: profile.proofUrl || null,
         proofReview: profile.proofReview || '',
         paymentSnapshot: frozenPaymentSnapshot,
+        paymentBankLabel: frozenPaymentSnapshot?.bankLabel || '',
         paymentBankDetails: frozenPaymentSnapshot?.bankDetails || '',
         paymentBankQr: frozenPaymentSnapshot?.bankQr || '',
         chainAccess: profile.chainAccess || {},
@@ -1784,7 +1813,7 @@ export default function App() {
           record,
           status: record.status || 'pending',
           routeAdmin: record.routeAdmin || '',
-          routeAccount: String(record.routeBankDetails || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)[0] || '',
+          routeAccount: String(record.routeBankDetails || record.routeBankLabel || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)[0] || '',
           proofUrl: record.proofUrl || '',
           adminFeeAmountPhp: Number(record.adminFeeAmountPhp || settings.adminFeePhp || 0),
           submittedAt: Number(record.proofSubmittedAt || record.updatedAt || record.createdAt || 0),
@@ -2608,8 +2637,19 @@ export default function App() {
   const customerProfile = useMemo(() => usersById[normalizedCustomerEmail] || null, [usersById, normalizedCustomerEmail]);
   const currentChainId = getCurrentChainId(settings);
   const currentChainAccessRecord = getChainAccessRecord(customerProfile, settings);
-  const currentAdminFeePaymentRoute = currentChainAccessRecord?.routeAdmin
-    ? getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin)
+  const currentAdminFeePaymentRoute = currentChainAccessRecord
+    ? {
+      ...getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || ''),
+      adminName: currentChainAccessRecord.routeAdmin || getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '').adminName,
+      bankLabel: String(currentChainAccessRecord.routeBankLabel || getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '').bankLabel || '').trim(),
+      bankDetails: String(currentChainAccessRecord.routeBankDetails || getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '').bankDetails || '').trim(),
+      bankQr: String(currentChainAccessRecord.routeBankQr || getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '').bankQr || '').trim(),
+      hasRoute: Boolean(
+        String(currentChainAccessRecord.routeBankDetails || '').trim()
+        || String(currentChainAccessRecord.routeBankQr || '').trim()
+        || getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '').hasRoute
+      )
+    }
     : adminFeePaymentRoute;
   const hasCurrentChainFeeApproval = hasApprovedChainAccess(customerProfile, settings);
   const currentChainFeeStatus = currentChainAccessRecord?.status || 'pending';
@@ -2905,6 +2945,7 @@ export default function App() {
       now: Date.now(),
     });
     nextRecord.routeAdmin = adminFeePaymentRoute.adminName;
+    nextRecord.routeBankLabel = adminFeePaymentRoute.bankLabel;
     nextRecord.routeBankDetails = adminFeePaymentRoute.bankDetails;
     nextRecord.routeBankQr = adminFeePaymentRoute.bankQr;
 
@@ -2965,6 +3006,7 @@ export default function App() {
         proofSubmittedAt: Date.now(),
         adminFeeAmountPhp: Number(settings.adminFeePhp || 0),
         routeAdmin: currentAdminFeePaymentRoute.adminName,
+        routeBankLabel: currentAdminFeePaymentRoute.bankLabel,
         routeBankDetails: currentAdminFeePaymentRoute.bankDetails,
         routeBankQr: currentAdminFeePaymentRoute.bankQr,
         updatedAt: Date.now(),
@@ -4754,6 +4796,80 @@ ${rowsXML.join("\n")}
     await safeAwait(setDoc(doc(db, colPath('settings'), 'main'), newSettings));
   }
 
+  const commitAdminBanks = async (adminIndex, transformBanks, successMessage = 'Admin payment options updated.') => {
+    if (settings.paymentsOpen) {
+      showToast('Admin bank profiles are locked while payments are open.');
+      return;
+    }
+
+    const targetAdmin = normalizedAdmins[adminIndex];
+    if (!targetAdmin) return;
+
+    const nextAdmins = normalizedAdmins.map((admin, idx) => {
+      if (idx !== adminIndex) return admin;
+      const nextBanks = transformBanks([...(admin.banks || [])]).map((bank, bankIdx) => normalizeAdminBankOption(bank, bankIdx));
+      return { ...admin, banks: nextBanks };
+    });
+
+    await updateSetting('admins', nextAdmins);
+    showToast(successMessage);
+  };
+
+  const saveAdminBankOptionPatch = async (adminIndex, bankIndex, patch = {}) => {
+    await commitAdminBanks(adminIndex, (banks) => {
+      if (!banks[bankIndex]) return banks;
+      const current = banks[bankIndex];
+      const next = {
+        ...current,
+        ...patch,
+      };
+      banks[bankIndex] = normalizeAdminBankOption(next, bankIndex);
+      return banks;
+    });
+  };
+
+  const uploadAdminBankQr = async (adminIndex, bankIndex, file) => {
+    if (!file) return;
+    if (settings.paymentsOpen) {
+      showToast('Admin bank profiles are locked while payments are open.');
+      return;
+    }
+    setIsBtnLoading(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `qr_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+      const sRefPath = isCanvas ? `artifacts/${appId}/public/qrs/${fileName}` : `qrs/${fileName}`;
+      const { storage, storageRef, uploadBytesResumable, getDownloadURL } = await getStorageServices();
+      const sRef = storageRef(storage, sRefPath);
+      await uploadBytesResumable(sRef, file);
+      const qrUrl = await getDownloadURL(sRef);
+      await saveAdminBankOptionPatch(adminIndex, bankIndex, { qr: qrUrl });
+      showToast('QR updated.');
+    } catch (err) {
+      console.error(err);
+      showToast('Error uploading QR.');
+    }
+    setIsBtnLoading(false);
+  };
+
+  const removeAdminBankOption = async (adminIndex, bankIndex) => {
+    await commitAdminBanks(adminIndex, (banks) => banks.filter((_, idx) => idx !== bankIndex), 'Payment option removed.');
+  };
+
+  const addAdminBankOption = async (adminIndex) => {
+    const targetAdmin = normalizedAdmins[adminIndex];
+    if (!targetAdmin) return;
+    if ((targetAdmin.banks || []).length >= 6) {
+      showToast('Maximum of 6 payment options per admin.');
+      return;
+    }
+    await commitAdminBanks(
+      adminIndex,
+      (banks) => [...banks, { label: '', details: '', qr: '' }],
+      'New payment option added.'
+    );
+  };
+
   async function togglePaymentsWindow() {
     if (settings.paymentsOpen) {
       try {
@@ -5207,7 +5323,11 @@ ${rowsXML.join("\n")}
           await uploadBytesResumable(sRef, b.qrFile);
           qrUrl = await getDownloadURL(sRef);
         }
-        return { details: b.details, qr: qrUrl };
+        return {
+          label: String(b.label || '').trim(),
+          details: String(b.details || '').trim(),
+          qr: qrUrl
+        };
       }));
 
       const validBanks = uploadedBanks.filter(b => b.details || b.qr);
@@ -5218,7 +5338,7 @@ ${rowsXML.join("\n")}
       }];
 
       await updateSetting('admins', updatedAdmins);
-      setNewAdmin({ name: '', banks: [{ details: '', qrFile: null }] });
+      setNewAdmin({ name: '', banks: [{ label: '', details: '', qrFile: null }] });
       showToast('Admin added successfully.');
     } catch (err) {
       console.error(err);
@@ -5373,6 +5493,7 @@ ${rowsXML.join("\n")}
             ...rebuilt,
             adminAssigned: existingSnapshot.adminAssigned,
             bankIndex: existingSnapshot.bankIndex,
+            bankLabel: existingSnapshot.bankLabel || '',
             bankDetails: existingSnapshot.bankDetails,
             bankQr: existingSnapshot.bankQr
           };
@@ -5402,9 +5523,9 @@ ${rowsXML.join("\n")}
 
   // --- STYLES ---
   const originalInput = "w-full bg-[#FFF0F5] border-2 border-[#FFC0CB] rounded-2xl px-4 py-3 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 font-bold text-[#4A042A] text-sm shadow-inner placeholder:text-pink-300";
-  const lockedAdminInput = `${originalInput} disabled:cursor-not-allowed disabled:opacity-60`;
+  const lockedAdminInput = "w-full bg-[#FFF0F5] border-2 border-[#FFC0CB] rounded-xl px-3 py-2 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 font-bold text-[#4A042A] text-xs shadow-inner placeholder:text-pink-300 disabled:cursor-not-allowed disabled:opacity-60";
   const customerFormInput = "w-full bg-white border-2 border-[#FFC0CB] rounded-2xl px-4 py-3 text-sm font-bold text-[#4A042A] outline-none shadow-[0_10px_24px_rgba(214,0,110,0.08)] transition-all duration-300 placeholder:text-pink-300 focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 disabled:border-pink-100 disabled:bg-[#FFF7FA] disabled:text-[#9E2A5E] disabled:shadow-none disabled:cursor-not-allowed";
-  const adminInputSm = "w-full bg-[#FFF0F5] border-2 border-[#FFC0CB] rounded-xl px-3 py-1.5 text-sm sm:text-xs outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 font-bold text-[#4A042A]";
+  const adminInputSm = "w-full bg-[#FFF0F5] border-2 border-[#FFC0CB] rounded-xl px-3 py-2 text-xs outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 font-bold text-[#4A042A]";
   const originalBtn = "bg-gradient-to-r from-[#FF1493] to-[#FF69B4] text-white font-black px-6 py-2.5 rounded-full shadow-[0_16px_34px_rgba(255,20,147,0.22)] uppercase tracking-[0.16em] hover:translate-y-[-1px] hover:shadow-[0_20px_38px_rgba(255,20,147,0.26)] transition-all text-sm";
 
   // --- PREPARE DATA ---
@@ -5441,6 +5562,7 @@ ${rowsXML.join("\n")}
   const currentPaymentRoute = lockedPaymentSnapshot
     ? {
       adminAssigned: lockedPaymentSnapshot.adminAssigned || currentCustomerRecord?.adminAssigned || currentProfile?.adminAssigned || 'Admin',
+      bankLabel: lockedPaymentSnapshot.bankLabel || '',
       bankDetails: lockedPaymentSnapshot.bankDetails || '',
       bankQr: lockedPaymentSnapshot.bankQr || '',
       hasRoute: Boolean(lockedPaymentSnapshot.bankDetails || lockedPaymentSnapshot.bankQr)
@@ -5837,12 +5959,12 @@ ${rowsXML.join("\n")}
     const statusText = active ? activeText : inactiveText;
 
     return (
-      <div className={`rounded-2xl border p-4 transition-colors ${tone.panel}`}>
-        <div className="flex items-start justify-between gap-4">
+      <div className={`rounded-xl border p-3 transition-colors ${tone.panel}`}>
+        <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-sm font-black text-[#4A042A]">{label}</p>
-            <p className="mt-1 text-xs font-bold text-slate-500 leading-relaxed">{description}</p>
-            <span className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${tone.badge}`}>
+            <p className="text-[13px] font-black text-[#4A042A]">{label}</p>
+            <p className="mt-1 text-[11px] font-bold text-slate-500 leading-relaxed">{description}</p>
+            <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-widest ${tone.badge}`}>
               {statusText}
             </span>
           </div>
@@ -5850,9 +5972,9 @@ ${rowsXML.join("\n")}
             type="button"
             onClick={onToggle}
             aria-pressed={active}
-            className={`relative inline-flex h-8 w-14 shrink-0 rounded-full border-2 transition-all ${tone.track}`}
+            className={`relative inline-flex h-7 w-12 shrink-0 rounded-full border-2 transition-all ${tone.track}`}
           >
-            <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${active ? 'translate-x-7' : 'translate-x-1'}`} />
+            <span className={`absolute top-1 h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${active ? 'translate-x-6' : 'translate-x-1'}`} />
           </button>
         </div>
       </div>
@@ -6189,7 +6311,6 @@ ${rowsXML.join("\n")}
             <tr>
               <th>Buyer</th>
               <th>Route Admin</th>
-              <th>Route Account</th>
               <th>Amount</th>
               <th>Proof</th>
               <th>Status</th>
@@ -6210,7 +6331,6 @@ ${rowsXML.join("\n")}
                     {customer.handle && <p className="text-[10px] font-black uppercase tracking-widest text-[#D6006E]">{customer.handle}</p>}
                   </td>
                   <td className="text-xs font-black text-slate-700">{customer.routeAdmin || 'Unassigned'}</td>
-                  <td className="text-xs font-bold text-slate-500">{customer.routeAccount || '-'}</td>
                   <td className="font-black text-[#D6006E]">{"\u20B1"}{customer.adminFeeAmountPhp.toLocaleString()}</td>
                   <td>
                     {customer.proofUrl ? (
@@ -6231,7 +6351,7 @@ ${rowsXML.join("\n")}
                     )}
                   </td>
                   <td>
-                    <span className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${
+                    <span className={`inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide ${
                       customer.status === 'approved'
                         ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                         : customer.status === 'proof_sent'
@@ -6251,17 +6371,17 @@ ${rowsXML.join("\n")}
                       <button
                         type="button"
                         onClick={() => setAdminFeeBatchDiscordStatus(customer, !isBatchAdded)}
-                        className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest transition-colors ${isBatchAdded ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300' : 'border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300'}`}
+                        className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold transition-colors ${isBatchAdded ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300' : 'border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300'}`}
                       >
-                        {isBatchAdded ? 'Added to Batch Discord' : 'Mark Added to Batch Discord'}
+                        {isBatchAdded ? 'Batch Added' : 'Mark Batch Added'}
                       </button>
                       <p className="text-[10px] font-bold text-slate-400">
                         {isBatchAdded ? new Date(customer.discordBatchAddedAt).toLocaleString() : 'Not yet added'}
                       </p>
                     </div>
                   </td>
-                  <td className="text-center">
-                    <div className="flex items-center justify-center gap-2">
+                  <td className="relative text-center">
+                    <div className="flex items-center justify-center">
                       <div className="flex flex-col items-center gap-1.5">
                         <button
                           onClick={() => updateAdminFeeStatus(customer, 'approved')}
@@ -6308,7 +6428,7 @@ ${rowsXML.join("\n")}
                         </button>
                       </div>
                       {confirmAction.type === 'deleteAdminFee' && confirmAction.id === customer.email ? (
-                        <div className="flex items-center gap-1">
+                        <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
                           <button
                             onClick={() => deleteAdminFeeAccess(customer)}
                             className="rounded-full bg-rose-500 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-white hover:bg-rose-600"
@@ -6325,7 +6445,7 @@ ${rowsXML.join("\n")}
                       ) : (
                         <button
                           onClick={() => setConfirmAction({ type: 'deleteAdminFee', id: customer.email })}
-                          className="ml-auto rounded-full border border-transparent bg-transparent p-1 text-slate-300 transition-colors hover:border-rose-100 hover:bg-rose-50 hover:text-rose-600"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-transparent bg-transparent p-1 text-slate-300 transition-colors hover:border-rose-100 hover:bg-rose-50 hover:text-rose-600"
                           title="Delete admin fee request"
                           aria-label="Delete admin fee request"
                         >
@@ -6860,7 +6980,32 @@ ${rowsXML.join("\n")}
         .hide-scroll { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
         .hide-scroll::-webkit-scrollbar { display: none; }
         
-        .admin-sidebar { width: 280px; background: linear-gradient(180deg, #4A042A 0%, #5a0935 100%); flex-shrink: 0; }
+        .admin-sidebar {
+          width: 280px;
+          background: linear-gradient(180deg, #4A042A 0%, #5a0935 100%);
+          flex-shrink: 0;
+          height: 100vh;
+          overflow-y: auto;
+          position: sticky;
+          top: 0;
+        }
+        .admin-main-viewport {
+          background: linear-gradient(180deg, rgba(255,250,253,0.96) 0%, rgba(255,242,247,0.94) 56%, rgba(255,234,244,0.92) 100%);
+        }
+        .admin-density-compact {
+          font-size: 15px;
+        }
+        .admin-density-compact .admin-page-shell {
+          padding: 0.9rem;
+        }
+        .admin-density-compact .custom-table th {
+          font-size: 9px;
+          padding: 0.84rem 0.9rem;
+        }
+        .admin-density-compact .custom-table td {
+          font-size: 12px;
+          padding: 0.84rem 0.9rem;
+        }
         .nav-item.active { background: rgba(255,255,255,0.98); color: #D6006E; border-radius: 1rem 0 0 1rem; margin-right: -1.5rem; padding-right: 1.5rem; box-shadow: 0 10px 24px rgba(74,4,42,0.18); }
         .custom-table th { background: #FFF8FB; color: #7A104C; font-weight: 800; font-size: 10px; text-transform: uppercase; padding: 0.95rem 1rem; border-bottom: 1px solid #F7D9E8; letter-spacing: 0.14em; }
         .custom-table td { padding: 0.95rem 1rem; border-bottom: 1px solid #F8E8F0; font-weight: 600; font-size: 13px; color: #3e3140; }
@@ -7304,6 +7449,11 @@ ${rowsXML.join("\n")}
                           </div>
                           {currentAdminFeePaymentRoute.hasRoute ? (
                             <div className="mt-3 space-y-3">
+                              {currentAdminFeePaymentRoute.bankLabel && (
+                                <p className="rounded-xl border border-pink-200 bg-pink-50 px-3 py-2 text-xs font-black text-pink-700">
+                                  {currentAdminFeePaymentRoute.bankLabel}
+                                </p>
+                              )}
                               {currentAdminFeePaymentRoute.bankQr && (
                                 <img src={currentAdminFeePaymentRoute.bankQr} alt="Admin fee QR" className="mx-auto w-full max-w-[180px] rounded-xl border border-slate-200 bg-white" />
                               )}
@@ -7615,8 +7765,8 @@ ${rowsXML.join("\n")}
             </form>
           </div>
         ) : (
-          <div className="min-h-screen w-full flex bg-slate-50">
-            <aside className="admin-sidebar hidden lg:flex flex-col p-6 text-white overflow-hidden">
+          <div className="h-screen w-full flex overflow-hidden bg-[linear-gradient(180deg,#FFF9FC_0%,#FFF2F7_58%,#FFEAF4_100%)]">
+            <aside className="admin-sidebar admin-grid-scroll hidden lg:flex flex-col p-6 text-white">
               <div className="brand-title text-3xl text-center mb-8">BBP Core</div>
 
               <p className="text-[9px] font-black text-pink-300 uppercase tracking-widest mb-2 px-4 opacity-70">Logistics</p>
@@ -7668,7 +7818,7 @@ ${rowsXML.join("\n")}
               </div>
             </aside>
 
-            <main className="admin-grid-scroll flex-1 h-screen overflow-y-auto p-4 lg:p-6 hide-scroll">
+            <main className={`admin-grid-scroll admin-main-viewport flex-1 h-screen overflow-y-auto p-3.5 lg:p-5 hide-scroll ${adminTab.includes('settings') ? 'admin-density-compact' : ''}`}>
               <div className="lg:hidden flex items-center justify-between mb-4 bg-[#4A042A] p-3 sm:p-4 rounded-xl sm:rounded-2xl shadow-xl sticky top-2 z-50">
                 <div className="flex items-center gap-2 sm:gap-3">
                   <button onClick={() => switchView('shop')} className="bbp-focus-ring text-white bg-white/10 p-1.5 sm:p-2 rounded-lg hover:bg-white/20 transition-colors"><Home size={18} /></button>
@@ -7691,7 +7841,7 @@ ${rowsXML.join("\n")}
                 </select>
               </div>
 
-              <div className="w-full max-w-[1680px] 2xl:max-w-[1840px] mx-auto relative">
+              <div className="w-full max-w-[1500px] 2xl:max-w-[1600px] mx-auto relative min-h-full">
                 {!adminTab.includes('settings') && (
                   <div className="bg-white p-3 rounded-2xl shadow-sm border-2 border-pink-100 mb-6 flex items-center gap-3 sticky top-[70px] lg:top-0 z-40">
                     <Search size={20} className="text-pink-400 ml-2 shrink-0" />
@@ -8644,11 +8794,11 @@ ${rowsXML.join("\n")}
                 )}
 
                 {adminTab === 'settings-core' && (
-                  <div className="admin-page-shell space-y-6 pb-20 max-w-5xl mx-auto">
+                  <div className="admin-page-shell space-y-5 pb-10 max-w-4xl mx-auto">
                     <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Core System Settings</h2>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <section className="bg-white p-6 rounded-2xl shadow-sm border-2 border-pink-50 space-y-6 h-full">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <section className="bg-white p-4 rounded-2xl shadow-sm border-2 border-pink-50 space-y-4 h-full">
                         <h3 className="font-black text-xs text-pink-600 uppercase tracking-[0.2em] border-b-2 border-pink-50 pb-3">Global Constants</h3>
                         {settings.paymentsOpen && (
                           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-black text-amber-700">
@@ -8682,7 +8832,7 @@ ${rowsXML.join("\n")}
                           <p className="mt-1 text-[10px] font-bold text-slate-400">If this is filled, buyers need the current Discord code before they can enter the shop.</p>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-2 gap-3">
                           <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Exchange Rate (USD to PHP)</label><input type="number" className={lockedAdminInput} value={settings.fxRate} onChange={e => updateSetting('fxRate', Number(e.target.value))} disabled={settings.paymentsOpen} /></div>
                           <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Admin Fee (PHP)</label><input type="number" className={lockedAdminInput} value={settings.adminFeePhp} onChange={e => updateSetting('adminFeePhp', Number(e.target.value))} disabled={settings.paymentsOpen} /></div>
                         </div>
@@ -8701,7 +8851,7 @@ ${rowsXML.join("\n")}
                         <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Dashboard Password</label><input type="text" className={lockedAdminInput} value={settings.adminPass} onChange={e => updateSetting('adminPass', e.target.value)} disabled={settings.paymentsOpen} /></div>
                       </section>
 
-                      <section className="bg-white p-6 rounded-2xl shadow-sm border-2 border-pink-50 space-y-4 h-full flex flex-col">
+                      <section className="bg-white p-4 rounded-2xl shadow-sm border-2 border-pink-50 space-y-4 h-full flex flex-col">
                         <div className="border-b-2 border-pink-50 pb-3">
                           <h3 className="font-black text-xs text-pink-600 uppercase tracking-[0.2em]">Store Modes</h3>
                           <p className="mt-2 text-xs font-bold text-slate-500">These are whole-store states. Product and box locking lives in Inventory.</p>
@@ -8826,7 +8976,7 @@ ${rowsXML.join("\n")}
                       </section>
                     </div>
 
-                    <section className="bg-white p-6 rounded-2xl shadow-sm border-2 border-pink-50 space-y-4">
+                    <section className="bg-white p-4 rounded-2xl shadow-sm border-2 border-pink-50 space-y-3">
                       <h3 className="font-black text-xs text-pink-600 uppercase tracking-[0.2em] border-b-2 border-pink-50 pb-3">System Utilities</h3>
 
                       <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3 mb-4">
@@ -8841,21 +8991,21 @@ ${rowsXML.join("\n")}
                         </div>
                       </div>
 
-                      <div className="hidden lg:block pt-4 border-t-2 border-pink-50">
-                        <button onClick={seedDemoData} disabled={isBtnLoading} className="w-full py-3 rounded-xl bg-slate-100 text-slate-600 font-black uppercase text-[10px] tracking-widest border border-slate-200 hover:bg-slate-200 transition-colors disabled:opacity-50">
+                      <div className="hidden lg:block pt-3 border-t-2 border-pink-50">
+                        <button onClick={seedDemoData} disabled={isBtnLoading} className="inline-flex w-full sm:w-auto sm:min-w-[260px] justify-center px-4 py-2 rounded-lg bg-slate-100 text-slate-600 font-black uppercase text-[9px] tracking-widest border border-slate-200 hover:bg-slate-200 transition-colors disabled:opacity-50">
                           {isBtnLoading ? "Seeding..." : "Seed Full Product List & Mock Orders"}
                         </button>
                         <p className="text-[10px] text-center text-slate-400 mt-2 font-bold">Testing utility only. Injects demo products and mock orders.</p>
                       </div>
                     </section>
 
-                    <section className="bg-rose-50 p-6 rounded-2xl shadow-sm border-2 border-rose-200 space-y-4">
+                    <section className="bg-rose-50 p-4 rounded-2xl shadow-sm border-2 border-rose-200 space-y-3">
                       <div className="border-b border-rose-200 pb-3">
                         <h3 className="font-black text-xs text-rose-600 uppercase tracking-[0.2em]">Danger Zone</h3>
                         <p className="text-xs font-bold text-rose-500 mt-2">Use these only when you are intentionally closing a batch or resetting your testing environment.</p>
                       </div>
 
-                      <button onClick={resetSystem} disabled={isBtnLoading} className="w-full py-4 rounded-2xl bg-white text-rose-600 font-black uppercase text-[10px] tracking-widest border border-rose-300 hover:bg-rose-100 transition-colors disabled:opacity-50">
+                      <button onClick={resetSystem} disabled={isBtnLoading} className="inline-flex w-full sm:w-auto sm:min-w-[220px] justify-center px-4 py-2 rounded-lg bg-white text-rose-600 font-black uppercase text-[9px] tracking-widest border border-rose-300 hover:bg-rose-100 transition-colors disabled:opacity-50">
                         Reset System
                       </button>
                     </section>
@@ -8863,7 +9013,7 @@ ${rowsXML.join("\n")}
                 )}
 
                 {adminTab === 'settings-admins' && (
-                  <div className="admin-page-shell space-y-6 pb-20 max-w-3xl mx-auto">
+                  <div className="admin-page-shell space-y-5 pb-10 max-w-6xl mx-auto">
                     <div className="space-y-3">
                       <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Admin Profiles & Banks</h2>
                       {settings.paymentsOpen && (
@@ -8878,8 +9028,9 @@ ${rowsXML.join("\n")}
                         {renderCompactAdminStat('Need QR', adminProfilesSummary.noQrProfiles, 'amber', 'Profiles without QR')}
                       </div>
                     </div>
-                    <section className="bg-white p-6 rounded-2xl shadow-sm border-2 border-pink-50">
-                      <div className="bg-[#FFF0F5] border-2 border-[#FFC0CB] rounded-xl p-4 max-h-[400px] overflow-y-auto mb-6 space-y-4">
+                    <section className="bg-white p-4 rounded-2xl shadow-sm border-2 border-pink-50">
+                      <div className="grid gap-4 xl:grid-cols-[1.3fr_1fr]">
+                      <div className="bg-[#FFF0F5] border-2 border-[#FFC0CB] rounded-xl p-3 max-h-[72vh] overflow-y-auto space-y-4">
                         {normalizedAdmins.map((a, idx) => (
                           <div key={idx} className="flex gap-3 justify-between items-start border-b border-pink-100 pb-4">
                             <div className="w-full pr-1">
@@ -8891,29 +9042,86 @@ ${rowsXML.join("\n")}
                               </div>
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                                 {a.banks.map((bank, bIdx) => (
-                                  <div key={bIdx} className="bg-white p-3 rounded-lg border border-pink-50 shadow-sm">
-                                    <span className="text-[9px] font-black text-pink-400 uppercase">Option {bIdx + 1}</span>
-                                    <div className="text-[10px] text-gray-600 break-words mt-1">
+                                  <div key={bIdx} className="bg-white p-3 rounded-lg border border-pink-100 shadow-sm space-y-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="text-[9px] font-black text-pink-500 uppercase tracking-widest">Option {bIdx + 1}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => removeAdminBankOption(idx, bIdx)}
+                                        disabled={settings.paymentsOpen}
+                                        className="text-[10px] font-black text-rose-600 hover:text-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        Remove Option
+                                      </button>
+                                    </div>
+                                    <input
+                                      type="text"
+                                      defaultValue={bank.label || ''}
+                                      placeholder="Route Name (e.g. BDO Maya, GCash QR)"
+                                      onBlur={async (e) => {
+                                        const nextLabel = String(e.target.value || '').trim();
+                                        if (nextLabel === String(bank.label || '').trim()) return;
+                                        await saveAdminBankOptionPatch(idx, bIdx, { label: nextLabel });
+                                      }}
+                                      disabled={settings.paymentsOpen}
+                                      className={`${adminInputSm} disabled:opacity-60 disabled:cursor-not-allowed`}
+                                    />
+                                    <textarea
+                                      className={`${adminInputSm} disabled:opacity-60 disabled:cursor-not-allowed`}
+                                      placeholder="Bank Details (e.g. BDO: 123...)"
+                                      defaultValue={bank.details || ''}
+                                      onBlur={async (e) => {
+                                        const nextDetails = String(e.target.value || '').trim();
+                                        if (nextDetails === String(bank.details || '').trim()) return;
+                                        await saveAdminBankOptionPatch(idx, bIdx, { details: nextDetails });
+                                      }}
+                                      rows={2}
+                                      disabled={settings.paymentsOpen}
+                                    />
+                                    <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-bold text-slate-600 uppercase">QR</span>
+                                        {bank.qr && (
+                                          <button
+                                            type="button"
+                                            onClick={() => saveAdminBankOptionPatch(idx, bIdx, { qr: '' })}
+                                            disabled={settings.paymentsOpen}
+                                            className="text-[10px] font-black text-rose-600 hover:text-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                          >
+                                            Remove QR
+                                          </button>
+                                        )}
+                                      </div>
                                       {bank.qr ? (
-                                        <div className="mb-2">
-                                          <span className="text-emerald-600 font-bold flex items-center gap-1 mb-2">
-                                            <ImageIcon size={10} />
-                                            QR Preview
-                                          </span>
-                                          <a href={bank.qr} target="_blank" rel="noreferrer" className="block">
-                                            <img
-                                              src={bank.qr}
-                                              alt={`${a.name} payment option ${bIdx + 1} QR`}
-                                              className="w-full max-w-[220px] rounded-lg border border-emerald-100 bg-white object-contain"
-                                            />
-                                          </a>
-                                        </div>
-                                      ) : null}
-                                      {bank.details ? <span className={bank.qr ? 'block mt-1' : ''}>{bank.details}</span> : null}
+                                        <a href={bank.qr} target="_blank" rel="noreferrer" className="block">
+                                          <img
+                                            src={bank.qr}
+                                            alt={`${a.name} payment option ${bIdx + 1} QR`}
+                                            className="w-full max-w-[180px] rounded-lg border border-emerald-100 bg-white object-contain"
+                                          />
+                                        </a>
+                                      ) : (
+                                        <p className="text-[10px] font-bold text-slate-400">No QR uploaded</p>
+                                      )}
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={e => uploadAdminBankQr(idx, bIdx, e.target.files?.[0] || null)}
+                                        disabled={settings.paymentsOpen}
+                                        className="w-full text-xs file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-bold file:bg-pink-100 file:text-pink-700 hover:file:bg-pink-200 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                                      />
                                     </div>
                                   </div>
                                 ))}
                               </div>
+                              <button
+                                type="button"
+                                onClick={() => addAdminBankOption(idx)}
+                                disabled={settings.paymentsOpen}
+                                className="mt-3 text-xs font-bold text-[#D6006E] bg-pink-50 px-3 py-2 rounded-xl w-full hover:bg-pink-100 border border-pink-200 border-dashed transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                + Add Bank/QR Option For {a.name}
+                              </button>
                             </div>
                             {/* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ FIXED: Inline Confirmation for Admin Delete */}
                             {confirmAction.type === 'deleteAdmin' && confirmAction.id === idx ? (
@@ -8932,13 +9140,13 @@ ${rowsXML.join("\n")}
                         ))}
                       </div>
 
-                      <div className="flex flex-col gap-4 bg-slate-50 p-6 rounded-xl border border-slate-200">
+                      <div className="flex flex-col gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200 h-fit">
                         <h4 className="text-xs font-black text-slate-700 uppercase tracking-widest">Add New Admin</h4>
                         <input type="text" className={`${adminInputSm} disabled:opacity-60 disabled:cursor-not-allowed`} placeholder="Admin Name" value={newAdmin.name} onChange={e => setNewAdmin({ ...newAdmin, name: e.target.value })} disabled={settings.paymentsOpen} />
 
                         <div className="space-y-4 border-t border-slate-200 pt-4">
                           {newAdmin.banks.map((bank, index) => (
-                            <div key={index} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                            <div key={index} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
                               <div className="flex justify-between items-center mb-2">
                                 <p className="text-[10px] font-bold text-slate-500 uppercase">Payment Option {index + 1}</p>
                                 {newAdmin.banks.length > 1 && (
@@ -8949,12 +9157,24 @@ ${rowsXML.join("\n")}
                                   }} disabled={settings.paymentsOpen} className="text-red-500 text-xs font-bold hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline">Remove Option</button>
                                 )}
                               </div>
-                              <textarea className={`${adminInputSm} mb-3 disabled:opacity-60 disabled:cursor-not-allowed`} placeholder="Bank Details (e.g. BDO: 123...)" value={bank.details} onChange={e => {
+                              <input
+                                type="text"
+                                className={`${adminInputSm} mb-2 disabled:opacity-60 disabled:cursor-not-allowed`}
+                                placeholder="Route Name (e.g. BDO Maya, GCash QR)"
+                                value={bank.label || ''}
+                                onChange={e => {
+                                  const newBanks = [...newAdmin.banks];
+                                  newBanks[index].label = e.target.value;
+                                  setNewAdmin({ ...newAdmin, banks: newBanks });
+                                }}
+                                disabled={settings.paymentsOpen}
+                              />
+                              <textarea className={`${adminInputSm} mb-2 disabled:opacity-60 disabled:cursor-not-allowed`} placeholder="Bank Details (e.g. BDO: 123...)" value={bank.details} onChange={e => {
                                 const newBanks = [...newAdmin.banks];
                                 newBanks[index].details = e.target.value;
                                 setNewAdmin({ ...newAdmin, banks: newBanks });
                               }} rows={2} disabled={settings.paymentsOpen} />
-                              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
                                 <label className="text-[10px] font-bold text-slate-600 uppercase block mb-2">Upload QR Code Image</label>
                                 <input type="file" accept="image/*" onChange={e => {
                                   const newBanks = [...newAdmin.banks];
@@ -8969,7 +9189,7 @@ ${rowsXML.join("\n")}
                               showToast("Maximum of 4 payment options allowed.");
                               return;
                             }
-                            setNewAdmin({ ...newAdmin, banks: [...newAdmin.banks, { details: '', qrFile: null }] });
+                            setNewAdmin({ ...newAdmin, banks: [...newAdmin.banks, { label: '', details: '', qrFile: null }] });
                           }} disabled={settings.paymentsOpen} className="text-xs font-bold text-[#D6006E] bg-pink-50 px-4 py-3 rounded-xl w-full hover:bg-pink-100 border border-pink-200 border-dashed transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">+ Add Another Bank Option</button>
                         </div>
 
@@ -8977,12 +9197,13 @@ ${rowsXML.join("\n")}
                           {isBtnLoading ? 'Uploading QRs...' : 'Save New Admin Profile'}
                         </button>
                       </div>
+                      </div>
                     </section>
                   </div>
                 )}
 
                 {adminTab === 'settings-products' && (
-                  <div className="admin-page-shell space-y-6 pb-20 max-w-5xl mx-auto defer-render">
+                  <div className="admin-page-shell space-y-6 pb-12 max-w-5xl mx-auto defer-render">
                     <div className="space-y-3">
                       <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Product Catalog Management</h2>
                       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
