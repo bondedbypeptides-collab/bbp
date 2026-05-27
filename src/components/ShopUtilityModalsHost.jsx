@@ -29,7 +29,7 @@ export default function ShopUtilityModalsHost({
         <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[390] flex items-center justify-center p-4">
           <div className="bg-white rounded-[32px] w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
             <div className="bg-gradient-to-r from-[#FF7A59] via-[#FF4FA1] to-[#FF1493] px-4 py-3 sm:px-5 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 relative">
-              <button onClick={closeCalculator} className="absolute top-3 right-4 text-white/80 hover:text-white font-black text-[28px] leading-none hover:scale-110 transition-transform">&times;</button>
+              <button onClick={closeCalculator} className="bbp-focus-ring absolute top-3 right-4 text-white/80 hover:text-white font-black text-[28px] leading-none hover:scale-110 transition-transform" aria-label="Close calculator">&times;</button>
               <div className="text-white pr-10 sm:pr-0">
                 <h2 className="brand-title text-[1.8rem] sm:text-[2.25rem] leading-[0.92] m-0 text-white shadow-none">Peptide Calculator</h2>
                 <p className="text-white/90 font-bold text-[12px] sm:text-[13px] mt-0.5 max-w-lg leading-snug">Calculate concentration, draw amount, and syringe units for peptide reconstitution.</p>
@@ -61,7 +61,7 @@ export default function ShopUtilityModalsHost({
                     <div>
                       <div className="flex items-center justify-between gap-3">
                         <label className="text-[10px] font-black uppercase tracking-[0.2em] text-[#D6006E]">Dose of Peptide</label>
-                        <input type="number" min="0.01" step="0.01" value={calculatorDoseMg} onChange={e => setCalculatorDoseMg(Number(e.target.value) || 0)} className="w-24 rounded-xl border border-pink-200 bg-pink-50 px-3 py-2 text-right text-sm font-black text-[#4A042A] outline-none focus:border-[#D6006E]" />
+                        <input type="number" min="0.01" step="0.01" value={calculatorDoseMg} onChange={e => setCalculatorDoseMg(Number(e.target.value) || 0)} className="bbp-focus-ring w-24 rounded-xl border border-pink-200 bg-pink-50 px-3 py-2 text-right text-sm font-black text-[#4A042A] outline-none focus:border-[#D6006E]" />
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         {dosePresets.map((dose) => (
@@ -69,7 +69,7 @@ export default function ShopUtilityModalsHost({
                             key={`dose-${dose}`}
                             type="button"
                             onClick={() => setCalculatorDoseMg(dose)}
-                            className={`rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors ${calculatorDoseMg === dose ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
+                            className={`bbp-focus-ring rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors ${calculatorDoseMg === dose ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
                           >
                             {dose}mg
                           </button>
@@ -80,7 +80,7 @@ export default function ShopUtilityModalsHost({
                     <div>
                       <div className="flex items-center justify-between gap-3">
                         <label className="text-[10px] font-black uppercase tracking-[0.2em] text-[#D6006E]">Strength of Peptide</label>
-                        <input type="number" min="0.1" step="0.1" value={calculatorStrengthMg} onChange={e => setCalculatorStrengthMg(Number(e.target.value) || 0)} className="w-24 rounded-xl border border-pink-200 bg-pink-50 px-3 py-2 text-right text-sm font-black text-[#4A042A] outline-none focus:border-[#D6006E]" />
+                        <input type="number" min="0.1" step="0.1" value={calculatorStrengthMg} onChange={e => setCalculatorStrengthMg(Number(e.target.value) || 0)} className="bbp-focus-ring w-24 rounded-xl border border-pink-200 bg-pink-50 px-3 py-2 text-right text-sm font-black text-[#4A042A] outline-none focus:border-[#D6006E]" />
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         {strengthPresets.map((strength) => (
@@ -88,7 +88,7 @@ export default function ShopUtilityModalsHost({
                             key={`strength-${strength}`}
                             type="button"
                             onClick={() => setCalculatorStrengthMg(strength)}
-                            className={`rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors ${calculatorStrengthMg === strength ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
+                            className={`bbp-focus-ring rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors ${calculatorStrengthMg === strength ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
                           >
                             {strength}mg
                           </button>
@@ -99,7 +99,7 @@ export default function ShopUtilityModalsHost({
                     <div>
                       <div className="flex items-center justify-between gap-3">
                         <label className="text-[10px] font-black uppercase tracking-[0.2em] text-[#D6006E]">Water of Peptide</label>
-                        <input type="number" min="0.1" step="0.1" value={calculatorWaterMl} onChange={e => setCalculatorWaterMl(Number(e.target.value) || 0)} className="w-24 rounded-xl border border-pink-200 bg-pink-50 px-3 py-2 text-right text-sm font-black text-[#4A042A] outline-none focus:border-[#D6006E]" />
+                        <input type="number" min="0.1" step="0.1" value={calculatorWaterMl} onChange={e => setCalculatorWaterMl(Number(e.target.value) || 0)} className="bbp-focus-ring w-24 rounded-xl border border-pink-200 bg-pink-50 px-3 py-2 text-right text-sm font-black text-[#4A042A] outline-none focus:border-[#D6006E]" />
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         {waterPresets.map((water) => (
@@ -107,7 +107,7 @@ export default function ShopUtilityModalsHost({
                             key={`water-${water}`}
                             type="button"
                             onClick={() => setCalculatorWaterMl(water)}
-                            className={`rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors ${calculatorWaterMl === water ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
+                            className={`bbp-focus-ring rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors ${calculatorWaterMl === water ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
                           >
                             {water}mL
                           </button>
@@ -211,7 +211,7 @@ export default function ShopUtilityModalsHost({
                       </div>
 
                       <div className="rounded-[22px] border border-pink-100 bg-pink-50/60 px-4 py-3 text-xs font-bold text-[#8F2C5D] leading-relaxed">
-                        Formula: strength ÷ water = concentration, then dose ÷ concentration = draw amount. On a standard U-100 syringe, 1mL = 100 units.
+                        Formula: strength / water = concentration, then dose / concentration = draw amount. On a standard U-100 syringe, 1 mL = 100 units.
                       </div>
                     </>
                   ) : (
@@ -230,7 +230,7 @@ export default function ShopUtilityModalsHost({
         <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[400] flex items-center justify-center p-4">
           <div className="bg-white rounded-[32px] w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-4 border-white">
             <div className="bg-gradient-to-r from-[#FF1493] to-[#FF69B4] px-4 py-3 sm:px-5 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 relative">
-              <button onClick={closeWiki} className="absolute top-3 right-4 text-white/80 hover:text-white font-black text-[28px] leading-none hover:scale-110 transition-transform">&times;</button>
+              <button onClick={closeWiki} className="bbp-focus-ring absolute top-3 right-4 text-white/80 hover:text-white font-black text-[28px] leading-none hover:scale-110 transition-transform" aria-label="Close peptide wiki">&times;</button>
               <div className="text-white pr-10 sm:pr-0">
                 <h2 className="brand-title text-[1.75rem] sm:text-[2.15rem] leading-[0.92] m-0 text-white shadow-none">Peptide Wiki</h2>
                 <p className="text-white/90 font-bold text-[12px] sm:text-[13px] mt-0.5 max-w-lg leading-snug">Quick product context, simple benefits, and handling notes in one place.</p>
@@ -250,12 +250,12 @@ export default function ShopUtilityModalsHost({
             <div className="bg-[#FFF0F5] px-4 py-2.5 border-b-2 border-[#FFC0CB] space-y-2.5">
               <div className="relative w-full max-w-[720px] mx-auto">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-400" size={18} />
-                <input type="text" value={wikiSearchQuery} onChange={e => setWikiSearchQuery(e.target.value)} placeholder="Search by product, tag, or benefit..." className="w-full pl-11 pr-24 py-2 rounded-2xl text-[14px] font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-white text-[#4A042A] shadow-sm" />
+                <input type="text" value={wikiSearchQuery} onChange={e => setWikiSearchQuery(e.target.value)} placeholder="Search by product, tag, or benefit..." className="bbp-focus-ring w-full pl-11 pr-24 py-2 rounded-2xl text-[14px] font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-white text-[#4A042A] shadow-sm" />
                 {(wikiSearchQuery || wikiTagFilter !== 'All') && (
                   <button
                     type="button"
                     onClick={() => { setWikiSearchQuery(''); setWikiTagFilter('All'); }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-pink-200 bg-pink-50 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-[#D6006E] transition-colors hover:bg-pink-100"
+                    className="bbp-focus-ring absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-pink-200 bg-pink-50 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-[#D6006E] transition-colors hover:bg-pink-100"
                   >
                     Clear
                   </button>
@@ -267,7 +267,7 @@ export default function ShopUtilityModalsHost({
                     key={tag}
                     type="button"
                     onClick={() => setWikiTagFilter(tag)}
-                    className={`shrink-0 rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.16em] transition-colors ${wikiTagFilter === tag ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
+                    className={`bbp-focus-ring shrink-0 rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.16em] transition-colors ${wikiTagFilter === tag ? 'border-[#D6006E] bg-[#D6006E] text-white shadow-sm' : 'border-pink-200 bg-white text-[#9E2A5E] hover:border-pink-300 hover:bg-pink-50'}`}
                   >
                     {tag}
                   </button>
@@ -362,3 +362,4 @@ export default function ShopUtilityModalsHost({
     </>
   );
 }
+

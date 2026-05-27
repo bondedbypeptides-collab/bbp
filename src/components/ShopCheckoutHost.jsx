@@ -33,12 +33,13 @@ export default function ShopCheckoutHost({
     <>
       {showPayModal && (
         <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-[24px] w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-2 border-pink-200">
+          <div className="bg-white rounded-[24px] w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border-2 border-pink-200">
             <div className="bg-[#FFF0F5] p-4 flex justify-between items-center border-b border-[#FFC0CB]">
               <h2 className="brand-title text-xl text-pink-600">Checkout</h2>
-              <button onClick={onClosePay} className="text-pink-600 font-black text-2xl hover:scale-110 transition-transform">&times;</button>
+              <button onClick={onClosePay} className="bbp-focus-ring text-pink-600 font-black text-2xl hover:scale-110 transition-transform" aria-label="Close checkout">&times;</button>
             </div>
             <div className="p-4 sm:p-5 overflow-y-auto space-y-4 hide-scroll bg-white">
+              <p className="bbp-section-title">Step 1: Confirm total and route</p>
               <div className="bg-pink-100 p-6 rounded-[24px] border-4 border-pink-200 text-center shadow-inner relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/40 to-transparent"></div>
                 <p className="text-[10px] font-black text-pink-500 uppercase tracking-widest mb-1 relative z-10">Total Amount to Pay</p>
@@ -76,12 +77,13 @@ export default function ShopCheckoutHost({
               </div>
 
               <div className="space-y-2.5">
+                <p className="bbp-section-title">Step 2: Shipping details</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <select value={addressForm.shipOpt} onChange={(e) => onAddressChange({ ...addressForm, shipOpt: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-xs sm:text-sm font-bold text-[#4A042A] outline-none transition-all ${addressErrors.shipOpt ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200 focus:border-[#D6006E]'}`}>
+                  <select value={addressForm.shipOpt} onChange={(e) => onAddressChange({ ...addressForm, shipOpt: e.target.value })} className={`bbp-focus-ring w-full bg-slate-50 border rounded-xl px-3 py-2 text-xs sm:text-sm font-bold text-[#4A042A] outline-none transition-all ${addressErrors.shipOpt ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200 focus:border-[#D6006E]'}`}>
                     <option value="" disabled>Select Courier...</option>
                     {settings.shippingOptions.map((o) => <option key={o} value={o}>{o}</option>)}
                   </select>
-                  <select value={addressForm.partialShipPref} onChange={(e) => onAddressChange({ ...addressForm, partialShipPref: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-xs sm:text-sm font-bold text-[#4A042A] outline-none transition-all ${addressErrors.partialShipPref ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200 focus:border-[#D6006E]'}`}>
+                  <select value={addressForm.partialShipPref} onChange={(e) => onAddressChange({ ...addressForm, partialShipPref: e.target.value })} className={`bbp-focus-ring w-full bg-slate-50 border rounded-xl px-3 py-2 text-xs sm:text-sm font-bold text-[#4A042A] outline-none transition-all ${addressErrors.partialShipPref ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200 focus:border-[#D6006E]'}`}>
                     <option value="" disabled>If may maunang dumating...</option>
                     {partialShipOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
@@ -90,20 +92,21 @@ export default function ShopCheckoutHost({
                   Minsan hiwa-hiwalay dumadating ang kits. Pili ka dito kung gusto mo i-ship agad yung ready na, or okay lang sayo maghintay hanggang kumpleto lahat.
                 </p>
                 <div className="grid grid-cols-2 gap-2.5">
-                  <input type="text" value={addressForm.street} onChange={(e) => onAddressChange({ ...addressForm, street: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 transition-all ${addressErrors.street ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Street / Lot / Bldg *" />
-                  <input type="text" value={addressForm.brgy} onChange={(e) => onAddressChange({ ...addressForm, brgy: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 sm:col-span-1 transition-all ${addressErrors.brgy ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Barangay *" />
-                  <input type="text" value={addressForm.city} onChange={(e) => onAddressChange({ ...addressForm, city: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 sm:col-span-1 transition-all ${addressErrors.city ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="City *" />
-                  <input type="text" value={addressForm.prov} onChange={(e) => onAddressChange({ ...addressForm, prov: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 sm:col-span-1 transition-all ${addressErrors.prov ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Province *" />
-                  <input type="text" value={addressForm.zip} onChange={(e) => onAddressChange({ ...addressForm, zip: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 sm:col-span-1 transition-all ${addressErrors.zip ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Zip Code *" />
-                  <input type="text" value={addressForm.contact} onChange={(e) => onAddressChange({ ...addressForm, contact: e.target.value })} className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 transition-all ${addressErrors.contact ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Contact # *" />
+                  <input type="text" value={addressForm.street} onChange={(e) => onAddressChange({ ...addressForm, street: e.target.value })} className={`bbp-focus-ring w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 transition-all ${addressErrors.street ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Street / Lot / Bldg *" />
+                  <input type="text" value={addressForm.brgy} onChange={(e) => onAddressChange({ ...addressForm, brgy: e.target.value })} className={`bbp-focus-ring w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 sm:col-span-1 transition-all ${addressErrors.brgy ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Barangay *" />
+                  <input type="text" value={addressForm.city} onChange={(e) => onAddressChange({ ...addressForm, city: e.target.value })} className={`bbp-focus-ring w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 sm:col-span-1 transition-all ${addressErrors.city ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="City *" />
+                  <input type="text" value={addressForm.prov} onChange={(e) => onAddressChange({ ...addressForm, prov: e.target.value })} className={`bbp-focus-ring w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 sm:col-span-1 transition-all ${addressErrors.prov ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Province *" />
+                  <input type="text" value={addressForm.zip} onChange={(e) => onAddressChange({ ...addressForm, zip: e.target.value })} className={`bbp-focus-ring w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 sm:col-span-1 transition-all ${addressErrors.zip ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Zip Code *" />
+                  <input type="text" value={addressForm.contact} onChange={(e) => onAddressChange({ ...addressForm, contact: e.target.value })} className={`bbp-focus-ring w-full bg-slate-50 border rounded-xl px-3 py-2 text-sm font-bold text-[#4A042A] outline-none col-span-2 transition-all ${addressErrors.contact ? 'animate-shake border-red-500 bg-red-50 placeholder:text-red-300' : 'border-slate-200 focus:border-[#D6006E]'}`} placeholder="Contact # *" />
                 </div>
               </div>
 
               <div className={`bg-slate-50 p-2.5 rounded-xl border flex items-center justify-between transition-all duration-300 ${addressErrors.proofFile ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200'}`}>
-                <input type="file" accept="image/*" onChange={(e) => onProofChange(e.target?.files?.[0] || null)} className={`w-full text-xs font-bold file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[10px] file:font-black file:text-white cursor-pointer ${addressErrors.proofFile ? 'text-red-600 file:bg-red-500' : 'text-[#D6006E] file:bg-[#FF1493] hover:file:bg-[#D6006E]'}`} />
+                <input type="file" accept="image/*" aria-label="Upload payment proof image" onChange={(e) => onProofChange(e.target?.files?.[0] || null)} className={`bbp-focus-ring w-full text-xs font-bold file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[10px] file:font-black file:text-white cursor-pointer ${addressErrors.proofFile ? 'text-red-600 file:bg-red-500' : 'text-[#D6006E] file:bg-[#FF1493] hover:file:bg-[#D6006E]'}`} />
               </div>
 
               <div className="bg-slate-50 p-4 sm:p-5 rounded-2xl border border-slate-200">
+                <p className="bbp-section-title mb-2">Step 3: Review summary and upload proof</p>
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 border-b border-slate-200 pb-2">Your Order Summary</p>
                 {cartList.map((i, idx) => (
                   <div key={idx} className="flex justify-between items-center text-sm font-bold text-[#4A042A] mb-1.5">
@@ -117,7 +120,7 @@ export default function ShopCheckoutHost({
                 </div>
               </div>
             </div>
-            <div className="p-4 border-t border-pink-100 bg-white">
+            <div className="bbp-sticky-actions p-4 border-t border-pink-100 bg-white">
               {!hasValidPaymentRoute ? (
                 <p className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-center text-[11px] font-bold text-rose-600">
                   Payment proof is locked until your order has a real assigned admin with a bank or QR route.
@@ -127,7 +130,7 @@ export default function ShopCheckoutHost({
                   Payment instructions are hidden right now. Wait for admin to show the route before uploading proof.
                 </p>
               ) : null}
-              <button onClick={onSubmitPayment} disabled={isBtnLoading || !hasValidPaymentRoute || !canShowPaymentRoute} className={`${originalBtn} w-full py-3 disabled:cursor-not-allowed disabled:opacity-50`}>
+              <button onClick={onSubmitPayment} disabled={isBtnLoading || !hasValidPaymentRoute || !canShowPaymentRoute} className={`bbp-focus-ring ${originalBtn} w-full py-3 disabled:cursor-not-allowed disabled:opacity-50`}>
                 {isBtnLoading ? 'Uploading...' : 'Complete Payment'}
               </button>
             </div>
@@ -149,7 +152,7 @@ export default function ShopCheckoutHost({
                       : 'Adjust quantities before you save'}
                 </p>
               </div>
-              <button onClick={onClosePreview} className="text-pink-600 font-black text-2xl hover:scale-110 transition-transform">&times;</button>
+              <button onClick={onClosePreview} className="bbp-focus-ring text-pink-600 font-black text-2xl hover:scale-110 transition-transform" aria-label="Close order confirmation">&times;</button>
             </div>
             <div className="p-6 overflow-y-auto space-y-4 hide-scroll">
               {cartList.length === 0 ? (
@@ -175,13 +178,13 @@ export default function ShopCheckoutHost({
                     <div className="text-right shrink-0">
                       {isCartEditable ? (
                         <div className={`flex items-center gap-1 justify-end mb-1 rounded-full px-1 py-0.5 transition-all ${shakingProd === i.product ? 'animate-shake bg-red-50 ring-2 ring-red-200' : ''}`}>
-                          <button onClick={() => onAdjustCartItem(i.product, -1)} className={`w-7 h-7 rounded-full border font-black leading-none transition-colors ${shakingProd === i.product ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100' : 'border-pink-200 bg-white text-[#D6006E] hover:bg-pink-50'}`}>
+                          <button onClick={() => onAdjustCartItem(i.product, -1)} className={`bbp-focus-ring w-7 h-7 rounded-full border font-black leading-none transition-colors ${shakingProd === i.product ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100' : 'border-pink-200 bg-white text-[#D6006E] hover:bg-pink-50'}`}>
                             -
                           </button>
                           <span className={`min-w-[36px] text-center font-black ${shakingProd === i.product ? 'text-red-600' : 'text-[#D6006E]'}`}>
                             {i.qty}
                           </span>
-                          <button onClick={() => onAdjustCartItem(i.product, 1)} className={`w-7 h-7 rounded-full border font-black leading-none transition-colors ${shakingProd === i.product ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100' : 'border-pink-200 bg-white text-[#D6006E] hover:bg-pink-50'}`}>
+                          <button onClick={() => onAdjustCartItem(i.product, 1)} className={`bbp-focus-ring w-7 h-7 rounded-full border font-black leading-none transition-colors ${shakingProd === i.product ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100' : 'border-pink-200 bg-white text-[#D6006E] hover:bg-pink-50'}`}>
                             +
                           </button>
                         </div>
@@ -210,16 +213,16 @@ export default function ShopCheckoutHost({
                       Review Only - Edits Paused
                     </div>
                   ) : (
-                    <button onClick={onSubmitOrder} disabled={isBtnLoading} className={originalBtn + ' w-full'}>
+                    <button onClick={onSubmitOrder} disabled={isBtnLoading} className={`bbp-focus-ring ${originalBtn} w-full`}>
                       {isBtnLoading ? 'Saving...' : 'Save Order'}
                     </button>
                   )
                 ) : (
-                  <button onClick={onOpenPayFromPreview} disabled={cartList.length === 0} className="w-full bg-[#008040] text-white font-bold py-3 rounded-full uppercase tracking-widest text-sm shadow-md disabled:opacity-50">
+                  <button onClick={onOpenPayFromPreview} disabled={cartList.length === 0} className="bbp-focus-ring w-full bg-[#008040] text-white font-bold py-3 rounded-full uppercase tracking-widest text-sm shadow-md disabled:opacity-50">
                     Pay Now
                   </button>
                 )}
-                <button onClick={onClosePreview} className="w-full rounded-full border-2 border-pink-200 bg-white py-3 text-sm font-black uppercase tracking-widest text-[#D6006E] hover:bg-pink-50">
+                <button onClick={onClosePreview} className="bbp-focus-ring w-full rounded-full border-2 border-pink-200 bg-white py-3 text-sm font-black uppercase tracking-widest text-[#D6006E] hover:bg-pink-50">
                   {settings.paymentsOpen ? 'Close Review' : isReviewStageOpen ? 'Back to Review' : 'Continue Shopping'}
                 </button>
               </div>

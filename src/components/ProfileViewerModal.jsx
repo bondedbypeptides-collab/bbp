@@ -34,7 +34,7 @@ export default function ProfileViewerModal({
               You can save shipping details here before payments open.
             </p>
           </div>
-          <button onClick={onClose} className="text-pink-600 font-black text-2xl hover:text-pink-800 transition-colors hover:scale-110">&times;</button>
+          <button onClick={onClose} className="bbp-focus-ring text-pink-600 font-black text-2xl hover:text-pink-800 transition-colors hover:scale-110" aria-label="Close profile viewer">&times;</button>
         </div>
         <div className="p-4 sm:p-5 overflow-y-auto space-y-4 bg-slate-50 hide-scroll">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -49,33 +49,33 @@ export default function ProfileViewerModal({
               <div className="flex justify-between items-center mb-2">
                 <p className="text-[10px] font-black text-pink-400 uppercase tracking-widest">Saved Address</p>
                 {!isEditingAddress && (
-                  <button onClick={() => startEditingAddress(profile)} className="text-[#D6006E] text-[10px] font-black uppercase hover:underline">Edit</button>
+                  <button onClick={() => startEditingAddress(profile)} className="bbp-focus-ring text-[#D6006E] text-[10px] font-black uppercase hover:underline">Edit</button>
                 )}
               </div>
 
               {isEditingAddress ? (
                 <div className="space-y-2 mt-2">
                   <div className="grid grid-cols-2 gap-2">
-                    <select value={editAddressForm.shipOpt} onChange={e => setEditAddressForm({ ...editAddressForm, shipOpt: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none">
+                    <select value={editAddressForm.shipOpt} onChange={e => setEditAddressForm({ ...editAddressForm, shipOpt: e.target.value })} className="bbp-focus-ring w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none">
                       <option value="" disabled>Select Courier...</option>
                       {shippingOptions.map(option => <option key={option} value={option}>{option}</option>)}
                     </select>
-                    <select value={editAddressForm.partialShipPref} onChange={e => setEditAddressForm({ ...editAddressForm, partialShipPref: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none">
+                    <select value={editAddressForm.partialShipPref} onChange={e => setEditAddressForm({ ...editAddressForm, partialShipPref: e.target.value })} className="bbp-focus-ring w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none">
                       <option value="" disabled>If may maunang dumating...</option>
                       {partialShipOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </select>
                   </div>
-                  <input type="text" value={editAddressForm.street} onChange={e => setEditAddressForm({ ...editAddressForm, street: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Street / Lot / Bldg" />
+                  <input type="text" value={editAddressForm.street} onChange={e => setEditAddressForm({ ...editAddressForm, street: e.target.value })} className="bbp-focus-ring w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Street / Lot / Bldg" />
                   <div className="grid grid-cols-2 gap-2">
-                    <input type="text" value={editAddressForm.brgy} onChange={e => setEditAddressForm({ ...editAddressForm, brgy: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Barangay" />
-                    <input type="text" value={editAddressForm.city} onChange={e => setEditAddressForm({ ...editAddressForm, city: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="City" />
-                    <input type="text" value={editAddressForm.prov} onChange={e => setEditAddressForm({ ...editAddressForm, prov: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Province" />
-                    <input type="text" value={editAddressForm.zip} onChange={e => setEditAddressForm({ ...editAddressForm, zip: e.target.value })} className="w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Zip Code" />
-                    <input type="text" value={editAddressForm.contact} onChange={e => setEditAddressForm({ ...editAddressForm, contact: e.target.value })} className="col-span-2 w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Contact #" />
+                    <input type="text" value={editAddressForm.brgy} onChange={e => setEditAddressForm({ ...editAddressForm, brgy: e.target.value })} className="bbp-focus-ring w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Barangay" />
+                    <input type="text" value={editAddressForm.city} onChange={e => setEditAddressForm({ ...editAddressForm, city: e.target.value })} className="bbp-focus-ring w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="City" />
+                    <input type="text" value={editAddressForm.prov} onChange={e => setEditAddressForm({ ...editAddressForm, prov: e.target.value })} className="bbp-focus-ring w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Province" />
+                    <input type="text" value={editAddressForm.zip} onChange={e => setEditAddressForm({ ...editAddressForm, zip: e.target.value })} className="bbp-focus-ring w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Zip Code" />
+                    <input type="text" value={editAddressForm.contact} onChange={e => setEditAddressForm({ ...editAddressForm, contact: e.target.value })} className="bbp-focus-ring col-span-2 w-full bg-[#FFF0F5] border border-[#FFC0CB] rounded-xl px-3 py-2 text-xs font-bold text-[#4A042A] outline-none" placeholder="Contact #" />
                   </div>
                   <div className="flex gap-2 mt-3">
-                    <button onClick={saveEditedAddress} disabled={isBtnLoading} className="flex-1 bg-[#D6006E] text-white text-[10px] font-black uppercase tracking-widest py-2 rounded-xl hover:bg-pink-700">{isBtnLoading ? 'Saving...' : 'Save'}</button>
-                    <button onClick={() => setIsEditingAddress(false)} className="flex-1 bg-slate-200 text-slate-700 text-[10px] font-black uppercase tracking-widest py-2 rounded-xl hover:bg-slate-300">Cancel</button>
+                    <button onClick={saveEditedAddress} disabled={isBtnLoading} className="bbp-focus-ring flex-1 bg-[#D6006E] text-white text-[10px] font-black uppercase tracking-widest py-2 rounded-xl hover:bg-pink-700">{isBtnLoading ? 'Saving...' : 'Save'}</button>
+                    <button onClick={() => setIsEditingAddress(false)} className="bbp-focus-ring flex-1 bg-slate-200 text-slate-700 text-[10px] font-black uppercase tracking-widest py-2 rounded-xl hover:bg-slate-300">Cancel</button>
                   </div>
                 </div>
               ) : (

@@ -16,7 +16,7 @@ export default function ProofModalHost({
     <>
       {fullScreenProof && (
         <div className="fixed inset-0 bg-black/90 z-[2000] flex flex-col items-center justify-center p-4 cursor-pointer" onClick={onCloseFullScreenProof}>
-          <button className="absolute top-4 right-4 sm:top-8 sm:right-8 text-white/80 hover:text-white text-4xl font-black transition-colors">&times;</button>
+          <button className="bbp-focus-ring absolute top-4 right-4 sm:top-8 sm:right-8 text-white/80 hover:text-white text-4xl font-black transition-colors" aria-label="Close full proof image">&times;</button>
           <img src={fullScreenProof} alt="Full Screen Proof" className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" />
         </div>
       )}
@@ -26,7 +26,7 @@ export default function ProofModalHost({
           <div className="bg-slate-50 rounded-[32px] w-full max-w-6xl overflow-hidden shadow-2xl flex flex-col h-[90vh] border-4 border-white">
             <div className="bg-white p-5 flex justify-between items-center border-b-2 border-slate-200">
               <h2 className="brand-title text-2xl text-[#D6006E]">All Payment Proofs</h2>
-              <button onClick={onCloseAllProofs} className="text-slate-400 hover:text-[#D6006E] font-black text-3xl transition-colors">&times;</button>
+              <button onClick={onCloseAllProofs} className="bbp-focus-ring text-slate-400 hover:text-[#D6006E] font-black text-3xl transition-colors" aria-label="Close all proofs modal">&times;</button>
             </div>
             <div className="p-6 overflow-y-auto flex-1 hide-scroll">
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
@@ -35,7 +35,7 @@ export default function ProofModalHost({
                 ) : (
                   customerList.filter((customer) => customer.proofUrl).map((customer) => (
                     <div key={customer.email} className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col group">
-                      <button onClick={() => onOpenFullScreenProof(customer.proofUrl)} className="flex-1 min-h-[150px] bg-slate-100 rounded-xl overflow-hidden mb-2 relative cursor-zoom-in border-none p-0 m-0">
+                      <button onClick={() => onOpenFullScreenProof(customer.proofUrl)} className="bbp-focus-ring flex-1 min-h-[150px] bg-slate-100 rounded-xl overflow-hidden mb-2 relative cursor-zoom-in border-none p-0 m-0">
                         <img src={customer.proofUrl} alt="Proof" className="absolute inset-0 w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
                       </button>
                       <p className="text-[10px] font-black text-slate-800 truncate">{customer.name}</p>
@@ -43,7 +43,7 @@ export default function ProofModalHost({
                       <span className="mt-1 bg-violet-50 text-violet-700 border border-violet-100 px-2 py-0.5 rounded text-[8px] font-black uppercase text-center">Proof On File</span>
                       <button
                         onClick={() => onRemoveCustomerProof(customer)}
-                        className="mt-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300"
+                        className="bbp-focus-ring mt-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300"
                       >
                         Remove Proof
                       </button>
@@ -59,7 +59,7 @@ export default function ProofModalHost({
       {quickInfoProduct && (
         <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4" onClick={onCloseQuickInfo}>
           <div className="bg-white rounded-[24px] w-full max-w-sm overflow-hidden shadow-2xl border-4 border-pink-100 relative animate-fadeIn" onClick={(event) => event.stopPropagation()}>
-            <button onClick={onCloseQuickInfo} className="absolute top-4 right-4 text-slate-400 hover:text-[#D6006E] font-black text-2xl transition-colors">&times;</button>
+            <button onClick={onCloseQuickInfo} className="bbp-focus-ring absolute top-4 right-4 text-slate-400 hover:text-[#D6006E] font-black text-2xl transition-colors" aria-label="Close product details">&times;</button>
 
             <div className="p-6">
               <h3 className="font-black text-2xl text-[#D6006E] mb-2">{quickInfoProduct.displayName || quickInfoProduct.name}</h3>

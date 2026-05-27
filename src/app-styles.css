@@ -41,7 +41,7 @@
 
         @media screen and (max-width: 768px) { input, select, textarea { font-size: 16px !important; } }
 
-        /* âœ¨ NEW: Ambulance Shake & Flash Animation */
+        /* New: Ambulance Shake and Flash Animation */
         @keyframes ambulanceFlash {
           0% { box-shadow: 0 0 0 0 rgba(255, 20, 147, 0.7); border-color: #FF1493; transform: translateX(0); }
           15% { box-shadow: 0 0 30px 10px rgba(255, 0, 0, 0.8); border-color: #FF0000; transform: translateX(-8px); }
@@ -53,7 +53,7 @@
         }
         .animate-ambulance { animation: ambulanceFlash 0.8s cubic-bezier(.36,.07,.19,.97) both; background-color: #FFF0F5 !important; }
         
-        /* âœ¨ NEW: Epic Unicorn Animation */
+        /* New: Epic Unicorn Animation */
         @keyframes flyUnicorn {
           0% { transform: translate(-50vw, 80vh) rotate(-20deg) scale(0.8); }
           25% { transform: translate(10vw, 40vh) rotate(10deg) scale(1); }
@@ -313,4 +313,56 @@
         .custom-table td { padding: 1rem; border-bottom: 1px solid #FFE4E1; font-weight: 600; font-size: 13px; }
         .compact-table th { padding: 0.72rem 0.85rem; font-size: 9px; }
         .compact-table td { padding: 0.72rem 0.85rem; font-size: 12px; }
+
+        .bbp-section-title {
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.2em;
+          text-transform: uppercase;
+          color: #B21764;
+        }
+
+        .bbp-field-label {
+          display: block;
+          margin-bottom: 0.3rem;
+          padding-left: 0.25rem;
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: #D6006E;
+        }
+
+        .bbp-soft-divider {
+          height: 1px;
+          background: linear-gradient(90deg, rgba(255, 192, 203, 0.75), rgba(255, 192, 203, 0));
+        }
+
+        .bbp-focus-ring:focus-visible {
+          outline: 2px solid #D6006E;
+          outline-offset: 2px;
+        }
+
+        .bbp-sticky-actions {
+          position: sticky;
+          bottom: 0;
+          z-index: 2;
+          padding-bottom: calc(0.6rem + env(safe-area-inset-bottom));
+          background: linear-gradient(180deg, rgba(255,255,255,0.3), rgba(255,255,255,0.95) 24%, rgba(255,255,255,0.98));
+          backdrop-filter: blur(8px);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          * {
+            scroll-behavior: auto !important;
+          }
+          .animate-shake,
+          .animate-fadeIn,
+          .animate-ambulance,
+          .unicorn-wrapper,
+          .bubble-floater-icon {
+            animation: none !important;
+            transition: none !important;
+          }
+        }
 

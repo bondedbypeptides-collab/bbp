@@ -110,12 +110,12 @@ export default function ShopWorkspaceMain({
               </div>
 
               <div className="flex flex-wrap gap-2 xl:max-w-[320px] xl:justify-end">
-                <button onClick={onToggleHowTo} className="order-form-chip inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E] transition-colors hover:bg-white/90">
+                <button onClick={onToggleHowTo} className="bbp-focus-ring order-form-chip inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E] transition-colors hover:bg-white/90">
                   <BookOpen size={13} />
                   {showHowTo ? 'Hide Steps' : 'How It Works'}
                 </button>
                 {customerProfile && (
-                  <button onClick={onOpenProfileHistory} className="order-form-chip inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E] transition-colors hover:bg-white/90">
+                  <button onClick={onOpenProfileHistory} className="bbp-focus-ring order-form-chip inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E] transition-colors hover:bg-white/90">
                     <Users size={13} />
                     Profile & Address
                   </button>
@@ -123,15 +123,15 @@ export default function ShopWorkspaceMain({
                 {hasExistingOrder && !settings.paymentsOpen && !settings.addOnly && !settings.reviewStageOpen && (
                   confirmAction.type === 'cancelOrder' && confirmAction.id === customerEmail.toLowerCase().trim() ? (
                     <>
-                      <button onClick={cancelEntireOrder} className="inline-flex items-center rounded-full bg-rose-500 px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-white shadow-sm transition-colors hover:bg-rose-600">
+                      <button onClick={cancelEntireOrder} className="bbp-focus-ring inline-flex items-center rounded-full bg-rose-500 px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-white shadow-sm transition-colors hover:bg-rose-600">
                         Confirm Cancel
                       </button>
-                      <button onClick={onClearCancelOrder} className="order-form-chip inline-flex items-center rounded-full px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-slate-600 transition-colors hover:bg-white/90">
+                      <button onClick={onClearCancelOrder} className="bbp-focus-ring order-form-chip inline-flex items-center rounded-full px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-slate-600 transition-colors hover:bg-white/90">
                         Keep Order
                       </button>
                     </>
                   ) : (
-                    <button onClick={onRequestCancelOrder} className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50/90 px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-rose-600 transition-colors hover:bg-rose-100">
+                    <button onClick={onRequestCancelOrder} className="bbp-focus-ring inline-flex items-center rounded-full border border-rose-200 bg-rose-50/90 px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-rose-600 transition-colors hover:bg-rose-100">
                       Cancel Entire Order
                     </button>
                   )
@@ -156,19 +156,19 @@ export default function ShopWorkspaceMain({
 
                 <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                   <div className="sm:col-span-1">
-                    <label className="mb-1 block pl-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">Email address</label>
+                    <label className="bbp-field-label">Email address</label>
                     <input type="email" value={customerEmail} onChange={onCustomerEmailChange} onBlur={!settings.paymentsOpen && !isReviewStageOpen ? handleLookup : undefined} className={getCustomerFormInputClass('email')} placeholder="Enter email to load your profile..." />
                   </div>
                   <div className="sm:col-span-1">
-                    <label className="mb-1 block pl-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">Confirm email</label>
+                    <label className="bbp-field-label">Confirm email</label>
                     <input type="email" value={customerEmailConfirm} onChange={onCustomerEmailConfirmChange} onBlur={settings.paymentsOpen || isReviewStageOpen ? handleLookup : undefined} className={getCustomerFormInputClass('emailConfirm')} placeholder="Type your email again..." />
                   </div>
                   <div className="sm:col-span-1">
-                    <label className="mb-1 block pl-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">Name</label>
+                    <label className="bbp-field-label">Name</label>
                     <input type="text" value={customerName} onChange={onCustomerNameChange} className={getCustomerFormInputClass('name')} placeholder="Full name" disabled={settings.paymentsOpen || settings.reviewStageOpen} />
                   </div>
                   <div className="sm:col-span-1">
-                    <label className="mb-1 block pl-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#D6006E]">Handle</label>
+                    <label className="bbp-field-label">Handle</label>
                     <input type="text" value={customerHandle} onChange={onCustomerHandleChange} className={customerFormInput} placeholder="@username" disabled={settings.paymentsOpen || settings.reviewStageOpen} />
                   </div>
                 </div>
@@ -234,7 +234,7 @@ export default function ShopWorkspaceMain({
                             <button
                               type="button"
                               onClick={() => setShowProtectionAnnouncement((value) => !value)}
-                              className="inline-flex items-center rounded-full border border-pink-200 bg-white/92 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.18em] text-[#D6006E] shadow-sm transition-colors hover:bg-pink-50"
+                              className="bbp-focus-ring inline-flex items-center rounded-full border border-pink-200 bg-white/92 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.18em] text-[#D6006E] shadow-sm transition-colors hover:bg-pink-50"
                             >
                               {showProtectionAnnouncement ? 'Hide Guide' : 'How This Works'}
                             </button>
@@ -512,7 +512,8 @@ export default function ShopWorkspaceMain({
                       <button
                         key={cat}
                         onClick={() => onSelectedCategoryChange(cat)}
-                        className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest whitespace-nowrap transition-colors border shadow-sm ${selectedCategory === cat ? 'bg-[#D6006E] text-white border-[#D6006E]' : 'bg-white text-slate-500 border-pink-100 hover:border-pink-300 hover:text-pink-600'}`}
+                        aria-pressed={selectedCategory === cat}
+                        className={`bbp-focus-ring px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest whitespace-nowrap transition-colors border shadow-sm ${selectedCategory === cat ? 'bg-[#D6006E] text-white border-[#D6006E]' : 'bg-white text-slate-500 border-pink-100 hover:border-pink-300 hover:text-pink-600'}`}
                       >
                         {cat}
                       </button>
@@ -520,14 +521,14 @@ export default function ShopWorkspaceMain({
                   </div>
                   <div className="relative w-full">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-400" size={18} />
-                    <input type="text" value={searchQuery} onChange={(e) => onClearFilters(false, e.target.value)} placeholder="Search products..." className="w-full pl-11 pr-4 py-1.5 sm:py-3 rounded-xl sm:rounded-2xl text-sm sm:text-base font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-[#FFF0F5] placeholder:text-pink-300 text-[#4A042A] shadow-inner" />
+                    <input type="text" value={searchQuery} onChange={(e) => onClearFilters(false, e.target.value)} placeholder="Search products..." className="bbp-focus-ring w-full pl-11 pr-4 py-1.5 sm:py-3 rounded-xl sm:rounded-2xl text-sm sm:text-base font-bold border-2 border-pink-200 outline-none focus:border-[#FF1493] focus:ring-4 focus:ring-pink-100 transition-all bg-[#FFF0F5] placeholder:text-pink-300 text-[#4A042A] shadow-inner" />
                   </div>
                   {(searchQuery || selectedCategory !== 'All') && (
                     <div className="flex items-center justify-between gap-3 px-1">
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                         Viewing {liveResultsLabel}
                       </p>
-                      <button onClick={() => onClearFilters(true)} className="text-[10px] font-black text-[#D6006E] uppercase tracking-widest hover:underline">
+                      <button onClick={() => onClearFilters(true)} className="bbp-focus-ring text-[10px] font-black text-[#D6006E] uppercase tracking-widest hover:underline">
                         Clear Filters
                       </button>
                     </div>
@@ -603,7 +604,7 @@ export default function ShopWorkspaceMain({
                           <div className={`min-w-0 ${(!isCartEditable || p.isClosed) ? 'opacity-40 pointer-events-none' : ''}`}>
                             <div className="flex items-start gap-1 min-w-0">
                               <h3 className="font-black text-[16px] sm:text-[17px] text-[#4A042A] leading-[1.05] line-clamp-2 flex-1 min-w-0">{p.name}</h3>
-                              <button onClick={() => onQuickInfo(productInfo)} className="shrink-0 rounded-full border border-pink-200 bg-pink-50 text-pink-600 w-4 h-4 flex items-center justify-center text-[9px] font-black leading-none hover:bg-pink-100 transition-colors" title="Learn more">
+                              <button onClick={() => onQuickInfo(productInfo)} className="bbp-focus-ring shrink-0 rounded-full border border-pink-200 bg-pink-50 text-pink-600 w-4 h-4 flex items-center justify-center text-[9px] font-black leading-none hover:bg-pink-100 transition-colors" title="Learn more">
                                 ?
                               </button>
                             </div>
@@ -636,6 +637,7 @@ export default function ShopWorkspaceMain({
                                 onFocus={(e) => handleCartFocus(p.name, e)}
                                 onChange={(e) => handleCartChange(p.name, e.target.value)}
                                 onBlur={() => handleCartBlur(p.name)}
+                                aria-label={`Vials for ${p.name}`}
                                 className={`w-full text-right font-black text-[16px] outline-none bg-transparent placeholder:text-pink-200 ${shakingProd === p.name ? 'text-red-600' : 'text-[#D6006E]'}`}
                                 placeholder="0"
                                 disabled={!isCartEditable || p.isClosed}

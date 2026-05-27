@@ -669,6 +669,12 @@ export default function App() {
   const [paymentFilterAdmin, setPaymentFilterAdmin] = useState('All');
   const [paymentViewFilter, setPaymentViewFilter] = useState('all');
   const [paymentSort, setPaymentSort] = useState('proof-first');
+  const [adminFeeStatusFilter, setAdminFeeStatusFilter] = useState('all');
+  const [adminFeeProofFilter, setAdminFeeProofFilter] = useState('all');
+  const [adminFeeBatchFilter, setAdminFeeBatchFilter] = useState('all');
+  const [adminFeeAdminFilter, setAdminFeeAdminFilter] = useState('All');
+  const [adminFeeSort, setAdminFeeSort] = useState('status-then-newest');
+  const [adminFeeSearch, setAdminFeeSearch] = useState('');
 
   // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW: Admin Inline Order Editing State
   const [adminOrderEditTarget, setAdminOrderEditTarget] = useState(null);
@@ -742,6 +748,7 @@ export default function App() {
   const deferredAdminGlobalSearch = useDeferredValue(adminGlobalSearch);
   const deferredAdminSettingsProductSearch = useDeferredValue(adminSettingsProductSearch);
   const deferredAdminModalSearchQuery = useDeferredValue(adminModalSearchQuery);
+  const deferredAdminFeeSearch = useDeferredValue(adminFeeSearch);
   const normalizedCustomerEmail = customerEmail.toLowerCase().trim();
   const normalizedSelectedProfileEmail = String(selectedProfileEmail || '').toLowerCase().trim();
   const normalizedShopSearchQuery = deferredSearchQuery.toLowerCase().trim();
@@ -749,6 +756,7 @@ export default function App() {
   const normalizedAdminSearch = deferredAdminGlobalSearch.toLowerCase().trim();
   const normalizedAdminSettingsProductSearch = deferredAdminSettingsProductSearch.toLowerCase().trim();
   const normalizedAdminModalSearchQuery = deferredAdminModalSearchQuery.toLowerCase().trim();
+  const normalizedAdminFeeSearch = deferredAdminFeeSearch.toLowerCase().trim();
   const isShopView = view === 'shop';
   const isAdminView = view === 'admin';
   const adminOrdersTabs = ['overview', 'active-orders', 'payments', 'audit', 'packing', 'trimming', 'customers', 'settings-core'];
@@ -1776,9 +1784,12 @@ export default function App() {
           record,
           status: record.status || 'pending',
           routeAdmin: record.routeAdmin || '',
+          routeAccount: String(record.routeBankDetails || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)[0] || '',
           proofUrl: record.proofUrl || '',
           adminFeeAmountPhp: Number(record.adminFeeAmountPhp || settings.adminFeePhp || 0),
           submittedAt: Number(record.proofSubmittedAt || record.updatedAt || record.createdAt || 0),
+          discordBatchAddedAt: Number(record.discordBatchAddedAt || 0) || 0,
+          discordBatchAddedBy: String(record.discordBatchAddedBy || '').trim(),
         };
       })
       .filter(Boolean)
@@ -1788,8 +1799,64 @@ export default function App() {
       });
   }, [isAdminAuthenticated, settings, users]);
 
-  const adminFeeSummary = useMemo(() => (
-    adminFeeAccessCustomers.reduce((summary, customer) => {
+  const adminFeeAdminOptions = useMemo(() => {
+    const base = ['All'];
+    const admins = new Set();
+    adminFeeAccessCustomers.forEach((customer) => {
+      admins.add(customer.routeAdmin || 'Unassigned');
+    });
+    return [...base, ...Array.from(admins).sort((left, right) => left.localeCompare(right))];
+  }, [adminFeeAccessCustomers]);
+
+  const filteredAdminFeeAccessCustomers = useMemo(() => {
+    const statusRank = { proof_sent: 0, pending: 1, rejected: 2, approved: 3 };
+    const list = adminFeeAccessCustomers.filter((customer) => {
+      const routeAdminLabel = customer.routeAdmin || 'Unassigned';
+      const hasProof = Boolean(customer.proofUrl);
+      const isBatchAdded = Number(customer.discordBatchAddedAt || 0) > 0;
+      const searchBlob = [
+        customer.name,
+        customer.email,
+        customer.handle,
+        routeAdminLabel,
+        customer.routeAccount,
+        customer.status,
+      ].join(' ').toLowerCase();
+
+      if (adminFeeStatusFilter !== 'all' && customer.status !== adminFeeStatusFilter) return false;
+      if (adminFeeProofFilter === 'with-proof' && !hasProof) return false;
+      if (adminFeeProofFilter === 'no-proof' && hasProof) return false;
+      if (adminFeeBatchFilter === 'added' && !isBatchAdded) return false;
+      if (adminFeeBatchFilter === 'not-added' && isBatchAdded) return false;
+      if (adminFeeAdminFilter !== 'All' && routeAdminLabel !== adminFeeAdminFilter) return false;
+      if (normalizedAdminFeeSearch && !searchBlob.includes(normalizedAdminFeeSearch)) return false;
+      return true;
+    });
+
+    return [...list].sort((left, right) => {
+      if (adminFeeSort === 'newest') return right.submittedAt - left.submittedAt;
+      if (adminFeeSort === 'oldest') return left.submittedAt - right.submittedAt;
+      if (adminFeeSort === 'amount-high') return Number(right.adminFeeAmountPhp || 0) - Number(left.adminFeeAmountPhp || 0) || right.submittedAt - left.submittedAt;
+      if (adminFeeSort === 'amount-low') return Number(left.adminFeeAmountPhp || 0) - Number(right.adminFeeAmountPhp || 0) || right.submittedAt - left.submittedAt;
+      if (adminFeeSort === 'batch-pending-first') {
+        const leftPending = Number(left.discordBatchAddedAt || 0) > 0 ? 1 : 0;
+        const rightPending = Number(right.discordBatchAddedAt || 0) > 0 ? 1 : 0;
+        return leftPending - rightPending || (statusRank[left.status] ?? 9) - (statusRank[right.status] ?? 9) || right.submittedAt - left.submittedAt;
+      }
+      return (statusRank[left.status] ?? 9) - (statusRank[right.status] ?? 9) || right.submittedAt - left.submittedAt;
+    });
+  }, [
+    adminFeeAccessCustomers,
+    adminFeeAdminFilter,
+    adminFeeBatchFilter,
+    adminFeeProofFilter,
+    adminFeeSort,
+    adminFeeStatusFilter,
+    normalizedAdminFeeSearch,
+  ]);
+
+  const filteredAdminFeeSummary = useMemo(() => (
+    filteredAdminFeeAccessCustomers.reduce((summary, customer) => {
       const amount = Number(customer.adminFeeAmountPhp || 0);
       summary.totalPHP += amount;
       summary.totalCount += 1;
@@ -1808,6 +1875,11 @@ export default function App() {
         summary.pendingCount += 1;
       }
 
+      if (Number(customer.discordBatchAddedAt || 0) > 0) {
+        summary.discordAddedCount += 1;
+      } else {
+        summary.discordPendingCount += 1;
+      }
       return summary;
     }, {
       totalPHP: 0,
@@ -1820,8 +1892,10 @@ export default function App() {
       pendingCount: 0,
       recheckPHP: 0,
       recheckCount: 0,
+      discordAddedCount: 0,
+      discordPendingCount: 0,
     })
-  ), [adminFeeAccessCustomers]);
+  ), [filteredAdminFeeAccessCustomers]);
 
   const filteredAdminProducts = useMemo(() => {
     if (!needsInventoryData) return [];
@@ -2919,7 +2993,7 @@ export default function App() {
     setIsBtnLoading(false);
   }
 
-  async function updateAdminFeeStatus(customer, nextStatus) {
+  async function updateAdminFeeStatus(customer, nextStatus, options = {}) {
     if (!customer?.email) return;
     const profile = usersById[customer.email] || {};
     const existingRecord = getChainAccessRecord(profile, settings);
@@ -2928,13 +3002,21 @@ export default function App() {
       return;
     }
 
+    const approvedViaOverride = Boolean(options?.approvedViaOverride);
     const now = Date.now();
     const nextRecord = {
       ...existingRecord,
       status: nextStatus,
       updatedAt: now,
       adminFeeAmountPhp: Number(existingRecord.adminFeeAmountPhp || settings.adminFeePhp || 0),
-      ...(nextStatus === 'approved' ? { adminFeePaidAt: now, approvedAt: now, approvedBy: 'Admin' } : {}),
+      ...(nextStatus === 'approved' ? {
+        adminFeePaidAt: now,
+        approvedAt: now,
+        approvedBy: 'Admin',
+        approvedViaOverride,
+        approvedOverrideSource: approvedViaOverride ? 'direct-screenshot' : '',
+        approvedOverrideAt: approvedViaOverride ? now : 0,
+      } : {}),
       ...(nextStatus === 'rejected' ? { rejectedAt: now } : {}),
     };
 
@@ -2944,10 +3026,12 @@ export default function App() {
         timestamp: now,
         email: customer.email,
         name: customer.name || '',
-        action: nextStatus === 'approved' ? 'Approved Admin Fee' : 'Rejected Admin Fee',
-        details: `Chain: ${currentChainId}`,
+        action: nextStatus === 'approved' ? (approvedViaOverride ? 'Approved Admin Fee (Override)' : 'Approved Admin Fee') : 'Rejected Admin Fee',
+        details: `Chain: ${currentChainId}${approvedViaOverride ? ' | Source: direct screenshot proof' : ''}`,
       }));
-      showToast(nextStatus === 'approved' ? 'Admin fee approved. Buyer can log in now.' : 'Admin fee marked for recheck.');
+      showToast(nextStatus === 'approved'
+        ? (approvedViaOverride ? 'Admin fee approved via manual override.' : 'Admin fee approved. Buyer can log in now.')
+        : 'Admin fee marked for recheck.');
     } catch (err) {
       console.error(err);
       showToast('Could not update admin fee status.');
@@ -2977,6 +3061,39 @@ export default function App() {
     } catch (err) {
       console.error(err);
       showToast('Could not delete admin fee request.');
+    }
+  }
+
+  async function setAdminFeeBatchDiscordStatus(customer, shouldMarkAdded) {
+    if (!customer?.email) return;
+    const profile = usersById[customer.email] || {};
+    const existingRecord = getChainAccessRecord(profile, settings);
+    if (!existingRecord) {
+      showToast('No admin fee record found for this customer.');
+      return;
+    }
+
+    const now = Date.now();
+    const nextRecord = {
+      ...existingRecord,
+      updatedAt: now,
+      discordBatchAddedAt: shouldMarkAdded ? now : 0,
+      discordBatchAddedBy: shouldMarkAdded ? 'Admin' : '',
+    };
+
+    try {
+      await safeAwait(setDoc(doc(db, colPath('users'), customer.email), buildChainAccessPatch(profile, nextRecord), { merge: true }));
+      await safeAwait(addDoc(collection(db, colPath('logs')), {
+        timestamp: now,
+        email: customer.email,
+        name: customer.name || '',
+        action: shouldMarkAdded ? 'Marked Added to Batch Discord' : 'Unmarked Added to Batch Discord',
+        details: `Chain: ${currentChainId}`,
+      }));
+      showToast(shouldMarkAdded ? 'Marked as added to batch Discord.' : 'Marked as not yet added to batch Discord.');
+    } catch (err) {
+      console.error(err);
+      showToast('Could not update batch Discord status.');
     }
   }
 
@@ -4131,6 +4248,55 @@ export default function App() {
   };
 
   const escapeCSVCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const exportAdminFeeAccessCSV = (rows, filenamePrefix = 'BBP_Admin_Fee_Access') => {
+    const headers = [
+      'Buyer Name',
+      'Email',
+      'Handle',
+      'Route Admin',
+      'Route Account',
+      'Admin Fee PHP',
+      'Status',
+      'Has Proof',
+      'Proof URL',
+      'Approved Via Override',
+      'Added To Batch Discord',
+      'Added To Batch At',
+      'Submitted At',
+    ];
+    let csvContent = headers.join(',') + '\n';
+
+    rows.forEach((row) => {
+      const isAddedToBatch = Number(row.discordBatchAddedAt || 0) > 0;
+      const addedAtText = isAddedToBatch ? new Date(row.discordBatchAddedAt).toLocaleString() : '';
+      const submittedAtText = row.submittedAt ? new Date(row.submittedAt).toLocaleString() : '';
+      const cells = [
+        row.name || '',
+        row.email || '',
+        row.handle || '',
+        row.routeAdmin || 'Unassigned',
+        row.routeAccount || '',
+        Number(row.adminFeeAmountPhp || 0),
+        row.status || 'pending',
+        row.proofUrl ? 'TRUE' : 'FALSE',
+        row.proofUrl || '',
+        row.record?.approvedViaOverride ? 'TRUE' : 'FALSE',
+        isAddedToBatch ? 'TRUE' : 'FALSE',
+        addedAtText,
+        submittedAtText,
+      ];
+      csvContent += cells.map(escapeCSVCell).join(',') + '\n';
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${filenamePrefix}_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
   const formatUSD = (value) => `$${Number(value || 0).toFixed(2)}`;
   const escapeSpreadsheetCell = (value) => String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -5938,123 +6104,241 @@ ${rowsXML.join("\n")}
           <p className="text-center text-xs font-bold text-pink-500 mt-2">Click to View Full Screen</p>
         </div>
       )}
-      <div className="flex flex-col gap-2 border-b border-pink-50 bg-[#FFF8FC] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Current Chain Admin Fee</p>
-          <p className="mt-1 text-xs font-bold text-slate-500">{currentChainId} access approvals</p>
+      <div className="flex flex-col gap-3 border-b border-pink-50 bg-[#FFF8FC] px-5 py-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">Current Chain Admin Fee</p>
+            <p className="mt-1 text-xs font-bold text-slate-500">{currentChainId} access approvals</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => exportAdminFeeAccessCSV(filteredAdminFeeAccessCustomers, 'BBP_Admin_Fee_Access_Filtered')}
+              className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-emerald-700 shadow-sm transition-colors hover:border-emerald-300"
+            >
+              Export Filtered CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAdminFeeStatusFilter('all');
+                setAdminFeeProofFilter('all');
+                setAdminFeeBatchFilter('all');
+                setAdminFeeAdminFilter('All');
+                setAdminFeeSort('status-then-newest');
+                setAdminFeeSearch('');
+              }}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600 shadow-sm transition-colors hover:border-pink-200 hover:text-pink-600"
+            >
+              Reset Filters
+            </button>
+          </div>
+        </div>
+        <div className="admin-grid-scroll flex items-center gap-2.5 overflow-x-auto whitespace-nowrap pb-1">
+          <input
+            type="text"
+            value={adminFeeSearch}
+            onChange={(event) => setAdminFeeSearch(event.target.value)}
+            placeholder="Search buyer, email, handle, admin..."
+            className="min-w-[320px] flex-1 rounded-xl border border-pink-200 bg-white px-3 py-2 text-xs font-bold text-[#4A042A] outline-none focus:border-[#D6006E]"
+          />
+          <select value={adminFeeStatusFilter} onChange={(event) => setAdminFeeStatusFilter(event.target.value)} className="w-[160px] shrink-0 rounded-xl border border-pink-200 bg-white px-3 py-2 text-xs font-black text-[#4A042A] outline-none focus:border-[#D6006E]">
+            <option value="all">All Status</option>
+            <option value="proof_sent">Proof Sent</option>
+            <option value="pending">Pending</option>
+            <option value="rejected">Recheck</option>
+            <option value="approved">Approved</option>
+          </select>
+          <select value={adminFeeProofFilter} onChange={(event) => setAdminFeeProofFilter(event.target.value)} className="w-[160px] shrink-0 rounded-xl border border-pink-200 bg-white px-3 py-2 text-xs font-black text-[#4A042A] outline-none focus:border-[#D6006E]">
+            <option value="all">All Proof</option>
+            <option value="with-proof">With Proof</option>
+            <option value="no-proof">No Proof</option>
+          </select>
+          <select value={adminFeeBatchFilter} onChange={(event) => setAdminFeeBatchFilter(event.target.value)} className="w-[180px] shrink-0 rounded-xl border border-pink-200 bg-white px-3 py-2 text-xs font-black text-[#4A042A] outline-none focus:border-[#D6006E]">
+            <option value="all">Batch Discord: All</option>
+            <option value="added">Added to Batch</option>
+            <option value="not-added">Not Added Yet</option>
+          </select>
+          <select value={adminFeeAdminFilter} onChange={(event) => setAdminFeeAdminFilter(event.target.value)} className="w-[170px] shrink-0 rounded-xl border border-pink-200 bg-white px-3 py-2 text-xs font-black text-[#4A042A] outline-none focus:border-[#D6006E]">
+            {adminFeeAdminOptions.map((adminName) => (
+              <option key={adminName} value={adminName}>{adminName === 'All' ? 'All Route Admins' : adminName}</option>
+            ))}
+          </select>
+          <select value={adminFeeSort} onChange={(event) => setAdminFeeSort(event.target.value)} className="w-[190px] shrink-0 rounded-xl border border-pink-200 bg-white px-3 py-2 text-xs font-black text-[#4A042A] outline-none focus:border-[#D6006E]">
+            <option value="status-then-newest">Sort: Status then Newest</option>
+            <option value="batch-pending-first">Sort: Batch Not Added First</option>
+            <option value="newest">Sort: Newest First</option>
+            <option value="oldest">Sort: Oldest First</option>
+            <option value="amount-high">Sort: Highest Amount</option>
+            <option value="amount-low">Sort: Lowest Amount</option>
+          </select>
         </div>
         <div className="flex flex-wrap gap-2">
-          {renderCompactAdminStat('Total', `\u20B1${adminFeeSummary.totalPHP.toLocaleString()}`, 'pink', `${adminFeeSummary.totalCount} requests`)}
-          {renderCompactAdminStat('Proof Sent', `\u20B1${adminFeeSummary.proofSentPHP.toLocaleString()}`, 'violet', `${adminFeeSummary.proofSentCount} need check`)}
-          {renderCompactAdminStat('Approved', `\u20B1${adminFeeSummary.approvedPHP.toLocaleString()}`, 'emerald', `${adminFeeSummary.approvedCount} can enter`)}
-          {renderCompactAdminStat('Pending', `\u20B1${adminFeeSummary.pendingPHP.toLocaleString()}`, 'amber', `${adminFeeSummary.pendingCount} no proof`)}
-          {adminFeeSummary.recheckCount > 0 && renderCompactAdminStat('Recheck', `\u20B1${adminFeeSummary.recheckPHP.toLocaleString()}`, 'rose', `${adminFeeSummary.recheckCount} resend`)}
+          {renderCompactAdminStat('Visible', filteredAdminFeeSummary.totalCount, 'pink', 'Matches filters')}
+          {renderCompactAdminStat('Total', `\u20B1${filteredAdminFeeSummary.totalPHP.toLocaleString()}`, 'pink', 'Visible amount')}
+          {renderCompactAdminStat('Proof Sent', filteredAdminFeeSummary.proofSentCount, 'violet', 'Need check')}
+          {renderCompactAdminStat('Approved', filteredAdminFeeSummary.approvedCount, 'emerald', 'Can enter')}
+          {renderCompactAdminStat('Batch Added', filteredAdminFeeSummary.discordAddedCount, 'blue', 'Sent to Discord')}
+          {renderCompactAdminStat('Batch Pending', filteredAdminFeeSummary.discordPendingCount, 'amber', 'Not yet sent')}
+          {filteredAdminFeeSummary.recheckCount > 0 && renderCompactAdminStat('Recheck', filteredAdminFeeSummary.recheckCount, 'rose', 'Need resend')}
         </div>
       </div>
-      <div className="overflow-x-auto">
+      <div className="admin-grid-scroll overflow-x-auto">
         <table className="w-full text-left custom-table">
           <thead>
             <tr>
               <th>Buyer</th>
               <th>Route Admin</th>
+              <th>Route Account</th>
               <th>Amount</th>
               <th>Proof</th>
               <th>Status</th>
+              <th>Batch Discord</th>
               <th className="text-center">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-pink-50">
-            {adminFeeAccessCustomers.map(customer => (
-              <tr key={customer.email} className={customer.status === 'approved' ? 'bg-emerald-50/40' : customer.status === 'proof_sent' ? 'bg-violet-50/45' : customer.status === 'rejected' ? 'bg-rose-50/45' : 'bg-white'}>
-                <td>
-                  <button onClick={() => { setSelectedProfileEmail(customer.email); setIsEditingAddress(false); }} className="font-bold text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">
-                    {customer.name}
-                  </button>
-                  <p className="text-[10px] text-slate-400">{customer.email}</p>
-                  {customer.handle && <p className="text-[10px] font-black uppercase tracking-widest text-[#D6006E]">{customer.handle}</p>}
-                </td>
-                <td className="text-xs font-black text-slate-700">{customer.routeAdmin || 'Unassigned'}</td>
-                <td className="font-black text-[#D6006E]">{"\u20B1"}{customer.adminFeeAmountPhp.toLocaleString()}</td>
-                <td>
-                  {customer.proofUrl ? (
-                    <button
-                      onClick={() => setFullScreenProof(customer.proofUrl)}
-                      onMouseEnter={(event) => showHoveredProofPreview(customer.proofUrl, event)}
-                      onMouseLeave={hideHoveredProofPreview}
-                      onPointerEnter={(event) => showHoveredProofPreview(customer.proofUrl, event)}
-                      onPointerLeave={hideHoveredProofPreview}
-                      onFocus={(event) => showHoveredProofPreview(customer.proofUrl, event)}
-                      onBlur={hideHoveredProofPreview}
-                      className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-violet-700 transition-colors hover:border-violet-300"
-                    >
-                      View
+            {filteredAdminFeeAccessCustomers.map(customer => {
+              const isBatchAdded = Number(customer.discordBatchAddedAt || 0) > 0;
+              return (
+                <tr key={customer.email} className={customer.status === 'approved' ? 'bg-emerald-50/40' : customer.status === 'proof_sent' ? 'bg-violet-50/45' : customer.status === 'rejected' ? 'bg-rose-50/45' : 'bg-white'}>
+                  <td>
+                    <button onClick={() => { setSelectedProfileEmail(customer.email); setIsEditingAddress(false); }} className="font-bold text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">
+                      {customer.name}
                     </button>
-                  ) : (
-                    <span className="text-[10px] font-bold italic text-slate-400">No proof</span>
-                  )}
-                </td>
-                <td>
-                  <span className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${
-                    customer.status === 'approved'
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                      : customer.status === 'proof_sent'
-                        ? 'border-violet-200 bg-violet-50 text-violet-700'
-                        : customer.status === 'rejected'
-                          ? 'border-rose-200 bg-rose-50 text-rose-700'
-                          : 'border-amber-200 bg-amber-50 text-amber-700'
-                  }`}>
-                    {customer.status === 'proof_sent' ? 'Proof Sent' : customer.status}
-                  </span>
-                </td>
-                <td className="text-center">
-                  <div className="flex items-center justify-center gap-2">
-                    <div className="flex flex-col items-center gap-1.5">
+                    <p className="text-[10px] text-slate-400">{customer.email}</p>
+                    {customer.handle && <p className="text-[10px] font-black uppercase tracking-widest text-[#D6006E]">{customer.handle}</p>}
+                  </td>
+                  <td className="text-xs font-black text-slate-700">{customer.routeAdmin || 'Unassigned'}</td>
+                  <td className="text-xs font-bold text-slate-500">{customer.routeAccount || '-'}</td>
+                  <td className="font-black text-[#D6006E]">{"\u20B1"}{customer.adminFeeAmountPhp.toLocaleString()}</td>
+                  <td>
+                    {customer.proofUrl ? (
                       <button
-                        onClick={() => updateAdminFeeStatus(customer, 'approved')}
-                        disabled={!customer.proofUrl || customer.status === 'approved'}
-                        className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition-colors hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={() => setFullScreenProof(customer.proofUrl)}
+                        onMouseEnter={(event) => showHoveredProofPreview(customer.proofUrl, event)}
+                        onMouseLeave={hideHoveredProofPreview}
+                        onPointerEnter={(event) => showHoveredProofPreview(customer.proofUrl, event)}
+                        onPointerLeave={hideHoveredProofPreview}
+                        onFocus={(event) => showHoveredProofPreview(customer.proofUrl, event)}
+                        onBlur={hideHoveredProofPreview}
+                        className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-violet-700 transition-colors hover:border-violet-300"
                       >
-                        Approve Fee
+                        View
                       </button>
+                    ) : (
+                      <span className="text-[10px] font-bold italic text-slate-400">No proof</span>
+                    )}
+                  </td>
+                  <td>
+                    <span className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${
+                      customer.status === 'approved'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : customer.status === 'proof_sent'
+                          ? 'border-violet-200 bg-violet-50 text-violet-700'
+                          : customer.status === 'rejected'
+                            ? 'border-rose-200 bg-rose-50 text-rose-700'
+                            : 'border-amber-200 bg-amber-50 text-amber-700'
+                    }`}>
+                      {customer.status === 'proof_sent' ? 'Proof Sent' : customer.status}
+                    </span>
+                    {customer.status === 'approved' && customer.record?.approvedViaOverride && (
+                      <p className="mt-1 text-[9px] font-black uppercase tracking-widest text-amber-700">Manual screenshot override</p>
+                    )}
+                  </td>
+                  <td>
+                    <div className="space-y-1.5">
                       <button
-                        onClick={() => updateAdminFeeStatus(customer, 'rejected')}
-                        disabled={!customer.proofUrl}
-                        className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
+                        type="button"
+                        onClick={() => setAdminFeeBatchDiscordStatus(customer, !isBatchAdded)}
+                        className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest transition-colors ${isBatchAdded ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300' : 'border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300'}`}
                       >
-                        Recheck
+                        {isBatchAdded ? 'Added to Batch Discord' : 'Mark Added to Batch Discord'}
                       </button>
+                      <p className="text-[10px] font-bold text-slate-400">
+                        {isBatchAdded ? new Date(customer.discordBatchAddedAt).toLocaleString() : 'Not yet added'}
+                      </p>
                     </div>
-                    {confirmAction.type === 'deleteAdminFee' && confirmAction.id === customer.email ? (
-                      <div className="flex items-center gap-1">
+                  </td>
+                  <td className="text-center">
+                    <div className="flex items-center justify-center gap-2">
+                      <div className="flex flex-col items-center gap-1.5">
                         <button
-                          onClick={() => deleteAdminFeeAccess(customer)}
-                          className="rounded-full bg-rose-500 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-white hover:bg-rose-600"
+                          onClick={() => updateAdminFeeStatus(customer, 'approved')}
+                          disabled={!customer.proofUrl || customer.status === 'approved'}
+                          className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition-colors hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          Yes
+                          Approve Fee
                         </button>
+                        {!customer.proofUrl && customer.status !== 'approved' && (
+                          confirmAction.type === 'overrideApproveAdminFee' && confirmAction.id === customer.email ? (
+                            <div className="flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-1">
+                              <span className="text-[9px] font-black uppercase tracking-widest text-amber-700">Override?</span>
+                              <button
+                                onClick={async () => {
+                                  await updateAdminFeeStatus(customer, 'approved', { approvedViaOverride: true });
+                                  setConfirmAction({ type: null, id: null });
+                                }}
+                                className="rounded-full bg-emerald-600 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-white hover:bg-emerald-700"
+                              >
+                                Yes
+                              </button>
+                              <button
+                                onClick={() => setConfirmAction({ type: null, id: null })}
+                                className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-slate-500 hover:border-slate-300"
+                              >
+                                No
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setConfirmAction({ type: 'overrideApproveAdminFee', id: customer.email })}
+                              className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-amber-700 transition-colors hover:border-amber-300"
+                            >
+                              Override Approve
+                            </button>
+                          )
+                        )}
                         <button
-                          onClick={() => setConfirmAction({ type: null, id: null })}
-                          className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:border-slate-300"
+                          onClick={() => updateAdminFeeStatus(customer, 'rejected')}
+                          disabled={!customer.proofUrl}
+                          className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          No
+                          Recheck
                         </button>
                       </div>
-                    ) : (
-                      <button
-                        onClick={() => setConfirmAction({ type: 'deleteAdminFee', id: customer.email })}
-                        className="ml-auto rounded-full border border-transparent bg-transparent p-1 text-slate-300 transition-colors hover:border-rose-100 hover:bg-rose-50 hover:text-rose-600"
-                        title="Delete admin fee request"
-                        aria-label="Delete admin fee request"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {adminFeeAccessCustomers.length === 0 && (
-              <tr><td colSpan="6" className="text-center p-8 text-pink-300 font-bold italic">No admin fee access requests yet.</td></tr>
+                      {confirmAction.type === 'deleteAdminFee' && confirmAction.id === customer.email ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => deleteAdminFeeAccess(customer)}
+                            className="rounded-full bg-rose-500 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-white hover:bg-rose-600"
+                          >
+                            Yes
+                          </button>
+                          <button
+                            onClick={() => setConfirmAction({ type: null, id: null })}
+                            className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:border-slate-300"
+                          >
+                            No
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmAction({ type: 'deleteAdminFee', id: customer.email })}
+                          className="ml-auto rounded-full border border-transparent bg-transparent p-1 text-slate-300 transition-colors hover:border-rose-100 hover:bg-rose-50 hover:text-rose-600"
+                          title="Delete admin fee request"
+                          aria-label="Delete admin fee request"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {filteredAdminFeeAccessCustomers.length === 0 && (
+              <tr><td colSpan="8" className="text-center p-8 text-pink-300 font-bold italic">No admin fee access requests match your filters.</td></tr>
             )}
           </tbody>
         </table>
@@ -6630,6 +6914,65 @@ ${rowsXML.join("\n")}
           font-weight: 900;
           text-transform: uppercase;
           letter-spacing: 0.18em;
+        }
+        .admin-page-shell {
+          max-width: 1680px;
+          margin: 0 auto;
+          border-radius: 1.25rem;
+          background: linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0.92));
+          border: 1px solid rgba(244, 220, 232, 0.9);
+          box-shadow: 0 16px 34px rgba(74, 4, 42, 0.06);
+          padding: 1rem;
+        }
+        .admin-page-shell :is(button, a, select, input, textarea):focus-visible {
+          outline: 2px solid #D6006E;
+          outline-offset: 2px;
+        }
+        .admin-page-shell-tight {
+          max-width: 1280px;
+        }
+        .admin-tab-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-end;
+          gap: 0.75rem;
+          flex-wrap: wrap;
+        }
+        .admin-chip-btn {
+          border-radius: 999px;
+          border: 1px solid #F5DCE8;
+          background: #fff;
+          padding: 0.4rem 0.75rem;
+          font-size: 10px;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 0.14em;
+          color: #6E4B62;
+          transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+        }
+        .admin-chip-btn:hover {
+          border-color: #EDBDD8;
+          color: #B21764;
+          background: #FFF7FB;
+        }
+        .admin-toolbar-card {
+          border: 1px solid #F2D6E5;
+          background: linear-gradient(180deg, #fff, #FFF8FC);
+          border-radius: 1rem;
+          box-shadow: 0 10px 22px rgba(74, 4, 42, 0.05);
+          padding: 0.8rem;
+        }
+        .admin-grid-scroll {
+          scrollbar-width: thin;
+          scrollbar-color: #F0BCD9 transparent;
+        }
+        .admin-grid-scroll::-webkit-scrollbar {
+          width: 8px;
+          height: 8px;
+        }
+        .admin-grid-scroll::-webkit-scrollbar-thumb {
+          background: #F4C8DE;
+          border-radius: 999px;
         }
         .defer-render {
           content-visibility: auto;
@@ -7255,18 +7598,19 @@ ${rowsXML.join("\n")}
       ) : (
         /* --- ADMIN VIEW --- */
         !isAdminAuthenticated ? (
-          <div className="min-h-screen w-full bg-[#FFF0F5] flex items-center justify-center p-4">
+          <div className="min-h-screen w-full bg-[linear-gradient(180deg,#FFF8FC_0%,#FFF0F5_55%,#FFEAF4_100%)] flex items-center justify-center p-4">
             <form onSubmit={handleAdminLogin} className="bg-white p-8 rounded-[32px] shadow-2xl w-full max-w-sm border-2 border-pink-600 text-center space-y-6">
               <div className="bg-pink-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto"><Lock className="text-pink-600" size={32} /></div>
               <div>
                 <h2 className="brand-title text-3xl text-pink-600">Security Gate</h2>
                 <p className="text-xs font-bold text-pink-400 uppercase tracking-widest mt-1">Verification Required</p>
+                <p className="mt-2 text-[11px] font-bold leading-relaxed text-slate-500">Admin tools are separated from the shop to protect buyer orders and payment routing.</p>
               </div>
-              <input type="password" autoFocus value={adminPassword} onChange={e => setAdminPassword(e.target.value)} className={originalInput} placeholder="Password" />
+              <input type="password" autoFocus value={adminPassword} onChange={e => setAdminPassword(e.target.value)} className={`bbp-focus-ring ${originalInput}`} placeholder="Password" />
               {loginError && <p className="text-xs font-bold text-rose-500">{loginError}</p>}
               <div className="flex flex-col gap-2 pt-4">
-                <button type="submit" className={originalBtn}>Enter Dashboard</button>
-                <button type="button" onClick={() => switchView('shop')} className="text-gray-400 font-bold text-[10px] uppercase tracking-[0.2em] mt-2 hover:underline">Cancel / Back to Shop</button>
+                <button type="submit" className={`bbp-focus-ring ${originalBtn}`}>Enter Dashboard</button>
+                <button type="button" onClick={() => switchView('shop')} className="bbp-focus-ring text-gray-400 font-bold text-[10px] uppercase tracking-[0.2em] mt-2 hover:underline">Cancel / Back to Shop</button>
               </div>
             </form>
           </div>
@@ -7287,7 +7631,7 @@ ${rowsXML.join("\n")}
                   { id: 'trimming', icon: <Scissors size={18} />, label: 'Hit List' },
                   { id: 'safety', icon: <RotateCcw size={18} />, label: 'Admin Safety' }
                 ].map(t => (
-                  <button key={t.id} onClick={() => switchAdminTab(t.id)} className={`nav-item w-full flex items-center gap-3 px-4 py-3 font-black text-xs uppercase tracking-widest transition-all ${adminTab === t.id ? 'active shadow-lg' : 'text-pink-300/60 hover:text-white'}`}>
+                  <button key={t.id} onClick={() => switchAdminTab(t.id)} className={`bbp-focus-ring nav-item w-full flex items-center gap-3 px-4 py-3 font-black text-xs uppercase tracking-widest transition-all ${adminTab === t.id ? 'active shadow-lg' : 'text-pink-300/60 hover:text-white'}`}>
                     {t.icon} {t.label}
                   </button>
                 ))}
@@ -7299,7 +7643,7 @@ ${rowsXML.join("\n")}
                   { id: 'customers', icon: <Users size={18} />, label: 'Customer DB' },
                   { id: 'logs', icon: <ScrollText size={18} />, label: 'Activity Logs' }
                 ].map(t => (
-                  <button key={t.id} onClick={() => switchAdminTab(t.id)} className={`nav-item w-full flex items-center gap-3 px-4 py-3 font-black text-xs uppercase tracking-widest transition-all ${adminTab === t.id ? 'active shadow-lg' : 'text-pink-300/60 hover:text-white'}`}>
+                  <button key={t.id} onClick={() => switchAdminTab(t.id)} className={`bbp-focus-ring nav-item w-full flex items-center gap-3 px-4 py-3 font-black text-xs uppercase tracking-widest transition-all ${adminTab === t.id ? 'active shadow-lg' : 'text-pink-300/60 hover:text-white'}`}>
                     {t.icon} {t.label}
                   </button>
                 ))}
@@ -7312,25 +7656,25 @@ ${rowsXML.join("\n")}
                   { id: 'settings-admins', icon: <ShieldCheck size={18} />, label: 'Admin Profiles' },
                   { id: 'settings-products', icon: <Package size={18} />, label: 'Products & Limits' }
                 ].map(t => (
-                  <button key={t.id} onClick={() => switchAdminTab(t.id)} className={`nav-item w-full flex items-center gap-3 px-4 py-3 font-black text-xs uppercase tracking-widest transition-all ${adminTab === t.id ? 'active shadow-lg' : 'text-pink-300/60 hover:text-white'}`}>
+                  <button key={t.id} onClick={() => switchAdminTab(t.id)} className={`bbp-focus-ring nav-item w-full flex items-center gap-3 px-4 py-3 font-black text-xs uppercase tracking-widest transition-all ${adminTab === t.id ? 'active shadow-lg' : 'text-pink-300/60 hover:text-white'}`}>
                     {t.icon} {t.label}
                   </button>
                 ))}
               </nav>
 
               <div className="pt-6 border-t border-white/10">
-                <button onClick={() => switchView('shop')} className="w-full flex items-center gap-3 px-4 py-3 text-pink-300/60 font-bold text-xs uppercase tracking-widest hover:text-white"><Home size={18} /> Shop View</button>
-                <button onClick={() => setIsAdminAuthenticated(false)} className="w-full flex items-center gap-3 px-4 py-3 text-pink-300/60 font-bold text-xs uppercase tracking-widest hover:text-white"><LogOut size={18} /> Logout</button>
+                <button onClick={() => switchView('shop')} className="bbp-focus-ring w-full flex items-center gap-3 px-4 py-3 text-pink-300/60 font-bold text-xs uppercase tracking-widest hover:text-white"><Home size={18} /> Shop View</button>
+                <button onClick={() => setIsAdminAuthenticated(false)} className="bbp-focus-ring w-full flex items-center gap-3 px-4 py-3 text-pink-300/60 font-bold text-xs uppercase tracking-widest hover:text-white"><LogOut size={18} /> Logout</button>
               </div>
             </aside>
 
-            <main className="flex-1 h-screen overflow-y-auto p-4 lg:p-6 hide-scroll">
+            <main className="admin-grid-scroll flex-1 h-screen overflow-y-auto p-4 lg:p-6 hide-scroll">
               <div className="lg:hidden flex items-center justify-between mb-4 bg-[#4A042A] p-3 sm:p-4 rounded-xl sm:rounded-2xl shadow-xl sticky top-2 z-50">
                 <div className="flex items-center gap-2 sm:gap-3">
-                  <button onClick={() => switchView('shop')} className="text-white bg-white/10 p-1.5 sm:p-2 rounded-lg hover:bg-white/20 transition-colors"><Home size={18} /></button>
+                  <button onClick={() => switchView('shop')} className="bbp-focus-ring text-white bg-white/10 p-1.5 sm:p-2 rounded-lg hover:bg-white/20 transition-colors"><Home size={18} /></button>
                   <span className="brand-title text-white text-lg sm:text-xl">BBP</span>
                 </div>
-                <select value={adminTab} onChange={e => switchAdminTab(e.target.value)} className="bg-white text-[#D6006E] font-black text-[10px] uppercase tracking-widest px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl outline-none max-w-[130px] sm:max-w-none">
+                <select value={adminTab} onChange={e => switchAdminTab(e.target.value)} className="bbp-focus-ring bg-white text-[#D6006E] font-black text-[10px] uppercase tracking-widest px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl outline-none max-w-[130px] sm:max-w-none">
                   <option value="overview">Inventory</option>
                   <option value="active-orders">Active Orders</option>
                   <option value="payments">Payments</option>
@@ -7351,13 +7695,13 @@ ${rowsXML.join("\n")}
                 {!adminTab.includes('settings') && (
                   <div className="bg-white p-3 rounded-2xl shadow-sm border-2 border-pink-100 mb-6 flex items-center gap-3 sticky top-[70px] lg:top-0 z-40">
                     <Search size={20} className="text-pink-400 ml-2 shrink-0" />
-                    <input type="text" value={adminGlobalSearch} onChange={e => setAdminGlobalSearch(e.target.value)} placeholder="Global Search (Ctrl+F equivalent)..." className="w-full text-sm font-bold text-[#4A042A] outline-none placeholder:text-pink-200 bg-transparent" />
+                    <input type="text" value={adminGlobalSearch} onChange={e => setAdminGlobalSearch(e.target.value)} placeholder="Global Search (Ctrl+F equivalent)..." className="bbp-focus-ring w-full text-sm font-bold text-[#4A042A] outline-none placeholder:text-pink-200 bg-transparent rounded-lg" />
                   </div>
                 )}
 
                 {adminTab === 'overview' && (
-                  <div className="space-y-6">
-                    <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+                  <div className="admin-page-shell space-y-6">
+                    <div className="admin-tab-header">
                       <div>
                         <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Live Inventory Overview</h2>
                         <p className="text-sm font-bold text-slate-500 mt-1">Manage product availability, box limits, and synced box caps here.</p>
@@ -7491,8 +7835,8 @@ ${rowsXML.join("\n")}
 
                 {/* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW: ACTIVE ORDERS TAB */}
                 {adminTab === 'active-orders' && (
-                  <div className="space-y-5 defer-render-xl">
-                    <div className="flex justify-between items-center flex-wrap gap-4">
+                  <div className="admin-page-shell space-y-5 defer-render-xl">
+                    <div className="admin-tab-header">
                       <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Active Orders</h2>
 
                       {/* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ MOVED FROM CUSTOMER DB: Sheet and CSV buttons */}
@@ -7528,24 +7872,24 @@ ${rowsXML.join("\n")}
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 xl:grid-cols-5 gap-2.5">
-                      <button onClick={() => setActiveOrdersFilter('all')} className={`rounded-[24px] border-2 px-4 py-3 text-left shadow-sm transition-all ${activeOrdersFilter === 'all' ? 'border-pink-300 bg-white ring-2 ring-pink-100' : 'border-pink-100 bg-white hover:border-pink-200'}`}>
+                    <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
+                      <button aria-pressed={activeOrdersFilter === 'all'} onClick={() => setActiveOrdersFilter('all')} className={`admin-toolbar-card rounded-[24px] border-2 px-4 py-3 text-left shadow-sm transition-all ${activeOrdersFilter === 'all' ? 'border-pink-300 bg-white ring-2 ring-pink-100' : 'border-pink-100 bg-white hover:border-pink-200'}`}>
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Customers</p>
                         <p className="mt-1 text-xl font-black text-[#D6006E]">{activeOrdersSummary.total}</p>
                       </button>
-                      <button onClick={() => setActiveOrdersFilter('unpaid')} className={`rounded-[24px] border-2 px-4 py-3 text-left shadow-sm transition-all ${activeOrdersFilter === 'unpaid' ? 'border-amber-300 bg-amber-50 ring-2 ring-amber-100' : 'border-amber-100 bg-white hover:border-amber-200'}`}>
+                      <button aria-pressed={activeOrdersFilter === 'unpaid'} onClick={() => setActiveOrdersFilter('unpaid')} className={`admin-toolbar-card rounded-[24px] border-2 px-4 py-3 text-left shadow-sm transition-all ${activeOrdersFilter === 'unpaid' ? 'border-amber-300 bg-amber-50 ring-2 ring-amber-100' : 'border-amber-100 bg-white hover:border-amber-200'}`}>
                         <p className="text-[10px] font-black uppercase tracking-widest text-amber-600">Waiting Payment</p>
                         <p className="mt-1 text-xl font-black text-amber-700">{activeOrdersSummary.unpaid}</p>
                       </button>
-                      <button onClick={() => setActiveOrdersFilter('no-address')} className={`rounded-[24px] border-2 px-4 py-3 text-left shadow-sm transition-all ${activeOrdersFilter === 'no-address' ? 'border-rose-300 bg-rose-50 ring-2 ring-rose-100' : 'border-rose-100 bg-white hover:border-rose-200'}`}>
+                      <button aria-pressed={activeOrdersFilter === 'no-address'} onClick={() => setActiveOrdersFilter('no-address')} className={`admin-toolbar-card rounded-[24px] border-2 px-4 py-3 text-left shadow-sm transition-all ${activeOrdersFilter === 'no-address' ? 'border-rose-300 bg-rose-50 ring-2 ring-rose-100' : 'border-rose-100 bg-white hover:border-rose-200'}`}>
                         <p className="text-[10px] font-black uppercase tracking-widest text-rose-600">Missing Address</p>
                         <p className="mt-1 text-xl font-black text-rose-700">{activeOrdersSummary.missingAddress}</p>
                       </button>
-                      <button onClick={() => setActiveOrdersFilter('no-admin')} className={`rounded-[24px] border-2 px-4 py-3 text-left shadow-sm transition-all ${activeOrdersFilter === 'no-admin' ? 'border-sky-300 bg-sky-50 ring-2 ring-sky-100' : 'border-sky-100 bg-white hover:border-sky-200'}`}>
+                      <button aria-pressed={activeOrdersFilter === 'no-admin'} onClick={() => setActiveOrdersFilter('no-admin')} className={`admin-toolbar-card rounded-[24px] border-2 px-4 py-3 text-left shadow-sm transition-all ${activeOrdersFilter === 'no-admin' ? 'border-sky-300 bg-sky-50 ring-2 ring-sky-100' : 'border-sky-100 bg-white hover:border-sky-200'}`}>
                         <p className="text-[10px] font-black uppercase tracking-widest text-sky-600">Needs Admin</p>
                         <p className="mt-1 text-xl font-black text-sky-700">{activeOrdersSummary.unassignedAdmin}</p>
                       </button>
-                      <button onClick={() => setActiveOrdersFilter('ready')} className={`rounded-[24px] border-2 px-4 py-3 text-left shadow-sm transition-all ${activeOrdersFilter === 'ready' ? 'border-emerald-300 bg-emerald-50 ring-2 ring-emerald-100' : 'border-emerald-100 bg-white hover:border-emerald-200'}`}>
+                      <button aria-pressed={activeOrdersFilter === 'ready'} onClick={() => setActiveOrdersFilter('ready')} className={`admin-toolbar-card rounded-[24px] border-2 px-4 py-3 text-left shadow-sm transition-all ${activeOrdersFilter === 'ready' ? 'border-emerald-300 bg-emerald-50 ring-2 ring-emerald-100' : 'border-emerald-100 bg-white hover:border-emerald-200'}`}>
                         <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Ready to Ship</p>
                         <p className="mt-1 text-xl font-black text-emerald-700">{activeOrdersSummary.ready}</p>
                       </button>
@@ -7571,7 +7915,7 @@ ${rowsXML.join("\n")}
                           </div>
                         </div>
 
-                        <div className="xl:max-w-[420px] w-full rounded-[24px] border border-slate-200 bg-slate-50/80 p-3.5">
+                        <div className="admin-toolbar-card xl:max-w-[420px] w-full rounded-[24px] border border-slate-200 bg-slate-50/80 p-3.5">
                           <div className="flex items-center justify-between gap-3">
                             <div>
                               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Bulk Actions</p>
@@ -7622,7 +7966,7 @@ ${rowsXML.join("\n")}
                         </div>
                       </div>
 
-                      <div className="rounded-[24px] border-2 border-pink-50 overflow-hidden">
+                      <div className="admin-grid-scroll rounded-[24px] border-2 border-pink-50 overflow-x-auto">
                         <table className="w-full text-left custom-table">
                           <thead>
                             <tr>
@@ -7648,11 +7992,11 @@ ${rowsXML.join("\n")}
                                       type="checkbox"
                                       checked={Boolean(selectedActiveOrders[c.email])}
                                       onChange={(e) => setSelectedActiveOrders(prev => ({ ...prev, [c.email]: e.target.checked }))}
-                                      className="h-4 w-4 rounded border-pink-300 text-[#D6006E] focus:ring-pink-300"
+                                      className="bbp-focus-ring h-4 w-4 rounded border-pink-300 text-[#D6006E] focus:ring-pink-300"
                                     />
                                   </td>
                                   <td className="py-3">
-                                    <button onClick={() => { setSelectedProfileEmail(c.email); setIsEditingAddress(false); }} className="font-black text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">
+                                    <button onClick={() => { setSelectedProfileEmail(c.email); setIsEditingAddress(false); }} className="bbp-focus-ring font-black text-slate-900 hover:text-pink-600 hover:underline text-left cursor-pointer bg-transparent border-none p-0 m-0">
                                       {c.name}
                                     </button>
                                     <p className="mt-0.5 text-[10px] font-bold text-slate-400">{c.email}</p>
@@ -7704,7 +8048,7 @@ ${rowsXML.join("\n")}
                                       <button
                                         type="button"
                                         onClick={() => setExpandedActiveOrders(prev => ({ ...prev, [c.email]: !prev[c.email] }))}
-                                        className="mt-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500 transition-colors hover:border-pink-200 hover:text-pink-600"
+                                        className="bbp-focus-ring mt-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500 transition-colors hover:border-pink-200 hover:text-pink-600"
                                       >
                                         {isExpanded ? 'Hide Items' : `View All ${c.itemEntries.length}`}
                                       </button>
@@ -7716,7 +8060,7 @@ ${rowsXML.join("\n")}
                                     </div>
                                   </td>
                                   <td className="py-3">
-                                    <select value={c.hasAssignedAdmin ? c.adminAssigned : ''} onChange={(e) => updateCustomerAdminAssignment(c, e.target.value)} disabled={settings.paymentsOpen || c.hasProof || c.isPaid} className="bg-[#FFF0F5] border border-[#FFC0CB] text-[#D6006E] text-[10px] font-black rounded-xl px-3 py-1.5 outline-none w-full max-w-[160px] disabled:cursor-not-allowed disabled:opacity-60">
+                                    <select value={c.hasAssignedAdmin ? c.adminAssigned : ''} onChange={(e) => updateCustomerAdminAssignment(c, e.target.value)} disabled={settings.paymentsOpen || c.hasProof || c.isPaid} className="bbp-focus-ring bg-[#FFF0F5] border border-[#FFC0CB] text-[#D6006E] text-[10px] font-black rounded-xl px-3 py-1.5 outline-none w-full max-w-[160px] disabled:cursor-not-allowed disabled:opacity-60">
                                       <option value="" disabled>Select Admin...</option>
                                       {normalizedAdmins.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
                                     </select>
@@ -7727,7 +8071,7 @@ ${rowsXML.join("\n")}
                                         value={adminNoteDrafts[c.email] ?? c.adminNotes ?? ''}
                                         onChange={(e) => setAdminNoteDrafts(prev => ({ ...prev, [c.email]: e.target.value }))}
                                         rows={2}
-                                        className="w-full rounded-2xl border border-pink-100 bg-[#FFF9FC] px-3 py-2 text-xs font-bold text-[#4A042A] outline-none focus:border-[#D6006E]"
+                                        className="bbp-focus-ring w-full rounded-2xl border border-pink-100 bg-[#FFF9FC] px-3 py-2 text-xs font-bold text-[#4A042A] outline-none focus:border-[#D6006E]"
                                         placeholder="Order note..."
                                       />
                                       <div className="flex items-center gap-2">
@@ -7785,7 +8129,7 @@ ${rowsXML.join("\n")}
                 )}
 
                 {adminTab === 'logs' && (
-                  <div className="space-y-6 defer-render">
+                  <div className="admin-page-shell space-y-6 defer-render">
                     <div className="space-y-3">
                       <div className="flex items-center justify-between gap-3 flex-wrap">
                         <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">System Activity Logs</h2>
@@ -7828,8 +8172,8 @@ ${rowsXML.join("\n")}
                 )}
 
                 {adminTab === 'admin-fees' && (
-                  <div className="space-y-6 defer-render-xl">
-                    <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
+                  <div className="admin-page-shell space-y-6 defer-render-xl">
+                    <div className="admin-tab-header mb-2">
                       <div>
                         <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Admin Fee Payments</h2>
                         <p className="text-sm font-bold text-slate-500 mt-1">Current-chain access fees only. Product payment approvals stay in Payments.</p>
@@ -7841,8 +8185,8 @@ ${rowsXML.join("\n")}
                 )}
 
                 {adminTab === 'payments' && (
-                  <div className="space-y-6 defer-render-xl">
-                    <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
+                  <div className="admin-page-shell space-y-6 defer-render-xl">
+                    <div className="admin-tab-header mb-2">
                       <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Customer Payments Management</h2>
 
                       <div className="flex gap-2 flex-wrap">
@@ -7959,8 +8303,8 @@ ${rowsXML.join("\n")}
                 )}
 
                 {adminTab === 'audit' && (
-                  <div className="space-y-6">
-                    <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
+                  <div className="admin-page-shell space-y-6">
+                    <div className="admin-tab-header mb-2">
                       <div>
                         <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Payment Audit</h2>
                         <p className="text-sm font-bold text-slate-500 mt-1">Reconcile expected totals, proofs received, and approval gaps by admin route.</p>
@@ -7979,8 +8323,8 @@ ${rowsXML.join("\n")}
                 )}
 
                 {adminTab === 'packing' && (
-                  <div className="space-y-6">
-                    <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
+                  <div className="admin-page-shell space-y-6">
+                    <div className="admin-tab-header mb-2">
                       <div>
                         <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Packing Logistics Guide</h2>
                         <p className="text-sm font-black text-indigo-600 mt-1 bg-indigo-50 inline-block px-3 py-1 rounded-lg border border-indigo-100">Total Physical Boxes to Receive: {totalPhysicalBoxesToReceive}</p>
@@ -8027,7 +8371,7 @@ ${rowsXML.join("\n")}
                 )}
 
                 {adminTab === 'trimming' && (
-                  <div className="space-y-6">
+                  <div className="admin-page-shell space-y-6">
                     <div className="space-y-3">
                       <div className="flex justify-between items-center gap-3 flex-wrap">
                         <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Loose Vial Hit List</h2>
@@ -8093,8 +8437,8 @@ ${rowsXML.join("\n")}
                 )}
 
                 {adminTab === 'safety' && (
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="admin-page-shell space-y-6">
+                    <div className="admin-tab-header">
                       <div>
                         <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Admin Safety & Recovery</h2>
                         <p className="mt-1 text-sm font-bold text-slate-500">Recycle bin, proof recovery, batch snapshots, and one-click undo for the latest risky admin actions.</p>
@@ -8243,8 +8587,8 @@ ${rowsXML.join("\n")}
 
                 {/* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ REFACTORED: PURE CUSTOMER DATABASE */}
                 {adminTab === 'customers' && (
-                  <div className="space-y-6 defer-render">
-                    <div className="flex justify-between items-center flex-wrap gap-4">
+                  <div className="admin-page-shell space-y-6 defer-render">
+                    <div className="admin-tab-header">
                       <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Registered Customers Database</h2>
                     </div>
                     <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
@@ -8300,7 +8644,7 @@ ${rowsXML.join("\n")}
                 )}
 
                 {adminTab === 'settings-core' && (
-                  <div className="space-y-6 pb-20 max-w-5xl mx-auto">
+                  <div className="admin-page-shell space-y-6 pb-20 max-w-5xl mx-auto">
                     <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Core System Settings</h2>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -8519,7 +8863,7 @@ ${rowsXML.join("\n")}
                 )}
 
                 {adminTab === 'settings-admins' && (
-                  <div className="space-y-6 max-w-3xl mx-auto pb-20">
+                  <div className="admin-page-shell space-y-6 pb-20 max-w-3xl mx-auto">
                     <div className="space-y-3">
                       <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Admin Profiles & Banks</h2>
                       {settings.paymentsOpen && (
@@ -8638,7 +8982,7 @@ ${rowsXML.join("\n")}
                 )}
 
                 {adminTab === 'settings-products' && (
-                  <div className="space-y-6 pb-20 max-w-5xl mx-auto defer-render">
+                  <div className="admin-page-shell space-y-6 pb-20 max-w-5xl mx-auto defer-render">
                     <div className="space-y-3">
                       <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Product Catalog Management</h2>
                       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
@@ -8658,7 +9002,7 @@ ${rowsXML.join("\n")}
                         </div>
                       </div>
 
-                      <div className="overflow-x-auto border-2 border-pink-100 rounded-2xl mb-6 max-h-[500px] overflow-y-auto shadow-inner">
+                      <div className="admin-grid-scroll overflow-x-auto border-2 border-pink-100 rounded-2xl mb-6 max-h-[500px] overflow-y-auto shadow-inner">
                         <table className="w-full text-sm text-left custom-table compact-table">
                           <thead className="sticky top-0 shadow-sm bg-[#FFF0F5] z-10">
                             <tr>{renderSortableHeader('Name', 'name', productsTableSort, setProductsTableSort)}{renderSortableHeader('Price (Vial)', 'price', productsTableSort, setProductsTableSort)}<th className="text-center">Delete</th></tr>
@@ -8806,5 +9150,6 @@ ${rowsXML.join("\n")}
     </>
   );
 }
+
 
 

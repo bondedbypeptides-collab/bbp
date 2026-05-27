@@ -21,7 +21,7 @@ export default function AdminOrderEditModal({
             <h2 className="brand-title text-xl text-[#D6006E] m-0">Editing Active Order</h2>
             <p className="text-xs font-bold text-slate-500 mt-1">{targetProfile.name} ({targetEmail})</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-[#D6006E] font-black text-3xl transition-colors">&times;</button>
+          <button onClick={onClose} className="bbp-focus-ring text-slate-400 hover:text-[#D6006E] font-black text-3xl transition-colors" aria-label="Close order editor">&times;</button>
         </div>
 
         <div className="bg-[#FFF0F5] p-4 border-b border-pink-100 flex gap-4">
@@ -32,7 +32,7 @@ export default function AdminOrderEditModal({
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Search products to add/edit..."
-              className={`${adminInputSm} pl-10 border-pink-200 m-0 py-2 shadow-inner`}
+              className={`bbp-focus-ring ${adminInputSm} pl-10 border-pink-200 m-0 py-2 shadow-inner`}
             />
           </div>
         </div>
@@ -57,15 +57,15 @@ export default function AdminOrderEditModal({
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => onChangeQty(product.name, Math.max(0, currentQty - 1))} className="w-8 h-8 rounded-lg bg-white border border-slate-300 text-slate-600 font-black flex items-center justify-center hover:bg-slate-100 active:scale-95">-</button>
+                    <button onClick={() => onChangeQty(product.name, Math.max(0, currentQty - 1))} className="bbp-focus-ring w-8 h-8 rounded-lg bg-white border border-slate-300 text-slate-600 font-black flex items-center justify-center hover:bg-slate-100 active:scale-95">-</button>
                     <input
                       type="number"
                       value={currentQty || ''}
                       onChange={e => onChangeQty(product.name, e.target.value)}
-                      className="w-12 h-8 text-center font-black text-[#D6006E] bg-transparent border-b-2 border-pink-200 outline-none focus:border-[#D6006E]"
+                      className="bbp-focus-ring w-12 h-8 text-center font-black text-[#D6006E] bg-transparent border-b-2 border-pink-200 outline-none focus:border-[#D6006E]"
                       placeholder="0"
                     />
-                    <button onClick={() => onChangeQty(product.name, currentQty + 1)} className="w-8 h-8 rounded-lg bg-pink-600 border border-pink-600 text-white font-black flex items-center justify-center hover:bg-pink-700 active:scale-95">+</button>
+                    <button onClick={() => onChangeQty(product.name, currentQty + 1)} className="bbp-focus-ring w-8 h-8 rounded-lg bg-pink-600 border border-pink-600 text-white font-black flex items-center justify-center hover:bg-pink-700 active:scale-95">+</button>
                   </div>
                 </div>
               );
@@ -75,8 +75,8 @@ export default function AdminOrderEditModal({
         </div>
 
         <div className="p-5 border-t-2 border-slate-200 bg-white flex justify-end gap-3">
-          <button onClick={onClose} className="px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors">Cancel</button>
-          <button onClick={onSave} disabled={isBtnLoading} className="px-8 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white bg-gradient-to-r from-[#FF1493] to-[#FF69B4] shadow-md hover:scale-[0.98] transition-transform disabled:opacity-50">
+          <button onClick={onClose} className="bbp-focus-ring px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors">Cancel</button>
+          <button onClick={onSave} disabled={isBtnLoading} className="bbp-focus-ring px-8 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white bg-gradient-to-r from-[#FF1493] to-[#FF69B4] shadow-md hover:scale-[0.98] transition-transform disabled:opacity-50">
             {isBtnLoading ? 'Saving...' : 'Save Changes'}
           </button>
         </div>

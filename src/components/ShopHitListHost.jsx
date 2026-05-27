@@ -23,6 +23,7 @@ export default function ShopHitListHost({
 }) {
   const [pendingAddDraft, setPendingAddDraft] = useState('');
   const userEmailTrimmed = customerEmail.toLowerCase().trim();
+
   useEffect(() => {
     setPendingAddDraft(pendingHitListAdd ? String(pendingHitListAdd.addQty || 1) : '');
   }, [pendingHitListAdd]);
@@ -75,18 +76,34 @@ export default function ShopHitListHost({
     return Number(a.boxNum || 0) - Number(b.boxNum || 0);
   });
 
+  const atRiskGroupCount = modalHitGroups.filter((group) => group.myRisk).length;
+  const openGroupCount = modalHitGroups.filter((group) => Number(group.missingSlots || 0) > 0).length;
+  const totalMissingSlots = modalHitGroups.reduce((sum, group) => sum + Number(group.missingSlots || 0), 0);
+
   return (
     <>
       <div className="fixed inset-0 bg-[#4A042A]/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
         <div className="bg-white rounded-[24px] w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[85vh] border-2 border-pink-200">
           <div className="bg-[#FFF0F5] p-4 flex justify-between items-center border-b border-[#FFC0CB]">
             <h2 className="brand-title text-xl text-rose-600 flex items-center gap-2">Boxes To Save</h2>
-            <button onClick={closeHitList} className="text-pink-600 font-black text-2xl hover:scale-110 transition-transform">&times;</button>
+            <button onClick={closeHitList} className="bbp-focus-ring text-pink-600 font-black text-2xl hover:scale-110 transition-transform" aria-label="Close hit list">&times;</button>
           </div>
           <div className="p-4 sm:p-5 overflow-y-auto bg-slate-50 hide-scroll">
-            <p className="mb-2 text-center text-[10px] font-bold text-slate-500">
-              Small view: use `+` or `-` here.
-            </p>
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              <div className="rounded-xl border border-rose-100 bg-white p-2 text-center">
+                <p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-400">At Risk</p>
+                <p className="mt-1 text-lg font-black text-rose-600">{atRiskGroupCount}</p>
+              </div>
+              <div className="rounded-xl border border-amber-100 bg-white p-2 text-center">
+                <p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-400">Open Boxes</p>
+                <p className="mt-1 text-lg font-black text-amber-700">{openGroupCount}</p>
+              </div>
+              <div className="rounded-xl border border-pink-100 bg-white p-2 text-center">
+                <p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-400">Slots Left</p>
+                <p className="mt-1 text-lg font-black text-[#D6006E]">{totalMissingSlots}</p>
+              </div>
+            </div>
+            <p className="mb-2 text-center text-[10px] font-bold text-slate-500">Small view: use `+` or `-` here.</p>
             {modalHitGroups.length === 0 ? (
               <div className="bg-emerald-50 p-6 rounded-xl text-center font-bold text-emerald-600 border border-emerald-200 uppercase tracking-widest text-[10px]">
                 All boxes are full. Nothing needs help right now.
@@ -110,7 +127,7 @@ export default function ShopHitListHost({
                             <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[12px] font-black">
                               <span className="min-w-0 flex-1 truncate">{group.prod}</span>
                               <span className="shrink-0 rounded-full border border-pink-200 bg-pink-50 px-2 py-0.5 text-[9px] uppercase tracking-widest text-[#D6006E]">
-                                ${pricePerVialUSD.toFixed(2)} / vial • you {myCurrentQty}
+                                ${pricePerVialUSD.toFixed(2)} / vial | you {myCurrentQty}
                               </span>
                               {group.myRisk && (
                                 <span className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[9px] uppercase tracking-widest text-rose-600">
@@ -127,21 +144,19 @@ export default function ShopHitListHost({
                             </span>
                             <span className="rounded-full border border-slate-200 bg-white px-2 py-1 text-slate-500">Buyers {group.rows.length}</span>
                             <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-sky-700">Saved {myExistingQty}</span>
-                            {pendingAddedQty > 0 ? (
-                              <span className="rounded-full border border-fuchsia-200 bg-fuchsia-50 px-2 py-1 text-fuchsia-700">Pending +{pendingAddedQty}</span>
-                            ) : null}
+                            {pendingAddedQty > 0 ? <span className="rounded-full border border-fuchsia-200 bg-fuchsia-50 px-2 py-1 text-fuchsia-700">Pending +{pendingAddedQty}</span> : null}
                             <div className="ml-auto flex items-center gap-1 pl-1">
                               <button
                                 onClick={(event) => { event.preventDefault(); adjustCartItem(group.prod, -1); }}
                                 disabled={!canDecrease}
-                                className="h-7 min-w-7 rounded-full border border-pink-200 bg-white px-1.5 text-[12px] font-black text-[#D6006E] transition-colors hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                className="bbp-focus-ring h-7 min-w-7 rounded-full border border-pink-200 bg-white px-1.5 text-[12px] font-black text-[#D6006E] transition-colors hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-40"
                               >
                                 -
                               </button>
                               <button
                                 onClick={(event) => { event.preventDefault(); confirmHitListIncrease(group.prod, 1, { missingSlots: group.missingSlots, boxNum: group.boxNum }); }}
                                 disabled={!canIncrease}
-                                className="h-7 min-w-7 rounded-full bg-[#FF1493] px-1.5 text-[12px] font-black text-white transition-colors hover:bg-[#D6006E] disabled:cursor-not-allowed disabled:opacity-40"
+                                className="bbp-focus-ring h-7 min-w-7 rounded-full bg-[#FF1493] px-1.5 text-[12px] font-black text-white transition-colors hover:bg-[#D6006E] disabled:cursor-not-allowed disabled:opacity-40"
                               >
                                 Add
                               </button>
@@ -161,9 +176,7 @@ export default function ShopHitListHost({
                                 {row.handle || row.name || row.email}
                                 {isMyItem ? ' | yours' : ''}
                               </div>
-                              <div className="shrink-0 font-black text-slate-500">
-                                open box {row.amountToRemove}
-                              </div>
+                              <div className="shrink-0 font-black text-slate-500">open box {row.amountToRemove}</div>
                             </div>
                           );
                         })}
@@ -175,18 +188,16 @@ export default function ShopHitListHost({
             )}
           </div>
           <div className="p-3 border-t border-pink-100 bg-white space-y-2">
-            <p className="text-center text-[10px] font-bold text-slate-500">
-              Name + matching email are required before save will work.
-            </p>
+            <p className="text-center text-[10px] font-bold text-slate-500">Name + matching email are required before save will work.</p>
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={submitOrder}
                 disabled={isBtnLoading || !isHitListSaveReady || !isCartEditable}
-                className={`${originalBtn} w-full py-3 text-sm disabled:opacity-50 disabled:cursor-not-allowed`}
+                className={`bbp-focus-ring ${originalBtn} w-full py-3 text-sm disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 {isReviewStageOpen ? 'Review Freeze' : isBtnLoading ? 'Saving...' : 'Save Changes'}
               </button>
-              <button onClick={closeHitList} className="w-full py-3 text-sm rounded-full border-2 border-pink-200 bg-white text-[#D6006E] font-bold uppercase tracking-widest shadow-sm hover:bg-pink-50 transition-colors">
+              <button onClick={closeHitList} className="bbp-focus-ring w-full py-3 text-sm rounded-full border-2 border-pink-200 bg-white text-[#D6006E] font-bold uppercase tracking-widest shadow-sm hover:bg-pink-50 transition-colors">
                 Close
               </button>
             </div>
@@ -201,8 +212,8 @@ export default function ShopHitListHost({
             <h3 className="mt-2 text-xl font-black leading-tight text-[#4A042A]">{pendingHitListAdd.productName}</h3>
             <div className="mt-4 space-y-2 rounded-[22px] border border-pink-100 bg-[#FFF7FA] p-4 text-sm font-bold text-[#7B1B53]">
               <div className="flex items-center justify-between gap-3">
-                <span>Price per vial • your qty now</span>
-                <span>${pendingHitListAdd.pricePerVialUSD.toFixed(2)} • {pendingHitListAdd.currentQty}</span>
+                <span>Price per vial | your qty now</span>
+                <span>${pendingHitListAdd.pricePerVialUSD.toFixed(2)} | {pendingHitListAdd.currentQty}</span>
               </div>
               {pendingHitListAdd.missingSlots > 0 && (
                 <div className="flex items-center justify-between gap-3">
@@ -215,7 +226,7 @@ export default function ShopHitListHost({
                 <div className="flex items-center gap-1 rounded-full border border-pink-200 bg-white px-1 py-1">
                   <button
                     onClick={() => commitPendingAddDraft(Math.max(1, (pendingHitListAdd.addQty || 1) - 1))}
-                    className="h-8 w-8 rounded-full border border-pink-200 bg-white text-sm font-black text-[#D6006E] hover:bg-pink-50"
+                    className="bbp-focus-ring h-8 w-8 rounded-full border border-pink-200 bg-white text-sm font-black text-[#D6006E] hover:bg-pink-50"
                   >
                     -
                   </button>
@@ -230,11 +241,11 @@ export default function ShopHitListHost({
                       if (digitsOnly) onPendingAddChange(digitsOnly);
                     }}
                     onBlur={(event) => commitPendingAddDraft(event.target.value)}
-                    className="w-14 bg-transparent text-center text-sm font-black text-[#D6006E] outline-none"
+                    className="bbp-focus-ring w-14 bg-transparent text-center text-sm font-black text-[#D6006E] outline-none"
                   />
                   <button
                     onClick={() => commitPendingAddDraft(Math.max(1, (pendingHitListAdd.addQty || 1) + 1))}
-                    className="h-8 w-8 rounded-full border border-pink-200 bg-white text-sm font-black text-[#D6006E] hover:bg-pink-50"
+                    className="bbp-focus-ring h-8 w-8 rounded-full border border-pink-200 bg-white text-sm font-black text-[#D6006E] hover:bg-pink-50"
                   >
                     +
                   </button>
@@ -249,28 +260,23 @@ export default function ShopHitListHost({
                   <span>Needed left after this</span>
                   <span>
                     {Math.max(0, pendingHitListAdd.missingSlots - pendingHitListAdd.addQty)}
-                    {pendingHitListAdd.addQty > pendingHitListAdd.missingSlots ? ` • +${pendingHitListAdd.addQty - pendingHitListAdd.missingSlots} extra` : ''}
+                    {pendingHitListAdd.addQty > pendingHitListAdd.missingSlots ? ` | +${pendingHitListAdd.addQty - pendingHitListAdd.missingSlots} extra` : ''}
                   </span>
                 </div>
               )}
               <div className="flex items-center justify-between gap-3">
                 <span>Estimated total</span>
-                <span>₱{pendingHitListAdd.nextTotalPHP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span>{`\u20B1${pendingHitListAdd.nextTotalPHP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}</span>
               </div>
             </div>
-            <p className="mt-3 text-xs font-bold leading-relaxed text-slate-500">
-              Pick how many vials you want to add, then save the updated total in one step.
-            </p>
+            <p className="mt-3 text-xs font-bold leading-relaxed text-slate-500">Pick how many vials you want to add, then save the updated total in one step.</p>
             <div className="mt-4 grid grid-cols-2 gap-2">
-              <button
-                onClick={onPendingAddConfirm}
-                className={`${originalBtn} w-full justify-center py-3 text-sm`}
-              >
+              <button onClick={onPendingAddConfirm} className={`bbp-focus-ring ${originalBtn} w-full justify-center py-3 text-sm`}>
                 Add To Cart
               </button>
               <button
                 onClick={onClosePendingAdd}
-                className="w-full rounded-full border-2 border-pink-200 bg-white py-3 text-sm font-black uppercase tracking-widest text-[#D6006E] hover:bg-pink-50"
+                className="bbp-focus-ring w-full rounded-full border-2 border-pink-200 bg-white py-3 text-sm font-black uppercase tracking-widest text-[#D6006E] hover:bg-pink-50"
               >
                 Cancel
               </button>
