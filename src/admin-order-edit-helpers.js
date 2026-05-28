@@ -162,6 +162,69 @@ export function buildAmountBalancedAdminAssignments({
   return assignments;
 }
 
+function createBankRouteKey(adminName = '', bankIndex = -1) {
+  return `${String(adminName || '').trim()}::${Number(bankIndex)}`;
+}
+
+export function buildAmountBalancedBankRouteAssignments({
+  routes = [],
+  lockedCustomers = [],
+  mutableCustomers = [],
+} = {}) {
+  const normalizedRoutes = routes
+    .map((route) => ({
+      adminName: String(route?.adminName || '').trim(),
+      bankIndex: Number(route?.bankIndex),
+      bankLabel: String(route?.bankLabel || ''),
+      bankDetails: String(route?.bankDetails || ''),
+      bankQr: String(route?.bankQr || ''),
+    }))
+    .filter((route) => route.adminName && Number.isInteger(route.bankIndex) && route.bankIndex >= 0);
+
+  const loads = {};
+  const routeByKey = {};
+  normalizedRoutes.forEach((route) => {
+    const key = createBankRouteKey(route.adminName, route.bankIndex);
+    loads[key] = 0;
+    routeByKey[key] = route;
+  });
+
+  lockedCustomers.forEach((customer) => {
+    const snap = customer?.paymentSnapshot || {};
+    const adminName = String(snap.adminAssigned || customer?.adminAssigned || '').trim();
+    const bankIndex = Number(snap.bankIndex);
+    const key = createBankRouteKey(adminName, bankIndex);
+    if (loads[key] === undefined) return;
+    loads[key] += Number(customer?.totalPHP || snap.totalPHP || 0);
+  });
+
+  const assignments = {};
+  [...mutableCustomers]
+    .sort((left, right) => {
+      const totalDiff = Number(right?.totalPHP || 0) - Number(left?.totalPHP || 0);
+      if (totalDiff !== 0) return totalDiff;
+      return String(left?.email || '').localeCompare(String(right?.email || ''));
+    })
+    .forEach((customer) => {
+      const routeKey = Object.entries(loads)
+        .sort(([leftKey, leftTotal], [rightKey, rightTotal]) => {
+          const totalDiff = Number(leftTotal || 0) - Number(rightTotal || 0);
+          if (totalDiff !== 0) return totalDiff;
+          const leftRoute = routeByKey[leftKey];
+          const rightRoute = routeByKey[rightKey];
+          const adminDiff = String(leftRoute?.adminName || '').localeCompare(String(rightRoute?.adminName || ''));
+          if (adminDiff !== 0) return adminDiff;
+          return Number(leftRoute?.bankIndex || 0) - Number(rightRoute?.bankIndex || 0);
+        })[0]?.[0];
+      const route = routeByKey[routeKey];
+      if (!route || !customer?.email) return;
+      assignments[customer.email] = route;
+      loads[routeKey] += Number(customer?.totalPHP || 0);
+    });
+
+  return assignments;
+}
+
 export function buildAdminEditedUserPatch({
   targetProfile = {},
   nextSnapshot = null,

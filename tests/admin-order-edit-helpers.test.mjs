@@ -6,6 +6,7 @@ import {
   buildAdminEditedUserPatch,
   buildChainAccessRecord,
   buildAmountBalancedAdminAssignments,
+  buildAmountBalancedBankRouteAssignments,
   pickLowestAdminFeeRoute,
   getChainAccessRecord,
   getCurrentChainId,
@@ -183,6 +184,31 @@ test('buildAmountBalancedAdminAssignments assigns largest mutable orders to lowe
     'big@example.com': 'Admin B',
     'mid@example.com': 'Admin C',
     'small@example.com': 'Admin C',
+  });
+});
+
+test('buildAmountBalancedBankRouteAssignments balances mutable orders across bank accounts', () => {
+  const assignments = buildAmountBalancedBankRouteAssignments({
+    routes: [
+      { adminName: 'Admin A', bankIndex: 0, bankLabel: 'A Bank 1', bankDetails: 'A1 account', bankQr: 'a1.png' },
+      { adminName: 'Admin A', bankIndex: 1, bankLabel: 'A Bank 2', bankDetails: 'A2 account', bankQr: 'a2.png' },
+      { adminName: 'Admin B', bankIndex: 0, bankLabel: 'B Bank 1', bankDetails: 'B1 account', bankQr: 'b1.png' },
+    ],
+    lockedCustomers: [
+      { email: 'locked-a@example.com', adminAssigned: 'Admin A', totalPHP: 90000, paymentSnapshot: { adminAssigned: 'Admin A', bankIndex: 0 } },
+      { email: 'locked-b@example.com', adminAssigned: 'Admin B', totalPHP: 10000, paymentSnapshot: { adminAssigned: 'Admin B', bankIndex: 0 } },
+    ],
+    mutableCustomers: [
+      { email: 'big@example.com', totalPHP: 70000 },
+      { email: 'mid@example.com', totalPHP: 50000 },
+      { email: 'small@example.com', totalPHP: 20000 },
+    ],
+  });
+
+  assert.deepEqual(assignments, {
+    'big@example.com': { adminName: 'Admin A', bankIndex: 1, bankLabel: 'A Bank 2', bankDetails: 'A2 account', bankQr: 'a2.png' },
+    'mid@example.com': { adminName: 'Admin B', bankIndex: 0, bankLabel: 'B Bank 1', bankDetails: 'B1 account', bankQr: 'b1.png' },
+    'small@example.com': { adminName: 'Admin B', bankIndex: 0, bankLabel: 'B Bank 1', bankDetails: 'B1 account', bankQr: 'b1.png' },
   });
 });
 

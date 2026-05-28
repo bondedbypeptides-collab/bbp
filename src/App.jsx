@@ -14,7 +14,7 @@ import {
 import ShopWorkspaceMain from './components/ShopWorkspaceMain';
 import {
   buildAdminEditedUserPatch,
-  buildAmountBalancedAdminAssignments,
+  buildAmountBalancedBankRouteAssignments,
   buildChainAccessRecord,
   buildLegacyProductPriceLookup,
   getChainAccessRecord,
@@ -1130,6 +1130,25 @@ export default function App() {
     });
   }, [settings.admins]);
 
+  const paymentBankRoutes = useMemo(() => (
+    normalizedAdmins.flatMap((admin) => (
+      (admin.banks || [])
+        .map((bank, bankIndex) => ({
+          adminName: admin.name,
+          bankIndex,
+          bankLabel: bank.label || '',
+          bankDetails: bank.details || '',
+          bankQr: bank.qr || '',
+        }))
+        .filter(route => route.adminName && (route.bankDetails || route.bankQr))
+    ))
+  ), [normalizedAdmins]);
+
+  const isActivePaymentAdmin = (adminName = '') => {
+    const cleanName = String(adminName || '').trim();
+    return Boolean(cleanName && normalizedAdmins.some(admin => admin.name === cleanName));
+  };
+
   const adminFeeChainRecords = useMemo(() => {
     const records = [];
     users.forEach((profile) => {
@@ -1139,7 +1158,7 @@ export default function App() {
     return records;
   }, [settings, users]);
 
-  const getAdminFeePaymentRoute = (adminName = '') => {
+  const getAdminFeePaymentRoute = (adminName = '', preferredBankIndex = null) => {
     const preferredAdmin = String(adminName || '').trim();
     const orderedAdmins = [
       ...normalizedAdmins.filter(admin => admin.name === preferredAdmin),
@@ -1147,10 +1166,16 @@ export default function App() {
     ];
 
     for (const admin of orderedAdmins) {
-      const bank = (admin.banks || []).find(option => option?.details || option?.qr);
+      const banks = (admin.banks || []).filter(option => option?.details || option?.qr);
+      const normalizedPreferredBankIndex = Number(preferredBankIndex);
+      const bankIndex = Number.isInteger(normalizedPreferredBankIndex) && normalizedPreferredBankIndex >= 0 && normalizedPreferredBankIndex < banks.length
+        ? normalizedPreferredBankIndex
+        : 0;
+      const bank = banks[bankIndex];
       if (bank) {
         return {
           adminName: admin.name || 'Admin',
+          bankIndex,
           bankLabel: bank.label || '',
           bankDetails: bank.details || '',
           bankQr: bank.qr || '',
@@ -1161,6 +1186,7 @@ export default function App() {
 
     return {
       adminName: 'Admin',
+      bankIndex: -1,
       bankLabel: '',
       bankDetails: '',
       bankQr: '',
@@ -1169,6 +1195,21 @@ export default function App() {
   };
 
   const adminFeePaymentRoute = useMemo(() => {
+    const bankAssignments = buildAmountBalancedBankRouteAssignments({
+      routes: paymentBankRoutes,
+      lockedCustomers: adminFeeChainRecords.map(record => ({
+        adminAssigned: record.routeAdmin,
+        totalPHP: Number(record.adminFeeAmountPhp || settings.adminFeePhp || 0),
+        paymentSnapshot: {
+          adminAssigned: record.routeAdmin,
+          bankIndex: Number(record.routeBankIndex),
+        },
+      })),
+      mutableCustomers: [{ email: '__next_admin_fee__', totalPHP: Number(settings.adminFeePhp || 0) }],
+    });
+    const nextRoute = bankAssignments.__next_admin_fee__;
+    if (nextRoute) return getAdminFeePaymentRoute(nextRoute.adminName, nextRoute.bankIndex);
+
     const eligibleAdminNames = normalizedAdmins
       .filter(admin => getAdminFeePaymentRoute(admin.name).hasRoute)
       .map(admin => admin.name);
@@ -1177,7 +1218,7 @@ export default function App() {
       chainAccessRecords: adminFeeChainRecords,
     });
     return getAdminFeePaymentRoute(balancedAdminName);
-  }, [adminFeeChainRecords, normalizedAdmins]);
+  }, [adminFeeChainRecords, normalizedAdmins, paymentBankRoutes, settings.adminFeePhp]);
 
   useEffect(() => {
     if (!configuredShopAccessCode) {
@@ -1409,7 +1450,7 @@ export default function App() {
     };
   };
 
-  const getSelectedAdminBankRoute = (adminName, email) => {
+  const getSelectedAdminBankRoute = (adminName, email, preferredBankIndex = null) => {
     const normalizedEmail = String(email || '').toLowerCase().trim();
     const resolvedAdminName = adminName || 'Unassigned';
     const adminObj = normalizedAdmins.find(a => a.name === resolvedAdminName) || null;
@@ -1424,8 +1465,10 @@ export default function App() {
         hasRoute: false
       };
     }
-    const hash = normalizedEmail.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const bankIndex = hash % availableBanks.length;
+    const normalizedPreferredBankIndex = Number(preferredBankIndex);
+    const bankIndex = Number.isInteger(normalizedPreferredBankIndex) && normalizedPreferredBankIndex >= 0 && normalizedPreferredBankIndex < availableBanks.length
+      ? normalizedPreferredBankIndex
+      : normalizedEmail.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % availableBanks.length;
     const selectedBank = availableBanks[bankIndex];
     return {
       adminAssigned: resolvedAdminName,
@@ -1477,7 +1520,17 @@ export default function App() {
     return '';
   };
 
-  const buildPaymentSnapshot = (items, adminName, email, capturedAt = Date.now(), profileOverride = null) => {
+  const getCustomerRouteDisplay = (customer) => {
+    const label = String(customer?.paymentBankLabel || '').trim();
+    const details = String(customer?.paymentBankDetails || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)[0] || '';
+    const bankIndex = Number(customer?.paymentBankIndex);
+    const qrFallback = Number.isInteger(bankIndex) && bankIndex >= 0 && String(customer?.paymentBankQr || '').trim()
+      ? `QR ${bankIndex + 1}`
+      : '';
+    return label || details || qrFallback || (customer?.hasAssignedAdmin ? 'No bank route' : 'No admin route');
+  };
+
+  const buildPaymentSnapshot = (items, adminName, email, capturedAt = Date.now(), profileOverride = null, routeOverride = null) => {
     let subtotalUSD = 0;
     Object.entries(items || {}).forEach(([prod, qty]) => {
       if (qty > 0) subtotalUSD += qty * getUnitPriceUSD(prod);
@@ -1488,7 +1541,7 @@ export default function App() {
       settings,
     });
     const { totalUSD, totalPHP, fxRate, adminFeePhp } = calculateOrderTotals(subtotalUSD, Number(settings.fxRate || 0), adminFeePhpForOrder);
-    const route = getSelectedAdminBankRoute(adminName, email);
+    const route = routeOverride || getSelectedAdminBankRoute(adminName, email, profileOverride?.preferredPaymentBankIndex);
 
     return {
       capturedAt,
@@ -1498,7 +1551,7 @@ export default function App() {
       fxRate,
       adminFeePhp,
       adminFeePrepaid: adminFeePhp === 0,
-      adminAssigned: route.adminAssigned,
+      adminAssigned: route.adminAssigned || route.adminName,
       bankIndex: route.bankIndex,
       bankLabel: route.bankLabel,
       bankDetails: route.bankDetails,
@@ -1752,7 +1805,17 @@ export default function App() {
       const orderAdminFeePhp = resolveOrderAdminFeePhp({ profile, settings });
       const { totalUSD: liveTotalUSD, totalPHP: liveTotalPHP } = calculateOrderTotals(sub, Number(settings.fxRate || 0), orderAdminFeePhp);
       const address = profile.address || null;
-      const adminAssigned = frozenPaymentSnapshot?.adminAssigned || profile.adminAssigned || "Unassigned";
+      const profileAdminAssigned = isActivePaymentAdmin(profile.adminAssigned) ? profile.adminAssigned : '';
+      const adminAssigned = frozenPaymentSnapshot?.adminAssigned || profileAdminAssigned || "Unassigned";
+      const livePaymentRoute = frozenPaymentSnapshot
+        ? {
+          bankIndex: Number(frozenPaymentSnapshot.bankIndex),
+          bankLabel: frozenPaymentSnapshot.bankLabel || '',
+          bankDetails: frozenPaymentSnapshot.bankDetails || '',
+          bankQr: frozenPaymentSnapshot.bankQr || '',
+          hasRoute: Boolean(frozenPaymentSnapshot.bankDetails || frozenPaymentSnapshot.bankQr || frozenPaymentSnapshot.bankLabel),
+        }
+        : getSelectedAdminBankRoute(profileAdminAssigned, c.email, profile.preferredPaymentBankIndex);
       const hasAddress = Boolean(address?.street && address?.city && address?.contact);
       const hasProof = Boolean(profile.proofUrl);
       const hasAssignedAdmin = Boolean(adminAssigned && adminAssigned !== 'Unassigned');
@@ -1774,9 +1837,11 @@ export default function App() {
         proofUrl: profile.proofUrl || null,
         proofReview: profile.proofReview || '',
         paymentSnapshot: frozenPaymentSnapshot,
-        paymentBankLabel: frozenPaymentSnapshot?.bankLabel || '',
-        paymentBankDetails: frozenPaymentSnapshot?.bankDetails || '',
-        paymentBankQr: frozenPaymentSnapshot?.bankQr || '',
+        paymentBankIndex: Number.isInteger(Number(livePaymentRoute?.bankIndex)) ? Number(livePaymentRoute.bankIndex) : -1,
+        paymentBankLabel: livePaymentRoute?.bankLabel || '',
+        paymentBankDetails: livePaymentRoute?.bankDetails || '',
+        paymentBankQr: livePaymentRoute?.bankQr || '',
+        hasPaymentRoute: Boolean(livePaymentRoute?.hasRoute),
         chainAccess: profile.chainAccess || {},
         currentChainAccess: getChainAccessRecord(profile, settings),
         adminFeePrepaid: orderAdminFeePhp === 0,
@@ -1791,7 +1856,7 @@ export default function App() {
         itemCount
       };
     });
-  }, [adminNeedsUsers, orders, productsByName, settings, usersById]);
+  }, [adminNeedsUsers, normalizedAdmins, orders, productsByName, settings, usersById]);
 
   const customerListByEmail = useMemo(
     () => Object.fromEntries(customerList.map((customer) => [customer.email, customer])),
@@ -2229,7 +2294,7 @@ export default function App() {
       if (!customer.hasAddress) flags.push('Missing address');
       if (!customer.hasProof) flags.push('No proof');
       if (customer.hasProof && !customer.isPaid) flags.push(customer.proofReview === 'needs-recheck' ? 'Needs recheck' : 'Pending review');
-      if ((customer.hasProof || customer.isPaid) && !customer.paymentBankDetails && !customer.paymentBankQr) flags.push('No saved route');
+      if ((customer.hasProof || customer.isPaid) && !customer.hasPaymentRoute) flags.push('No saved route');
 
       const buyer = {
         email: customer.email,
@@ -2639,15 +2704,16 @@ export default function App() {
   const currentChainAccessRecord = getChainAccessRecord(customerProfile, settings);
   const currentAdminFeePaymentRoute = currentChainAccessRecord
     ? {
-      ...getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || ''),
-      adminName: currentChainAccessRecord.routeAdmin || getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '').adminName,
-      bankLabel: String(currentChainAccessRecord.routeBankLabel || getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '').bankLabel || '').trim(),
-      bankDetails: String(currentChainAccessRecord.routeBankDetails || getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '').bankDetails || '').trim(),
-      bankQr: String(currentChainAccessRecord.routeBankQr || getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '').bankQr || '').trim(),
+      ...getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '', currentChainAccessRecord.routeBankIndex),
+      adminName: currentChainAccessRecord.routeAdmin || getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '', currentChainAccessRecord.routeBankIndex).adminName,
+      bankIndex: Number.isInteger(Number(currentChainAccessRecord.routeBankIndex)) ? Number(currentChainAccessRecord.routeBankIndex) : getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '').bankIndex,
+      bankLabel: String(currentChainAccessRecord.routeBankLabel || getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '', currentChainAccessRecord.routeBankIndex).bankLabel || '').trim(),
+      bankDetails: String(currentChainAccessRecord.routeBankDetails || getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '', currentChainAccessRecord.routeBankIndex).bankDetails || '').trim(),
+      bankQr: String(currentChainAccessRecord.routeBankQr || getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '', currentChainAccessRecord.routeBankIndex).bankQr || '').trim(),
       hasRoute: Boolean(
         String(currentChainAccessRecord.routeBankDetails || '').trim()
         || String(currentChainAccessRecord.routeBankQr || '').trim()
-        || getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '').hasRoute
+        || getAdminFeePaymentRoute(currentChainAccessRecord.routeAdmin || '', currentChainAccessRecord.routeBankIndex).hasRoute
       )
     }
     : adminFeePaymentRoute;
@@ -2945,6 +3011,7 @@ export default function App() {
       now: Date.now(),
     });
     nextRecord.routeAdmin = adminFeePaymentRoute.adminName;
+    nextRecord.routeBankIndex = adminFeePaymentRoute.bankIndex;
     nextRecord.routeBankLabel = adminFeePaymentRoute.bankLabel;
     nextRecord.routeBankDetails = adminFeePaymentRoute.bankDetails;
     nextRecord.routeBankQr = adminFeePaymentRoute.bankQr;
@@ -3006,6 +3073,7 @@ export default function App() {
         proofSubmittedAt: Date.now(),
         adminFeeAmountPhp: Number(settings.adminFeePhp || 0),
         routeAdmin: currentAdminFeePaymentRoute.adminName,
+        routeBankIndex: currentAdminFeePaymentRoute.bankIndex,
         routeBankLabel: currentAdminFeePaymentRoute.bankLabel,
         routeBankDetails: currentAdminFeePaymentRoute.bankDetails,
         routeBankQr: currentAdminFeePaymentRoute.bankQr,
@@ -3963,14 +4031,26 @@ export default function App() {
         handle: customerHandle,
         buyerReviewConfirmedAt: null
       };
-      if (!existingUser || !existingUser.adminAssigned) {
-        const eligibleAdminNames = normalizedAdmins
-          .filter((admin) => getSelectedAdminBankRoute(admin.name, `${admin.name}@routing.local`).hasRoute)
-          .map((admin) => admin.name);
-        userUpdatePayload.adminAssigned = pickLowestLoadAdmin({
-          adminNames: eligibleAdminNames.length ? eligibleAdminNames : normalizedAdmins.map((admin) => admin.name),
+      if (!existingUser || !isActivePaymentAdmin(existingUser.adminAssigned)) {
+        const desiredSubtotalUSD = Object.entries(desiredItems).reduce((sum, [prod, qty]) => sum + (qty * getUnitPriceUSD(prod)), 0);
+        const desiredAdminFeePhp = resolveOrderAdminFeePhp({ profile: existingUser || {}, settings });
+        const desiredTotalPHP = calculateOrderTotals(desiredSubtotalUSD, Number(settings.fxRate || 0), desiredAdminFeePhp).totalPHP;
+        const routeAssignments = buildAmountBalancedBankRouteAssignments({
+          routes: paymentBankRoutes,
+          lockedCustomers: customerList.filter(customer => customer.email !== emailLower && (customer.hasProof || customer.isPaid)),
+          mutableCustomers: [
+            ...customerList.filter(customer => customer.email !== emailLower && customer.itemCount > 0 && !customer.hasProof && !customer.isPaid),
+            { email: emailLower, totalPHP: desiredTotalPHP },
+          ],
+        });
+        const route = routeAssignments[emailLower];
+        userUpdatePayload.adminAssigned = route?.adminName || pickLowestLoadAdmin({
+          adminNames: normalizedAdmins.map((admin) => admin.name),
           customers: customerList.filter(customer => customer.email !== emailLower && customer.itemCount > 0),
         }) || "Admin";
+        if (route) {
+          userUpdatePayload.preferredPaymentBankIndex = route.bankIndex;
+        }
       }
       if (!existingUser?.proofUrl && !existingUser?.isPaid) {
         userUpdatePayload.paymentSnapshot = null;
@@ -4669,7 +4749,7 @@ ${rowsXML.join("\n")}
     }
 
     try {
-      await safeAwait(setDoc(doc(db, colPath('users'), customer.email), { adminAssigned: adminName, paymentSnapshot: null }, { merge: true }));
+      await safeAwait(setDoc(doc(db, colPath('users'), customer.email), { adminAssigned: adminName, preferredPaymentBankIndex: null, paymentSnapshot: null }, { merge: true }));
     } catch (error) {
       console.error(error);
       showToast("Could not update the assigned admin right now.");
@@ -4695,7 +4775,7 @@ ${rowsXML.join("\n")}
       for (const chunk of chunkArray(emails, 250)) {
         const batch = writeBatch(db);
         chunk.forEach(email => {
-          batch.set(doc(db, colPath('users'), email), { adminAssigned: adminName, paymentSnapshot: null }, { merge: true });
+          batch.set(doc(db, colPath('users'), email), { adminAssigned: adminName, preferredPaymentBankIndex: null, paymentSnapshot: null }, { merge: true });
         });
         await safeAwait(batch.commit());
       }
@@ -4890,27 +4970,36 @@ ${rowsXML.join("\n")}
       return;
     }
 
-    const invalidCustomer = activeCustomers.find((customer) => {
-      if (!customer.hasAssignedAdmin) return true;
-      return !getSelectedAdminBankRoute(customer.adminAssigned, customer.email).hasRoute;
-    });
-    if (invalidCustomer) {
-      showToast(`Cannot open payments yet. ${invalidCustomer.name || invalidCustomer.email} needs a stable admin with at least one bank or QR option.`);
+    if (paymentBankRoutes.length === 0) {
+      showToast('Cannot open payments yet. Add at least one active bank or QR route.');
       return;
     }
 
     setIsBtnLoading(true);
     try {
       await createBatchSnapshot('Before payment window opened', { action: 'open-payments' });
+      const lockedCustomers = activeCustomers.filter((customer) => customer.hasProof || customer.isPaid);
+      const mutableCustomers = activeCustomers.filter((customer) => !customer.hasProof && !customer.isPaid);
+      const routeAssignments = buildAmountBalancedBankRouteAssignments({
+        routes: paymentBankRoutes,
+        lockedCustomers,
+        mutableCustomers,
+      });
+
       for (const chunk of chunkArray(activeCustomers, 250)) {
         const batch = writeBatch(db);
         chunk.forEach((customer) => {
           const userProfile = usersById[customer.email] || {};
           const shouldPreserveExistingSnapshot = Boolean(userProfile.proofUrl || userProfile.isPaid);
+          const assignedRoute = routeAssignments[customer.email];
           const paymentSnapshot = shouldPreserveExistingSnapshot && getFrozenPaymentSnapshot(userProfile)
             ? getFrozenPaymentSnapshot(userProfile)
-            : buildPaymentSnapshot(customer.products, customer.adminAssigned, customer.email, Date.now(), userProfile);
-          batch.set(doc(db, colPath('users'), customer.email), { paymentSnapshot }, { merge: true });
+            : buildPaymentSnapshot(customer.products, assignedRoute?.adminName || customer.adminAssigned, customer.email, Date.now(), userProfile, assignedRoute);
+          batch.set(doc(db, colPath('users'), customer.email), {
+            adminAssigned: paymentSnapshot.adminAssigned,
+            preferredPaymentBankIndex: paymentSnapshot.bankIndex,
+            paymentSnapshot,
+          }, { merge: true });
         });
         await safeAwait(batch.commit());
       }
@@ -5359,10 +5448,7 @@ ${rowsXML.join("\n")}
       return;
     }
 
-    const eligibleAdmins = normalizedAdmins.filter((admin) =>
-      getSelectedAdminBankRoute(admin.name, `${admin.name}@routing.local`).hasRoute
-    );
-    if (eligibleAdmins.length === 0) {
+    if (paymentBankRoutes.length === 0) {
       showToast("Add at least one admin with a bank detail or QR before reshuffling.");
       return;
     }
@@ -5380,18 +5466,18 @@ ${rowsXML.join("\n")}
       await createBatchSnapshot('Before admin reshuffle', {
         action: 'reshuffle-admins',
         customers: mutableCustomers.length,
-        admins: eligibleAdmins.map(admin => admin.name)
+        routes: paymentBankRoutes.map(route => `${route.adminName} / ${route.bankLabel || `Bank ${route.bankIndex + 1}`}`)
       });
       await createUndoRecord({
         actionType: 'reshuffle-admins',
         label: `Undo admin reshuffle for ${mutableCustomers.length} customer${mutableCustomers.length === 1 ? '' : 's'}`,
         beforeUsers,
         targetEmails: mutableCustomers.map(customer => customer.email),
-        meta: { admins: eligibleAdmins.map(admin => admin.name) }
+        meta: { routes: paymentBankRoutes.map(route => `${route.adminName} / ${route.bankLabel || `Bank ${route.bankIndex + 1}`}`) }
       });
 
-      const adminAssignments = buildAmountBalancedAdminAssignments({
-        adminNames: eligibleAdmins.map(admin => admin.name),
+      const routeAssignments = buildAmountBalancedBankRouteAssignments({
+        routes: paymentBankRoutes,
         lockedCustomers: activeCustomers.filter(customer => customer.isPaid || customer.hasProof),
         mutableCustomers,
       });
@@ -5399,17 +5485,18 @@ ${rowsXML.join("\n")}
       for (const chunk of chunkArray(mutableCustomers, 250)) {
         const batch = writeBatch(db);
         chunk.forEach((customer) => {
-          const adminName = adminAssignments[customer.email];
-          if (!adminName) return;
+          const route = routeAssignments[customer.email];
+          if (!route) return;
           batch.set(doc(db, colPath('users'), customer.email), {
-            adminAssigned: adminName,
+            adminAssigned: route.adminName,
+            preferredPaymentBankIndex: route.bankIndex,
             paymentSnapshot: null
           }, { merge: true });
         });
         await safeAwait(batch.commit());
       }
 
-      showToast(`${mutableCustomers.length} active customer${mutableCustomers.length === 1 ? '' : 's'} reassigned across ${eligibleAdmins.length} admin${eligibleAdmins.length === 1 ? '' : 's'}.`);
+      showToast(`${mutableCustomers.length} active customer${mutableCustomers.length === 1 ? '' : 's'} rebalanced across ${paymentBankRoutes.length} bank route${paymentBankRoutes.length === 1 ? '' : 's'}.`);
     } catch (error) {
       console.error(error);
       showToast("Could not reshuffle admins right now.");
@@ -5556,6 +5643,7 @@ ${rowsXML.join("\n")}
 
   const currentCustomerRecord = customerListByEmail[normalizedCustomerEmail] || null;
   const currentProfile = customerProfile;
+  const activeCurrentProfileAdmin = isActivePaymentAdmin(currentProfile?.adminAssigned) ? currentProfile?.adminAssigned : '';
   const currentBuyerReviewConfirmedAt = currentCustomerRecord?.buyerReviewConfirmedAt || null;
   const currentReviewReady = Boolean(currentCustomerRecord?.reviewReady);
   const lockedPaymentSnapshot = currentCustomerRecord?.paymentSnapshot || getFrozenPaymentSnapshot(currentProfile);
@@ -5567,7 +5655,7 @@ ${rowsXML.join("\n")}
       bankQr: lockedPaymentSnapshot.bankQr || '',
       hasRoute: Boolean(lockedPaymentSnapshot.bankDetails || lockedPaymentSnapshot.bankQr)
     }
-    : getSelectedAdminBankRoute(currentCustomerRecord?.adminAssigned || currentProfile?.adminAssigned, customerEmail);
+    : getSelectedAdminBankRoute(currentCustomerRecord?.adminAssigned || activeCurrentProfileAdmin, customerEmail, currentProfile?.preferredPaymentBankIndex);
   const hasValidPaymentRoute = Boolean(
     currentPaymentRoute?.hasRoute
     && currentPaymentRoute?.adminAssigned
@@ -6330,7 +6418,12 @@ ${rowsXML.join("\n")}
                     <p className="text-[10px] text-slate-400">{customer.email}</p>
                     {customer.handle && <p className="text-[10px] font-black uppercase tracking-widest text-[#D6006E]">{customer.handle}</p>}
                   </td>
-                  <td className="text-xs font-black text-slate-700">{customer.routeAdmin || 'Unassigned'}</td>
+                  <td>
+                    <p className="text-xs font-black text-slate-700">{customer.routeAdmin || 'Unassigned'}</p>
+                    <p className="mt-1 max-w-[170px] truncate text-[10px] font-bold text-slate-400" title={customer.routeAccount || ''}>
+                      {customer.routeAccount || 'No saved bank route'}
+                    </p>
+                  </td>
                   <td className="font-black text-[#D6006E]">{"\u20B1"}{customer.adminFeeAmountPhp.toLocaleString()}</td>
                   <td>
                     {customer.proofUrl ? (
@@ -6380,8 +6473,8 @@ ${rowsXML.join("\n")}
                       </p>
                     </div>
                   </td>
-                  <td className="relative text-center">
-                    <div className="flex items-center justify-center">
+                  <td className="text-center">
+                    <div className="flex min-w-[190px] flex-wrap items-center justify-center gap-1.5">
                       <div className="flex flex-col items-center gap-1.5">
                         <button
                           onClick={() => updateAdminFeeStatus(customer, 'approved')}
@@ -6428,7 +6521,7 @@ ${rowsXML.join("\n")}
                         </button>
                       </div>
                       {confirmAction.type === 'deleteAdminFee' && confirmAction.id === customer.email ? (
-                        <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
+                        <div className="flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-1.5 py-1">
                           <button
                             onClick={() => deleteAdminFeeAccess(customer)}
                             className="rounded-full bg-rose-500 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-white hover:bg-rose-600"
@@ -6445,7 +6538,7 @@ ${rowsXML.join("\n")}
                       ) : (
                         <button
                           onClick={() => setConfirmAction({ type: 'deleteAdminFee', id: customer.email })}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-transparent bg-transparent p-1 text-slate-300 transition-colors hover:border-rose-100 hover:bg-rose-50 hover:text-rose-600"
+                          className="rounded-full border border-transparent bg-transparent p-1 text-slate-300 transition-colors hover:border-rose-100 hover:bg-rose-50 hover:text-rose-600"
                           title="Delete admin fee request"
                           aria-label="Delete admin fee request"
                         >
@@ -6458,7 +6551,7 @@ ${rowsXML.join("\n")}
               );
             })}
             {filteredAdminFeeAccessCustomers.length === 0 && (
-              <tr><td colSpan="8" className="text-center p-8 text-pink-300 font-bold italic">No admin fee access requests match your filters.</td></tr>
+              <tr><td colSpan="7" className="text-center p-8 text-pink-300 font-bold italic">No admin fee access requests match your filters.</td></tr>
             )}
           </tbody>
         </table>
@@ -6560,7 +6653,7 @@ ${rowsXML.join("\n")}
           )}
 
           <table className="w-full text-left custom-table">
-            <thead><tr>{renderSortableHeader('Customer', 'customer', paymentsTableSort, setPaymentsTableSort)}{renderSortableHeader('Assigned Admin', 'admin', paymentsTableSort, setPaymentsTableSort)}{renderSortableHeader('Total PHP', 'totalPHP', paymentsTableSort, setPaymentsTableSort, 'text-right')}{renderSortableHeader('Proof', 'proof', paymentsTableSort, setPaymentsTableSort, 'text-center')}{renderSortableHeader('Label', 'label', paymentsTableSort, setPaymentsTableSort, 'text-center')}{renderSortableHeader('Status', 'status', paymentsTableSort, setPaymentsTableSort)}<th className="text-center">Actions</th></tr></thead>
+            <thead><tr>{renderSortableHeader('Customer', 'customer', paymentsTableSort, setPaymentsTableSort)}{renderSortableHeader('Assigned Admin', 'admin', paymentsTableSort, setPaymentsTableSort)}<th>Route Bank</th>{renderSortableHeader('Total PHP', 'totalPHP', paymentsTableSort, setPaymentsTableSort, 'text-right')}{renderSortableHeader('Proof', 'proof', paymentsTableSort, setPaymentsTableSort, 'text-center')}{renderSortableHeader('Label', 'label', paymentsTableSort, setPaymentsTableSort, 'text-center')}{renderSortableHeader('Status', 'status', paymentsTableSort, setPaymentsTableSort)}<th className="text-center">Actions</th></tr></thead>
             <tbody className="divide-y divide-pink-50">
               {sortedPaymentCustomers.map(c => (
                 <tr key={c.email} className={`${getPaymentRowTone(c)} transition-colors hover:bg-pink-50/30`}>
@@ -6584,6 +6677,16 @@ ${rowsXML.join("\n")}
                       </select>
                       {!c.hasAssignedAdmin && <span className="text-[10px] font-black uppercase tracking-widest text-sky-600">No admin yet</span>}
                     </div>
+                  </td>
+                  <td>
+                    <p className={`max-w-[180px] truncate text-xs font-black ${c.hasPaymentRoute ? 'text-slate-700' : 'text-amber-600'}`} title={getCustomerRouteDisplay(c)}>
+                      {getCustomerRouteDisplay(c)}
+                    </p>
+                    {c.paymentBankLabel && c.paymentBankDetails && (
+                      <p className="mt-1 max-w-[180px] truncate text-[10px] font-bold text-slate-400" title={c.paymentBankDetails}>
+                        {c.paymentBankDetails}
+                      </p>
+                    )}
                   </td>
                   <td className="text-right">
                           <p className="font-black text-pink-600">{"\u20B1"}{c.totalPHP.toLocaleString()}</p>
@@ -8125,6 +8228,7 @@ ${rowsXML.join("\n")}
                               {renderSortableHeader('Order Items', 'items', activeOrdersTableSort, setActiveOrdersTableSort)}
                               {renderSortableHeader('Status', 'status', activeOrdersTableSort, setActiveOrdersTableSort)}
                               {renderSortableHeader('Assigned Admin', 'admin', activeOrdersTableSort, setActiveOrdersTableSort)}
+                              <th>Route Bank</th>
                               <th>Notes</th>
                               {renderSortableHeader('Total PHP', 'totalPHP', activeOrdersTableSort, setActiveOrdersTableSort, 'text-center')}
                               <th className="text-center">Actions</th>
@@ -8216,6 +8320,16 @@ ${rowsXML.join("\n")}
                                     </select>
                                   </td>
                                   <td className="py-3">
+                                    <p className={`max-w-[180px] truncate text-xs font-black ${c.hasPaymentRoute ? 'text-slate-700' : 'text-amber-600'}`} title={getCustomerRouteDisplay(c)}>
+                                      {getCustomerRouteDisplay(c)}
+                                    </p>
+                                    {c.paymentBankLabel && c.paymentBankDetails && (
+                                      <p className="mt-1 max-w-[180px] truncate text-[10px] font-bold text-slate-400" title={c.paymentBankDetails}>
+                                        {c.paymentBankDetails}
+                                      </p>
+                                    )}
+                                  </td>
+                                  <td className="py-3">
                                     <div className="min-w-[220px] max-w-[280px] space-y-2">
                                       <textarea
                                         value={adminNoteDrafts[c.email] ?? c.adminNotes ?? ''}
@@ -8270,7 +8384,7 @@ ${rowsXML.join("\n")}
                                 </tr>
                               );
                             })}
-                            {activeOrdersList.length === 0 && <tr><td colSpan="8" className="text-center p-8 text-pink-300 font-bold italic">No active orders found.</td></tr>}
+                            {activeOrdersList.length === 0 && <tr><td colSpan="9" className="text-center p-8 text-pink-300 font-bold italic">No active orders found.</td></tr>}
                           </tbody>
                         </table>
                       </div>
