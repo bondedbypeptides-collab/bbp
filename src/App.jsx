@@ -24,6 +24,13 @@ import {
   pickLowestLoadAdmin,
   resolveOrderAdminFeePhp,
 } from './admin-order-edit-helpers.js';
+import {
+  buildCustomerOrderRecord,
+  buildOrderItemsFromCartState,
+  buildOrdersByEmail,
+  buildUsersByEmail,
+  normalizeCustomerEmail,
+} from './customer-lookup-helpers.js';
 import { buildArchiveMetadata, buildCustomerBatchHistoryRecords, buildGroupedHistoryView, buildHistoryArchiveRows } from './history-helpers';
 
 const AdminOrderEditHost = lazy(() => import('./components/AdminOrderEditHost'));
@@ -716,6 +723,9 @@ export default function App() {
   const [customerEmailConfirm, setCustomerEmailConfirm] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerHandle, setCustomerHandle] = useState('');
+  const lastAutofilledConfirmRef = useRef('');
+  const lastAutofilledNameRef = useRef('');
+  const lastAutofilledHandleRef = useRef('');
   const [cartItems, setCartItems] = useState({});
   const [addressForm, setAddressForm] = useState(createEmptyAddressForm());
   const [searchQuery, setSearchQuery] = useState('');
@@ -749,8 +759,8 @@ export default function App() {
   const deferredAdminSettingsProductSearch = useDeferredValue(adminSettingsProductSearch);
   const deferredAdminModalSearchQuery = useDeferredValue(adminModalSearchQuery);
   const deferredAdminFeeSearch = useDeferredValue(adminFeeSearch);
-  const normalizedCustomerEmail = customerEmail.toLowerCase().trim();
-  const normalizedSelectedProfileEmail = String(selectedProfileEmail || '').toLowerCase().trim();
+  const normalizedCustomerEmail = normalizeCustomerEmail(customerEmail);
+  const normalizedSelectedProfileEmail = normalizeCustomerEmail(selectedProfileEmail);
   const normalizedShopSearchQuery = deferredSearchQuery.toLowerCase().trim();
   const normalizedWikiSearchQuery = deferredWikiSearchQuery.toLowerCase().trim();
   const normalizedAdminSearch = deferredAdminGlobalSearch.toLowerCase().trim();
@@ -990,11 +1000,11 @@ export default function App() {
   }, [user, adminNeedsSafety]);
 
   const currentChatIdentity = useMemo(() => (
-    customerEmail.toLowerCase().trim() ||
+    normalizedCustomerEmail ||
     customerHandle.toLowerCase().trim() ||
     customerName.toLowerCase().trim() ||
     'guest'
-  ), [customerEmail, customerHandle, customerName]);
+  ), [normalizedCustomerEmail, customerHandle, customerName]);
 
   const productsByName = useMemo(() => Object.fromEntries(products.map((product) => [product.name, product])), [products]);
   const legacyProductPriceLookup = useMemo(() => buildLegacyProductPriceLookup(safetyRecords), [safetyRecords]);
@@ -1006,16 +1016,9 @@ export default function App() {
     return 0;
   };
 
-  const usersById = useMemo(() => Object.fromEntries(users.map((profile) => [profile.id, profile])), [users]);
+  const usersById = useMemo(() => buildUsersByEmail(users), [users]);
 
-  const ordersByEmail = useMemo(() => {
-    const grouped = {};
-    orders.forEach((order) => {
-      if (!grouped[order.email]) grouped[order.email] = [];
-      grouped[order.email].push(order);
-    });
-    return grouped;
-  }, [orders]);
+  const ordersByEmail = useMemo(() => buildOrdersByEmail(orders), [orders]);
 
   const productTotals = useMemo(() => {
     const totals = {};
@@ -1780,18 +1783,20 @@ export default function App() {
     if (!adminNeedsUsers) return [];
     const map = {};
     orders.forEach(o => {
-      if (!map[o.email]) {
-        map[o.email] = {
-          email: o.email,
+      const email = normalizeCustomerEmail(o.email);
+      if (!email) return;
+      if (!map[email]) {
+        map[email] = {
+          email,
           name: o.name,
           handle: o.handle,
           products: {},
           latestTimestamp: 0
         };
       }
-      if (!map[o.email].products[o.product]) map[o.email].products[o.product] = 0;
-      map[o.email].products[o.product] += o.qty;
-      map[o.email].latestTimestamp = Math.max(map[o.email].latestTimestamp || 0, o.timestamp || 0);
+      if (!map[email].products[o.product]) map[email].products[o.product] = 0;
+      map[email].products[o.product] += o.qty;
+      map[email].latestTimestamp = Math.max(map[email].latestTimestamp || 0, o.timestamp || 0);
     });
 
     return Object.values(map).map(c => {
@@ -1859,7 +1864,7 @@ export default function App() {
   }, [adminNeedsUsers, normalizedAdmins, orders, productsByName, settings, usersById]);
 
   const customerListByEmail = useMemo(
-    () => Object.fromEntries(customerList.map((customer) => [customer.email, customer])),
+    () => Object.fromEntries(customerList.map((customer) => [normalizeCustomerEmail(customer.email), customer])),
     [customerList]
   );
 
@@ -2744,10 +2749,45 @@ export default function App() {
     return { items: itemsMap };
   }, [normalizedCustomerEmail, ordersByEmail]);
 
+  useEffect(() => {
+    if (!normalizedCustomerEmail || !normalizedCustomerEmail.includes('@')) return;
+
+    const profile = usersById[normalizedCustomerEmail] || null;
+    const userOrderRows = ordersByEmail[normalizedCustomerEmail] || [];
+    const fallbackName = String(userOrderRows[0]?.name || '').trim();
+    const fallbackHandle = String(userOrderRows[0]?.handle || '').trim();
+    const nextName = String(profile?.name || fallbackName || '').trim();
+    const nextHandle = String(profile?.handle || fallbackHandle || '').trim();
+
+    setCustomerEmailConfirm((prev) => {
+      const normalizedPrev = normalizeCustomerEmail(prev);
+      const wasAutofilled = normalizedPrev && normalizedPrev === normalizeCustomerEmail(lastAutofilledConfirmRef.current);
+      if (normalizedPrev && !wasAutofilled) return prev;
+      lastAutofilledConfirmRef.current = normalizedCustomerEmail;
+      return normalizedCustomerEmail;
+    });
+
+    setCustomerName((prev) => {
+      const trimmedPrev = String(prev || '').trim();
+      const wasAutofilled = trimmedPrev && trimmedPrev === String(lastAutofilledNameRef.current || '').trim();
+      if (trimmedPrev && !wasAutofilled) return prev;
+      lastAutofilledNameRef.current = nextName;
+      return nextName;
+    });
+
+    setCustomerHandle((prev) => {
+      const trimmedPrev = String(prev || '').trim();
+      const wasAutofilled = trimmedPrev && trimmedPrev === String(lastAutofilledHandleRef.current || '').trim();
+      if (trimmedPrev && !wasAutofilled) return prev;
+      lastAutofilledHandleRef.current = nextHandle;
+      return nextHandle;
+    });
+  }, [normalizedCustomerEmail, usersById, ordersByEmail]);
+
   const isCurrentUserAtRisk = useMemo(() => {
     if (!customerEmail || !settings.addOnly) return false;
-    return trimmingHitList.some(v => v.email === customerEmail.toLowerCase().trim());
-  }, [trimmingHitList, customerEmail, settings.addOnly]);
+    return trimmingHitList.some(v => normalizeCustomerEmail(v.email) === normalizedCustomerEmail);
+  }, [trimmingHitList, normalizedCustomerEmail, settings.addOnly]);
 
   const selectedProfile = useMemo(() => {
     if (!normalizedSelectedProfileEmail) return null;
@@ -2985,7 +3025,7 @@ export default function App() {
       return;
     }
 
-    if (emailLower !== customerEmailConfirm.toLowerCase().trim()) {
+    if (emailLower !== normalizeCustomerEmail(customerEmailConfirm)) {
       triggerShake('emailConfirm');
       showToast('Email confirmation does not match.');
       return;
@@ -3743,7 +3783,7 @@ export default function App() {
 
     const keepLookupAnchored = settings.paymentsOpen || isReviewStageOpen;
     const cleanEmail = normalizedCustomerEmail;
-    if ((settings.paymentsOpen || isReviewStageOpen) && cleanEmail !== customerEmailConfirm.toLowerCase().trim()) {
+    if ((settings.paymentsOpen || isReviewStageOpen) && cleanEmail !== normalizeCustomerEmail(customerEmailConfirm)) {
       return;
     }
     const profile = usersById[cleanEmail] || null;
@@ -3787,7 +3827,7 @@ export default function App() {
 
     setCartInputDrafts({});
 
-    if (!settings.paymentsOpen && settings.storeOpen !== false) {
+    if (!settings.paymentsOpen && (settings.storeOpen !== false || isReviewStageOpen)) {
       setCartItems(createEditableCart(currentItems));
       if (hasActiveOrders) {
         showToast(settings.addOnly ? "Your order is loaded. You can add more vials only." : "Your current order is loaded for editing.");
@@ -3895,7 +3935,7 @@ export default function App() {
   async function cancelEntireOrder() {
     if (!customerEmail) { triggerAmbulance(); showToast("Enter your email first."); return; }
 
-    const emailLower = customerEmail.toLowerCase().trim();
+    const emailLower = normalizedCustomerEmail;
     const userOrderRows = ordersByEmail[emailLower] || [];
     if (userOrderRows.length === 0) {
       showToast("There is no saved order to cancel.");
@@ -3943,12 +3983,12 @@ export default function App() {
     if (isShopAccessLocked) { showToast("Enter the batch code from Discord first."); return; }
     if (showCurrentChainFeeGate) { showToast("Admin fee approval is required before entering this chain."); return; }
     if (!customerEmail) { triggerAmbulance(); showToast("Email address is required."); return; }
-    if (customerEmail.toLowerCase().trim() !== customerEmailConfirm.toLowerCase().trim()) {
+    if (normalizedCustomerEmail !== normalizeCustomerEmail(customerEmailConfirm)) {
       triggerAmbulance(); showToast("Email addresses do not match."); return;
     }
     if (!customerName) { triggerAmbulance(); showToast("Your name is required."); return; }
 
-    const emailLower = customerEmail.toLowerCase().trim();
+    const emailLower = normalizedCustomerEmail;
     setIsBtnLoading(true);
     try {
       const errors = [];
@@ -3964,8 +4004,13 @@ export default function App() {
         });
       }
 
-      Object.entries(cartItems).forEach(([prodName, amounts]) => {
-        const qty = amounts.v || 0;
+      const orderSourceItems = buildOrderItemsFromCartState({
+        cartItems,
+        existingItems: existingOrderData.items,
+        useExistingWhenCartEmpty: Object.keys(existingOrderData.items).length > 0,
+      });
+
+      Object.entries(orderSourceItems).forEach(([prodName, qty]) => {
         const existingQty = existingOrderData.items[prodName] || 0;
         if (qty <= 0) return;
 
@@ -4099,7 +4144,7 @@ export default function App() {
       return;
     }
 
-    const emailLower = customerEmail.toLowerCase().trim();
+    const emailLower = normalizedCustomerEmail;
     setIsBtnLoading(true);
 
     try {
@@ -5619,16 +5664,15 @@ ${rowsXML.join("\n")}
   const userOrders = ordersByEmail[normalizedCustomerEmail] || [];
   const existingMap = {};
   userOrders.forEach(o => { existingMap[o.product] = (existingMap[o.product] || 0) + o.qty; });
+  const hasExistingOrder = Object.keys(existingMap).length > 0;
 
-  const finalItems = {};
-  if (settings.paymentsOpen || settings.storeOpen === false) {
-    Object.assign(finalItems, existingMap);
-  } else {
-    Object.entries(cartItems).forEach(([p, a]) => {
-      const q = a.v || 0;
-      if (q > 0) finalItems[p] = q;
+  const finalItems = (settings.paymentsOpen || settings.storeOpen === false)
+    ? existingMap
+    : buildOrderItemsFromCartState({
+      cartItems,
+      existingItems: existingMap,
+      useExistingWhenCartEmpty: hasExistingOrder,
     });
-  }
 
   let subtotalUSD = 0;
   const cartList = [];
@@ -5641,9 +5685,14 @@ ${rowsXML.join("\n")}
     }
   });
 
-  const currentCustomerRecord = customerListByEmail[normalizedCustomerEmail] || null;
   const currentProfile = customerProfile;
   const activeCurrentProfileAdmin = isActivePaymentAdmin(currentProfile?.adminAssigned) ? currentProfile?.adminAssigned : '';
+  const currentCustomerRecord = customerListByEmail[normalizedCustomerEmail] || buildCustomerOrderRecord({
+    email: normalizedCustomerEmail,
+    orders: userOrders,
+    profile: currentProfile || {},
+    paymentSnapshot: getFrozenPaymentSnapshot(currentProfile),
+  });
   const currentBuyerReviewConfirmedAt = currentCustomerRecord?.buyerReviewConfirmedAt || null;
   const currentReviewReady = Boolean(currentCustomerRecord?.reviewReady);
   const lockedPaymentSnapshot = currentCustomerRecord?.paymentSnapshot || getFrozenPaymentSnapshot(currentProfile);
@@ -5724,7 +5773,6 @@ ${rowsXML.join("\n")}
   const showShopAccessGate = isShopAccessLocked && !canBypassShopGate && !showCurrentChainFeeGate;
   const showCatalogReference = !settings.paymentsOpen && (!isReviewStageOpen || hasShopAccess);
   const isOrderOnlyMode = settings.paymentsOpen || (isReviewStageOpen && !hasShopAccess);
-  const hasExistingOrder = Object.keys(existingMap).length > 0;
   const currentProtectionSummary = useMemo(() => {
     if (!hasExistingOrder) return null;
 
@@ -5934,7 +5982,7 @@ ${rowsXML.join("\n")}
     customerName.trim() &&
     customerEmail.trim() &&
     customerEmailConfirm.trim() &&
-    customerEmail.toLowerCase().trim() === customerEmailConfirm.toLowerCase().trim()
+    normalizedCustomerEmail === normalizeCustomerEmail(customerEmailConfirm)
   );
   const isHeroCartCompact = !isStoreClosed && !isScrolled;
   const shopDesktopLayoutClass = 'flex flex-col lg:grid gap-4 xl:gap-5 items-start lg:grid-cols-[minmax(0,1fr)_252px] xl:grid-cols-[minmax(0,1fr)_284px]';
@@ -7697,7 +7745,7 @@ ${rowsXML.join("\n")}
                   onOpenPreview={() => setShowPreviewModal(true)}
                   onOpenProfileHistory={() => setSelectedProfileEmail(customerEmail)}
                   onQuickInfo={setQuickInfoProduct}
-                  onRequestCancelOrder={() => setConfirmAction({ type: 'cancelOrder', id: customerEmail.toLowerCase().trim() })}
+                  onRequestCancelOrder={() => setConfirmAction({ type: 'cancelOrder', id: normalizedCustomerEmail })}
                   onSelectedCategoryChange={setSelectedCategory}
                   onToggleHowTo={() => setShowHowTo(!showHowTo)}
                   orderCardDescription={orderCardDescription}
