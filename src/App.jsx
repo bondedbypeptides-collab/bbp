@@ -2754,18 +2754,21 @@ export default function App() {
 
     const profile = usersById[normalizedCustomerEmail] || null;
     const userOrderRows = ordersByEmail[normalizedCustomerEmail] || [];
+    const hasKnownProfileData = Boolean(profile) || userOrderRows.length > 0;
     const fallbackName = String(userOrderRows[0]?.name || '').trim();
     const fallbackHandle = String(userOrderRows[0]?.handle || '').trim();
     const nextName = String(profile?.name || fallbackName || '').trim();
     const nextHandle = String(profile?.handle || fallbackHandle || '').trim();
 
-    setCustomerEmailConfirm((prev) => {
-      const normalizedPrev = normalizeCustomerEmail(prev);
-      const wasAutofilled = normalizedPrev && normalizedPrev === normalizeCustomerEmail(lastAutofilledConfirmRef.current);
-      if (normalizedPrev && !wasAutofilled) return prev;
-      lastAutofilledConfirmRef.current = normalizedCustomerEmail;
-      return normalizedCustomerEmail;
-    });
+    if (hasKnownProfileData) {
+      setCustomerEmailConfirm((prev) => {
+        const normalizedPrev = normalizeCustomerEmail(prev);
+        const wasAutofilled = normalizedPrev && normalizedPrev === normalizeCustomerEmail(lastAutofilledConfirmRef.current);
+        if (normalizedPrev && !wasAutofilled) return prev;
+        lastAutofilledConfirmRef.current = normalizedCustomerEmail;
+        return normalizedCustomerEmail;
+      });
+    }
 
     setCustomerName((prev) => {
       const trimmedPrev = String(prev || '').trim();
