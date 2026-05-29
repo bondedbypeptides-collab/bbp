@@ -727,6 +727,7 @@ export default function App() {
   const lastAutofilledNameRef = useRef('');
   const lastAutofilledHandleRef = useRef('');
   const [cartItems, setCartItems] = useState({});
+  const [cartTouchedProducts, setCartTouchedProducts] = useState({});
   const [addressForm, setAddressForm] = useState(createEmptyAddressForm());
   const [searchQuery, setSearchQuery] = useState('');
   const [wikiSearchQuery, setWikiSearchQuery] = useState('');
@@ -3747,6 +3748,10 @@ export default function App() {
     });
     return prefill;
   };
+  const markCartProductTouched = (prodName) => {
+    if (!prodName) return;
+    setCartTouchedProducts((prev) => ({ ...prev, [prodName]: true }));
+  };
 
   const handleAddFromChat = (prodName) => {
     const pData = enrichedProductsByName[prodName];
@@ -3761,6 +3766,7 @@ export default function App() {
     } else {
       setCartItems(prev => ({ ...prev, [prodName]: { v: (prev[prodName]?.v || 0) + 1 } }));
     }
+    markCartProductTouched(prodName);
 
     showToast(`Added ${prodName} to your cart.`);
     triggerShake(prodName);
@@ -3832,6 +3838,7 @@ export default function App() {
 
     if (!settings.paymentsOpen && (settings.storeOpen !== false || isReviewStageOpen)) {
       setCartItems(createEditableCart(currentItems));
+      setCartTouchedProducts({});
       if (hasActiveOrders) {
         showToast(settings.addOnly ? "Your order is loaded. You can add more vials only." : "Your current order is loaded for editing.");
       }
@@ -3868,6 +3875,7 @@ export default function App() {
       return;
     }
     setCartItems(prev => ({ ...prev, [prodName]: { v: num } }));
+    markCartProductTouched(prodName);
   }
 
   function handleCartBlur(prodName) {
@@ -3900,6 +3908,7 @@ export default function App() {
       }
       return updated;
     });
+    markCartProductTouched(prodName);
 
     setCartInputDrafts(prev => {
       const updated = { ...prev };
@@ -3933,6 +3942,7 @@ export default function App() {
       }
       return updated;
     });
+    markCartProductTouched(prodName);
   }
 
   async function cancelEntireOrder() {
@@ -3972,6 +3982,7 @@ export default function App() {
       }));
 
       setCartItems({});
+      setCartTouchedProducts({});
       setCartInputDrafts({});
       setConfirmAction({ type: null, id: null });
       showToast("Order cancelled.");
@@ -3998,20 +4009,22 @@ export default function App() {
       const desiredItems = {};
       let finalTotalQty = 0;
 
+      const orderSourceItems = buildOrderItemsFromCartState({
+        cartItems,
+        existingItems: existingOrderData.items,
+        useExistingWhenCartEmpty: Object.keys(existingOrderData.items).length > 0,
+        preserveUntouchedExisting: true,
+        touchedProducts: cartTouchedProducts,
+      });
+
       if (settings.addOnly) {
         Object.entries(existingOrderData.items).forEach(([prodName, existingQty]) => {
-          const finalQty = cartItems[prodName]?.v || 0;
+          const finalQty = Number(orderSourceItems[prodName] || 0);
           if (finalQty < existingQty) {
             errors.push({ product: prodName, message: `${prodName}: add-only mode keeps your saved ${existingQty} vials locked in.` });
           }
         });
       }
-
-      const orderSourceItems = buildOrderItemsFromCartState({
-        cartItems,
-        existingItems: existingOrderData.items,
-        useExistingWhenCartEmpty: Object.keys(existingOrderData.items).length > 0,
-      });
 
       Object.entries(orderSourceItems).forEach(([prodName, qty]) => {
         const existingQty = existingOrderData.items[prodName] || 0;
@@ -4117,6 +4130,7 @@ export default function App() {
 
       triggerCelebration('order');
       setCartItems(createEditableCart(desiredItems));
+      setCartTouchedProducts({});
       setCartInputDrafts({});
       showToast(existingUser?.address?.street ? "Order saved." : "Order saved. You can add your shipping details any time from Profile & Address.");
     } catch (err) { console.error(err); showToast(`Error saving: ${err.message}`); }
@@ -5680,6 +5694,8 @@ ${rowsXML.join("\n")}
       cartItems,
       existingItems: existingMap,
       useExistingWhenCartEmpty: hasExistingOrder,
+      preserveUntouchedExisting: true,
+      touchedProducts: cartTouchedProducts,
     });
 
   let subtotalUSD = 0;
@@ -7858,6 +7874,7 @@ ${rowsXML.join("\n")}
                 onPendingAddChange={updatePendingHitListAddQuantity}
                 onPendingAddConfirm={() => {
                   setCartItems(prev => ({ ...prev, [pendingHitListAdd.productName]: { v: pendingHitListAdd.nextQty } }));
+                  markCartProductTouched(pendingHitListAdd.productName);
                   setCartInputDrafts(prev => {
                     const updated = { ...prev };
                     delete updated[pendingHitListAdd.productName];

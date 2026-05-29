@@ -63,6 +63,8 @@ export function buildOrderItemsFromCartState({
   cartItems = {},
   existingItems = {},
   useExistingWhenCartEmpty = false,
+  preserveUntouchedExisting = false,
+  touchedProducts = {},
 } = {}) {
   const selectedItems = {};
   Object.entries(cartItems || {}).forEach(([product, amounts]) => {
@@ -70,14 +72,34 @@ export function buildOrderItemsFromCartState({
     if (qty > 0) selectedItems[product] = qty;
   });
 
-  if (Object.keys(selectedItems).length > 0 || !useExistingWhenCartEmpty) {
-    return selectedItems;
-  }
-
   const savedItems = {};
   Object.entries(existingItems || {}).forEach(([product, qty]) => {
     const cleanQty = Number(qty || 0);
     if (cleanQty > 0) savedItems[product] = cleanQty;
   });
+
+  if (preserveUntouchedExisting) {
+    const touchedEntries = Object.entries(touchedProducts || {}).filter(([, isTouched]) => Boolean(isTouched));
+    if (touchedEntries.length === 0) {
+      if (Object.keys(savedItems).length > 0) return savedItems;
+      return selectedItems;
+    }
+
+    const mergedItems = { ...savedItems };
+    touchedEntries.forEach(([product]) => {
+      const qty = Number(cartItems?.[product]?.v ?? cartItems?.[product] ?? 0);
+      if (qty > 0) {
+        mergedItems[product] = qty;
+      } else {
+        delete mergedItems[product];
+      }
+    });
+    return mergedItems;
+  }
+
+  if (Object.keys(selectedItems).length > 0 || !useExistingWhenCartEmpty) {
+    return selectedItems;
+  }
+
   return savedItems;
 }

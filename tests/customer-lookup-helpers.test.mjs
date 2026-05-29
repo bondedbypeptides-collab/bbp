@@ -68,3 +68,28 @@ test('buildOrderItemsFromCartState prefers editable cart when buyer has selected
     Retatrutide: 5,
   });
 });
+
+test('buildOrderItemsFromCartState preserves untouched saved lines when requested', () => {
+  assert.deepEqual(buildOrderItemsFromCartState({
+    cartItems: { 'BAC Water': { v: 3 } },
+    existingItems: { Retatrutide: 2, 'BAC Water': 1 },
+    useExistingWhenCartEmpty: true,
+    preserveUntouchedExisting: true,
+    touchedProducts: { 'BAC Water': true },
+  }), {
+    Retatrutide: 2,
+    'BAC Water': 3,
+  });
+});
+
+test('buildOrderItemsFromCartState removes a touched product when its qty is set to zero', () => {
+  assert.deepEqual(buildOrderItemsFromCartState({
+    cartItems: {},
+    existingItems: { Retatrutide: 2, 'BAC Water': 1 },
+    useExistingWhenCartEmpty: true,
+    preserveUntouchedExisting: true,
+    touchedProducts: { 'BAC Water': true },
+  }), {
+    Retatrutide: 2,
+  });
+});
