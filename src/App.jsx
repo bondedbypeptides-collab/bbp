@@ -4071,30 +4071,35 @@ export default function App() {
       });
 
       const existingUser = usersById[emailLower];
+      const desiredSubtotalUSD = Object.entries(desiredItems).reduce((sum, [prod, qty]) => sum + (qty * getUnitPriceUSD(prod)), 0);
+      const desiredAdminFeePhp = resolveOrderAdminFeePhp({ profile: existingUser || {}, settings });
+      const desiredTotalPHP = calculateOrderTotals(desiredSubtotalUSD, Number(settings.fxRate || 0), desiredAdminFeePhp).totalPHP;
+      const isCurrentPaymentLocked = Boolean(existingUser?.proofUrl || existingUser?.isPaid);
+      const mutableCustomersForRouteCalc = [
+        ...customerList.filter(customer => customer.email !== emailLower && customer.itemCount > 0 && !customer.hasProof && !customer.isPaid),
+        ...(isCurrentPaymentLocked ? [] : [{ email: emailLower, totalPHP: desiredTotalPHP }]),
+      ];
+      const routeAssignments = paymentBankRoutes.length > 0
+        ? buildAmountBalancedBankRouteAssignments({
+          routes: paymentBankRoutes,
+          lockedCustomers: customerList.filter(customer => customer.email !== emailLower && (customer.hasProof || customer.isPaid)),
+          mutableCustomers: mutableCustomersForRouteCalc,
+        })
+        : {};
+      const currentRoute = routeAssignments[emailLower];
+
       const userUpdatePayload = {
         name: customerName,
         handle: customerHandle,
         buyerReviewConfirmedAt: null
       };
-      if (!existingUser || !isActivePaymentAdmin(existingUser.adminAssigned)) {
-        const desiredSubtotalUSD = Object.entries(desiredItems).reduce((sum, [prod, qty]) => sum + (qty * getUnitPriceUSD(prod)), 0);
-        const desiredAdminFeePhp = resolveOrderAdminFeePhp({ profile: existingUser || {}, settings });
-        const desiredTotalPHP = calculateOrderTotals(desiredSubtotalUSD, Number(settings.fxRate || 0), desiredAdminFeePhp).totalPHP;
-        const routeAssignments = buildAmountBalancedBankRouteAssignments({
-          routes: paymentBankRoutes,
-          lockedCustomers: customerList.filter(customer => customer.email !== emailLower && (customer.hasProof || customer.isPaid)),
-          mutableCustomers: [
-            ...customerList.filter(customer => customer.email !== emailLower && customer.itemCount > 0 && !customer.hasProof && !customer.isPaid),
-            { email: emailLower, totalPHP: desiredTotalPHP },
-          ],
-        });
-        const route = routeAssignments[emailLower];
-        userUpdatePayload.adminAssigned = route?.adminName || pickLowestLoadAdmin({
+      if (currentRoute || !existingUser || !isActivePaymentAdmin(existingUser.adminAssigned)) {
+        userUpdatePayload.adminAssigned = currentRoute?.adminName || pickLowestLoadAdmin({
           adminNames: normalizedAdmins.map((admin) => admin.name),
           customers: customerList.filter(customer => customer.email !== emailLower && customer.itemCount > 0),
         }) || "Admin";
-        if (route) {
-          userUpdatePayload.preferredPaymentBankIndex = route.bankIndex;
+        if (currentRoute) {
+          userUpdatePayload.preferredPaymentBankIndex = currentRoute.bankIndex;
         }
       }
       if (!existingUser?.proofUrl && !existingUser?.isPaid) {
