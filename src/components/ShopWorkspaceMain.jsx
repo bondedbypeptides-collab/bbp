@@ -6,6 +6,7 @@ export default function ShopWorkspaceMain({
   cancelEntireOrder,
   cartInputDrafts,
   cartItems,
+  cartTouchedProducts,
   cartList,
   confirmAction,
   currentProtectionSummary,
@@ -559,6 +560,8 @@ export default function ShopWorkspaceMain({
                     const cart = cartItems[p.name] || { v: 0 };
                     const active = cart.v > 0;
                     const exist = existingMap[p.name] || 0;
+                    const isTouched = Boolean(cartTouchedProducts?.[p.name]);
+                    const visibleQty = cartInputDrafts[p.name] ?? (isTouched ? (cart.v || '') : (cart.v || exist || ''));
                     const productInfo = buildProductInfo(p.name);
                     const productImage = getProductImageSrc(productInfo);
                     const productImageSrc = getRealProductImageSrc(p.name, p.imageUrl || '');
@@ -633,7 +636,7 @@ export default function ShopWorkspaceMain({
                               <input
                                 type="number"
                                 min="0"
-                                value={cartInputDrafts[p.name] ?? (cart.v || '')}
+                                value={visibleQty}
                                 onFocus={(e) => handleCartFocus(p.name, e)}
                                 onChange={(e) => handleCartChange(p.name, e.target.value)}
                                 onBlur={() => handleCartBlur(p.name)}

@@ -7719,6 +7719,7 @@ ${rowsXML.join("\n")}
                 <div className={shopDesktopLayoutClass}>
                 <div className="min-w-0 w-full">
                 <ShopWorkspaceMain
+                  cartTouchedProducts={cartTouchedProducts}
                   buildProductInfo={buildProductInfo}
                   cancelEntireOrder={cancelEntireOrder}
                   cartInputDrafts={cartInputDrafts}
