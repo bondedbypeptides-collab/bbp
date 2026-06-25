@@ -4358,56 +4358,6 @@ export default function App() {
     setIsBtnLoading(false);
   };
 
-  const pullFromGoogleSheets = async () => {
-    if (!settings.gasWebAppUrl) {
-      showToast("Please enter your Google Web App URL in Settings first.");
-      return;
-    }
-    setIsBtnLoading(true);
-    showToast("Pulling from Google Sheets...");
-
-    try {
-      const response = await fetch(settings.gasWebAppUrl);
-      const result = await response.json();
-
-      if (result.success && result.data) {
-        const updates = result.data.map(row => ({
-          email: String(row.Email || '').toLowerCase().trim(),
-          adminAssigned: String(row['Assigned Admin'] || '').trim(),
-          isPaid: String(row['Is Paid'] || '').toUpperCase() === 'TRUE',
-          address: {
-            street: String(row.Street || '').trim(),
-            brgy: String(row.Barangay || '').trim(),
-            city: String(row.City || '').trim(),
-            prov: String(row.Province || '').trim(),
-            zip: String(row.Zip || '').trim(),
-            contact: String(row.Contact || '').trim(),
-            shipOpt: String(row['Shipping Option'] || '').trim(),
-            partialShipPref: normalizePartialShipPreference(row['Partial Ship'] || row['Shipping Note'] || ''),
-          }
-        })).filter(u => u.email);
-
-        const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
-
-        for (const chunk of chunkArray(updates, 250)) {
-          const batch = writeBatch(db);
-          chunk.forEach(upd => {
-            const ref = doc(db, colPath('users'), upd.email);
-            batch.set(ref, { adminAssigned: upd.adminAssigned, isPaid: upd.isPaid, address: upd.address }, { merge: true });
-          });
-          await safeAwait(batch.commit());
-        }
-        showToast("Successfully pulled and synced from Google Sheets.");
-      } else {
-        showToast("Error from Sheets: " + result.error);
-      }
-    } catch (error) {
-      console.error(error);
-      showToast("Failed to pull. Check URL and permissions.");
-    }
-    setIsBtnLoading(false);
-  };
-
   const exportCustomersCSVRows = (customers, filenamePrefix = 'BBP_Customers') => {
     const headers = ["Email", "Name", "Handle", "Subtotal USD", "Total USD", "Total PHP", "Proof Link", "Assigned Admin", "Bank Account", "Label Link", "Street", "Barangay", "City", "Province", "Zip", "Contact", "Shipping Option", "Partial Ship", "Is Paid"];
     let csvContent = headers.join(",") + "\n";
@@ -4882,6 +4832,10 @@ ${rowsXML.join("\n")}
   const importCustomersCSV = async (e) => {
     const file = e.target?.files?.[0];
     if (!file) return;
+    if (!window.confirm('Sync the customer database from this CSV? This overwrites existing customer records with the file contents and cannot be undone.')) {
+      e.target.value = '';
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = async (event) => {
@@ -5039,6 +4993,10 @@ ${rowsXML.join("\n")}
 
     if (paymentBankRoutes.length === 0) {
       showToast('Cannot open payments yet. Add at least one active bank or QR route.');
+      return;
+    }
+
+    if (!window.confirm(`Open the payment window now? This freezes totals, assigned admins, and payment routes for all ${activeCustomers.length} active order${activeCustomers.length === 1 ? '' : 's'} and buyers can start paying. You can close it again later.`)) {
       return;
     }
 
@@ -5570,6 +5528,66 @@ ${rowsXML.join("\n")}
     }
     setIsBtnLoading(false);
   };
+
+  // Auto-balance bank routes during collection so buyers don't all pile onto the
+  // first route. A buyer's own Save can't balance (buyers don't load the full
+  // customer list, so each one only sees itself and picks the lowest-key route),
+  // which is why an admin previously had to click "Reshuffle Admins" by hand.
+  // While an admin dashboard is open and payments are NOT yet live, this re-runs
+  // the same balancing automatically and writes only the buyers whose route
+  // actually changes — idempotent, so it converges and never loops. Opening
+  // payments runs its own final rebalance, so the frozen state is always clean.
+  const autoRebalanceTimerRef = useRef(null);
+  useEffect(() => {
+    if (!isAdminAuthenticated || settings.paymentsOpen || isBtnLoading) return undefined;
+    if (paymentBankRoutes.length === 0) return undefined;
+
+    const activeCustomers = customerList.filter((c) => c.itemCount > 0);
+    const mutableCustomers = activeCustomers.filter((c) => !c.isPaid && !c.hasProof);
+    if (mutableCustomers.length === 0) return undefined;
+
+    const routeAssignments = buildAmountBalancedBankRouteAssignments({
+      routes: paymentBankRoutes,
+      lockedCustomers: activeCustomers.filter((c) => c.isPaid || c.hasProof),
+      mutableCustomers,
+    });
+
+    const changes = mutableCustomers
+      .map((c) => {
+        const route = routeAssignments[c.email];
+        if (!route) return null;
+        const profile = usersById[c.email] || {};
+        const sameRoute = profile.adminAssigned === route.adminName
+          && Number(profile.preferredPaymentBankIndex) === Number(route.bankIndex);
+        return sameRoute ? null : { email: c.email, route };
+      })
+      .filter(Boolean);
+
+    if (changes.length === 0) return undefined;
+
+    if (autoRebalanceTimerRef.current) clearTimeout(autoRebalanceTimerRef.current);
+    autoRebalanceTimerRef.current = setTimeout(async () => {
+      try {
+        for (const chunk of chunkArray(changes, 250)) {
+          const batch = writeBatch(db);
+          chunk.forEach(({ email, route }) => {
+            batch.set(doc(db, colPath('users'), email), {
+              adminAssigned: route.adminName,
+              preferredPaymentBankIndex: route.bankIndex,
+              paymentSnapshot: null,
+            }, { merge: true });
+          });
+          await safeAwait(batch.commit());
+        }
+      } catch (err) {
+        console.error('Auto-rebalance failed', err);
+      }
+    }, 1500);
+
+    return () => {
+      if (autoRebalanceTimerRef.current) clearTimeout(autoRebalanceTimerRef.current);
+    };
+  }, [isAdminAuthenticated, settings.paymentsOpen, isBtnLoading, paymentBankRoutes, customerList, usersById]);
 
   // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW: Inline Admin Edit Logic
   const openAdminEditModal = (email) => {
@@ -7182,8 +7200,12 @@ ${rowsXML.join("\n")}
           padding: 0.84rem 0.9rem;
         }
         .nav-item.active { background: rgba(255,255,255,0.98); color: #D6006E; border-radius: 1rem 0 0 1rem; margin-right: -1.5rem; padding-right: 1.5rem; box-shadow: 0 10px 24px rgba(74,4,42,0.18); }
+        .nav-item:not(.active) { border-radius: 0.85rem; }
+        .nav-item:not(.active):hover { background: rgba(255,255,255,0.08); }
         .custom-table th { background: #FFF8FB; color: #7A104C; font-weight: 800; font-size: 10px; text-transform: uppercase; padding: 0.95rem 1rem; border-bottom: 1px solid #F7D9E8; letter-spacing: 0.14em; }
         .custom-table td { padding: 0.95rem 1rem; border-bottom: 1px solid #F8E8F0; font-weight: 600; font-size: 13px; color: #3e3140; }
+        .custom-table tbody td { transition: box-shadow 0.16s cubic-bezier(0.22, 1, 0.36, 1); }
+        .custom-table tbody tr:hover td { box-shadow: inset 0 0 0 9999px rgba(214, 0, 110, 0.04); }
         .compact-table th { padding: 0.72rem 0.85rem; font-size: 9px; }
         .compact-table td { padding: 0.72rem 0.85rem; font-size: 12px; }
         .admin-surface {
@@ -7199,7 +7221,7 @@ ${rowsXML.join("\n")}
           border-radius: 1rem;
           padding: 0.85rem 1rem;
           box-shadow: 0 8px 18px rgba(74, 4, 42, 0.04);
-          transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+          transition: border-color 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s cubic-bezier(0.22, 1, 0.36, 1), background 0.18s cubic-bezier(0.22, 1, 0.36, 1);
         }
         .admin-stat-card:hover {
           border-color: #F0C4DB;
@@ -7207,7 +7229,7 @@ ${rowsXML.join("\n")}
         }
         .admin-stat-card-active {
           border-color: #E9B7D1;
-          background: linear-gradient(180deg, #ffffff, #FFF6FA);
+          background: linear-gradient(180deg, #FFFCFE, #FFF6FA);
           box-shadow: 0 0 0 2px rgba(214,0,110,0.08);
         }
         .admin-stat-card-emerald.admin-stat-card-active {
@@ -7223,7 +7245,7 @@ ${rowsXML.join("\n")}
           background: rgba(255,255,255,0.98);
           border-radius: 1.25rem;
           box-shadow: 0 10px 24px rgba(74, 4, 42, 0.05);
-          transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+          transition: border-color 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s cubic-bezier(0.22, 1, 0.36, 1), background 0.18s cubic-bezier(0.22, 1, 0.36, 1);
         }
         .admin-breakdown-card:hover {
           border-color: #F0C4DB;
@@ -7268,7 +7290,7 @@ ${rowsXML.join("\n")}
           text-transform: uppercase;
           letter-spacing: 0.14em;
           color: #6E4B62;
-          transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+          transition: border-color 0.18s cubic-bezier(0.22, 1, 0.36, 1), color 0.18s cubic-bezier(0.22, 1, 0.36, 1), background 0.18s cubic-bezier(0.22, 1, 0.36, 1);
         }
         .admin-chip-btn:hover {
           border-color: #EDBDD8;
@@ -7293,6 +7315,9 @@ ${rowsXML.join("\n")}
         .admin-grid-scroll::-webkit-scrollbar-thumb {
           background: #F4C8DE;
           border-radius: 999px;
+        }
+        .admin-grid-scroll::-webkit-scrollbar-thumb:hover {
+          background: #EAA3CB;
         }
         .defer-render {
           content-visibility: auto;
@@ -8020,7 +8045,7 @@ ${rowsXML.join("\n")}
 
               <div className="w-full max-w-[1500px] 2xl:max-w-[1600px] mx-auto relative min-h-full">
                 {!adminTab.includes('settings') && (
-                  <div className="bg-white p-3 rounded-2xl shadow-sm border-2 border-pink-100 mb-6 flex items-center gap-3 sticky top-[70px] lg:top-0 z-40">
+                  <div className="bg-white p-3 rounded-2xl shadow-sm border-2 border-pink-100 mb-6 flex items-center gap-3 sticky top-[70px] lg:top-0 z-40 transition-colors focus-within:border-[#F0BCD9]">
                     <Search size={20} className="text-pink-400 ml-2 shrink-0" />
                     <input type="text" value={adminGlobalSearch} onChange={e => setAdminGlobalSearch(e.target.value)} placeholder="Global Search (Ctrl+F equivalent)..." className="bbp-focus-ring w-full text-sm font-bold text-[#4A042A] outline-none placeholder:text-pink-200 bg-transparent rounded-lg" />
                   </div>
@@ -8187,14 +8212,9 @@ ${rowsXML.join("\n")}
                           <input type="file" accept=".csv" onChange={importCustomersCSV} className="hidden" disabled={isBtnLoading} />
                         </label>
                         {settings.gasWebAppUrl && (
-                          <>
-                            <button onClick={pushToGoogleSheets} disabled={isBtnLoading} className="bg-emerald-50 border-2 border-emerald-200 text-emerald-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-emerald-500 transition-colors flex items-center gap-2 disabled:opacity-50">
-                              {isBtnLoading ? 'Pushing...' : 'Push to Sheets'}
-                            </button>
-                            <button onClick={pullFromGoogleSheets} disabled={isBtnLoading} className="bg-blue-50 border-2 border-blue-200 text-blue-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-blue-500 transition-colors flex items-center gap-2 disabled:opacity-50">
-                              {isBtnLoading ? 'Pulling...' : 'Pull from Sheets'}
-                            </button>
-                          </>
+                          <button onClick={pushToGoogleSheets} disabled={isBtnLoading} className="bg-emerald-50 border-2 border-emerald-200 text-emerald-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm hover:border-emerald-500 transition-colors flex items-center gap-2 disabled:opacity-50">
+                            {isBtnLoading ? 'Pushing...' : 'Push to Sheets'}
+                          </button>
                         )}
                       </div>
                     </div>

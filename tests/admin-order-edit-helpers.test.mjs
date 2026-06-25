@@ -152,6 +152,58 @@ test('resolveOrderAdminFeePhp removes admin fee after current chain approval', (
   assert.deepEqual(getChainAccessRecord(profile, settings), { status: 'approved', adminFeeAmountPhp: 150 });
 });
 
+test('resolveOrderAdminFeePhp bundles the admin fee into the order when the gate is off', () => {
+  // Next-batch model: upfront gate OFF, but the admin fee is still collected on
+  // the payment page as orders + admin fee. So an unapproved buyer is still
+  // charged the fee regardless of adminFeeGateOpen.
+  assert.equal(
+    resolveOrderAdminFeePhp({ profile: {}, settings: { batchName: 'June Batch', adminFeePhp: 150, adminFeeGateOpen: false } }),
+    150
+  );
+  assert.equal(
+    resolveOrderAdminFeePhp({ profile: {}, settings: { batchName: 'June Batch', adminFeePhp: 150, adminFeeGateOpen: true } }),
+    150
+  );
+  // Undefined gate flag behaves the same — fee is charged at payment.
+  assert.equal(
+    resolveOrderAdminFeePhp({ profile: {}, settings: { adminFeePhp: 150 } }),
+    150
+  );
+});
+
+test('resolveOrderAdminFeePhp never double-charges a buyer who already paid the fee upfront (gate ON)', () => {
+  // Gate ON: a buyer who paid via the current-chain gate (approved) has the fee
+  // removed from their order total so they are not charged twice.
+  const settings = { chainLabel: 'June Chain', adminFeePhp: 150, adminFeeGateOpen: true };
+  const profile = { chainAccess: { [getCurrentChainId(settings)]: { status: 'approved' } } };
+
+  assert.equal(resolveOrderAdminFeePhp({ profile, settings }), 0);
+});
+
+test('resolveOrderAdminFeePhp ignores a stale approval when the gate is off (no silent fee loss)', () => {
+  // Gate OFF: nobody can pay upfront, so an 'approved' record can only be a
+  // leftover from a prior batch. It must NOT waive this batch's bundled fee,
+  // otherwise returning buyers are silently exempted and the fee is lost.
+  const settings = { chainLabel: 'June Chain', adminFeePhp: 150, adminFeeGateOpen: false };
+  const staleApproved = { chainAccess: { [getCurrentChainId(settings)]: { status: 'approved' } } };
+
+  assert.equal(resolveOrderAdminFeePhp({ profile: staleApproved, settings }), 150);
+});
+
+test('getChainAccessRecord tolerates case and whitespace drift in the chain key', () => {
+  const profile = {
+    chainAccess: {
+      'April Chain 7': { status: 'approved', adminFeeAmountPhp: 150 },
+    },
+  };
+
+  // Same chain, only label casing/spacing differs — must still resolve approved.
+  assert.equal(hasApprovedChainAccess(profile, { chainLabel: 'april chain 7' }), true);
+  assert.equal(hasApprovedChainAccess(profile, { chainLabel: '  April   Chain 7 ' }), true);
+  // A genuinely different chain still does not carry the approval.
+  assert.equal(hasApprovedChainAccess(profile, { chainLabel: 'May Chain 8' }), false);
+});
+
 test('removeCurrentChainAccess removes only the selected chain approval record', () => {
   const profile = {
     chainAccess: {

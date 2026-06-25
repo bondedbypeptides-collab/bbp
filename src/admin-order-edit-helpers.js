@@ -57,9 +57,21 @@ export function getCurrentChainId(settings = {}) {
   return 'current-chain';
 }
 
+// Compare key only; case/whitespace differences in the label must not orphan an
+// existing approval. Writes still use getCurrentChainId() unchanged, so this is
+// purely additive — it can only match more, never fewer, records.
+function normalizeChainKey(value = '') {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 export function getChainAccessRecord(profile = {}, settings = {}) {
+  const chainAccess = profile?.chainAccess || {};
   const chainId = getCurrentChainId(settings);
-  return profile?.chainAccess?.[chainId] || null;
+  if (chainAccess[chainId]) return chainAccess[chainId];
+  const target = normalizeChainKey(chainId);
+  const driftMatch = Object.entries(chainAccess)
+    .find(([key]) => normalizeChainKey(key) === target);
+  return driftMatch ? driftMatch[1] : null;
 }
 
 export function removeCurrentChainAccess(profile = {}, settings = {}) {
@@ -90,7 +102,16 @@ export function buildChainAccessRecord({
 }
 
 export function resolveOrderAdminFeePhp({ profile = {}, settings = {} } = {}) {
-  return hasApprovedChainAccess(profile, settings) ? 0 : Number(settings?.adminFeePhp || 0);
+  const adminFeePhp = Number(settings?.adminFeePhp || 0);
+  // Gate OFF (next-batch model): the admin fee is collected at payment for
+  // EVERYONE (order total = orders + admin fee). The upfront-payment path is
+  // disabled when the gate is off, so any 'approved' chain-access record can
+  // only be a leftover from a prior batch — honoring it would silently waive
+  // this batch's fee. So charge all buyers; no exemption when the gate is off.
+  if (settings?.adminFeeGateOpen === false) return adminFeePhp;
+  // Gate ON: a buyer who already paid the fee upfront (status 'approved') is
+  // exempt so they are not charged twice; everyone else pays it bundled.
+  return hasApprovedChainAccess(profile, settings) ? 0 : adminFeePhp;
 }
 
 function createAdminLoadMap(adminNames = [], customers = []) {
