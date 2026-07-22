@@ -757,7 +757,7 @@ export default function App() {
   const [customersTableSort, setCustomersTableSort] = useState({ key: 'name', direction: 'asc' });
   const [productsTableSort, setProductsTableSort] = useState({ key: 'name', direction: 'asc' });
   const [adminSettingsProductSearch, setAdminSettingsProductSearch] = useState('');
-  const [productPriceEdit, setProductPriceEdit] = useState({ id: null, name: '', vial: '', kit: '', kitSize: '' });
+  const [productPriceEdit, setProductPriceEdit] = useState({ id: null, name: '', vial: '', kitSize: '' });
   const [cartInputDrafts, setCartInputDrafts] = useState({});
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
@@ -800,7 +800,7 @@ export default function App() {
   const [quickInfoProduct, setQuickInfoProduct] = useState(null);
   const POPULAR_CATEGORIES = ["All", "Weight Loss", "Healing", "Anti-Aging", "Muscle Growth", "Brain Health", "Skin"];
 
-  const [newProd, setNewProd] = useState({ name: '', kit: '', vial: '', max: '', kitSize: '' });
+  const [newProd, setNewProd] = useState({ name: '', vial: '', max: '', kitSize: '' });
   const [newAdmin, setNewAdmin] = useState({ name: '', banks: [{ label: '', details: '', qrFile: null }] });
   const [isScrolled, setIsScrolled] = useState(false);
   const configuredShopAccessCode = normalizeAccessCode(settings.shopAccessCode);
@@ -5186,8 +5186,8 @@ ${rowsXML.join("\n")}
               let kit = parseFloat(kitPriceRaw) || 0;
               let vial = parseFloat(vialPriceRaw) || 0;
 
-              if (kit === 0 && vial > 0) kit = vial * kitSize;
               if (vial === 0 && kit > 0) vial = kit / kitSize;
+              kit = vial * kitSize; // kit price is always derived from vial price
 
               newProducts.push({ name, pricePerKitUSD: kit, pricePerVialUSD: vial, kitSize, locked: false, maxBoxes: 0, inventoryTotalVials: 0, inventoryBoxes: 0, inventorySlotsLeft: SLOTS_PER_BATCH, inventoryUpdatedAt: Date.now() });
             }
@@ -5237,7 +5237,7 @@ ${rowsXML.join("\n")}
     if (!name || !newProd.vial) { showToast('Enter name and vial price!'); return; }
     if (products.some(p => p.name.toLowerCase() === name.toLowerCase())) { showToast(`"${name}" already exists in the catalog.`); return; }
     const kitSize = getKitSize({ kitSize: newProd.kitSize });
-    const kitPrice = Number(newProd.kit) || (Number(newProd.vial) * kitSize);
+    const kitPrice = Number(newProd.vial) * kitSize;
     await safeAwait(addDoc(collection(db, colPath('products')), {
       name,
       pricePerKitUSD: kitPrice,
@@ -5251,7 +5251,7 @@ ${rowsXML.join("\n")}
       inventoryUpdatedAt: Date.now()
     }));
     await safeAwait(addDoc(collection(db, colPath('logs')), { timestamp: Date.now(), email: '', name: 'Admin', action: 'Added Product', details: `${name}: vial $${Number(newProd.vial).toFixed(2)}, kit $${kitPrice.toFixed(2)}, ${kitSize === 1 ? 'vial-only' : `${kitSize} vials/kit`}` }));
-    setNewProd({ name: '', kit: '', vial: '', max: '', kitSize: '' });
+    setNewProd({ name: '', vial: '', max: '', kitSize: '' });
     showToast('Product added.');
   }
 
@@ -5260,7 +5260,7 @@ ${rowsXML.join("\n")}
     // safe, but admin order-edit and packing/trimming still read live price (see 5660+/5839+).
     if (settings.paymentsOpen) {
       showToast('Payments are open — close payments before editing products.');
-      setProductPriceEdit({ id: null, name: '', vial: '', kit: '', kitSize: '' });
+      setProductPriceEdit({ id: null, name: '', vial: '', kitSize: '' });
       return;
     }
     const newVial = Number(productPriceEdit.vial);
@@ -5268,9 +5268,7 @@ ${rowsXML.join("\n")}
     const kitSizeRaw = String(productPriceEdit.kitSize).trim();
     const newKitSize = kitSizeRaw === '' ? getKitSize(p) : Math.floor(Number(kitSizeRaw));
     if (!Number.isFinite(newKitSize) || newKitSize < 1) { showToast('Kit size must be 1 or more vials (1 = vial-only).'); return; }
-    const kitRaw = String(productPriceEdit.kit).trim();
-    const newKit = kitRaw === '' ? (newVial * newKitSize) : Number(kitRaw);
-    if (!Number.isFinite(newKit) || newKit < 0) { showToast('Kit price must be 0 or a positive number.'); return; }
+    const newKit = newVial * newKitSize; // kit price is always derived, never hand-set
     const newName = String(productPriceEdit.name || '').trim() || p.name;
     const renamed = newName !== p.name;
     if (renamed && products.some(other => other.id !== p.id && other.name.toLowerCase() === newName.toLowerCase())) {
@@ -5297,7 +5295,7 @@ ${rowsXML.join("\n")}
       action: (renamed || newKitSize !== oldKitSize) ? 'Edited Product' : 'Edited Product Price',
       details: `${renamed ? `${p.name}→${newName}, ` : `${p.name}: `}vial $${oldVial.toFixed(2)}→$${newVial.toFixed(2)}, kit $${oldKit.toFixed(2)}→$${newKit.toFixed(2)}${newKitSize !== oldKitSize ? `, kit size ${oldKitSize}→${newKitSize} vials` : ''}`
     }));
-    setProductPriceEdit({ id: null, name: '', vial: '', kit: '', kitSize: '' });
+    setProductPriceEdit({ id: null, name: '', vial: '', kitSize: '' });
     showToast(renamed ? 'Product updated (orders re-linked).' : 'Product updated.');
   }
 
@@ -9326,9 +9324,11 @@ ${rowsXML.join("\n")}
                           <label className="block text-[10px] font-black text-emerald-600 uppercase tracking-wider mb-1">Vials/Kit</label>
                           <input type="number" step="1" min="1" value={newProd.kitSize} onChange={e => setNewProd(s => ({ ...s, kitSize: e.target.value }))} placeholder="10" title="Vials in one kit. Blank = 10. Set 1 for vial-only products (no kit, no open-box risk)." className={`${adminInputSm} w-full m-0 py-2`} />
                         </div>
-                        <div className="w-24">
-                          <label className="block text-[10px] font-black text-emerald-600 uppercase tracking-wider mb-1">Kit $</label>
-                          <input type="number" step="0.01" min="0" value={newProd.kit} onChange={e => setNewProd(s => ({ ...s, kit: e.target.value }))} placeholder="Auto" title="Leave blank = vial price × kit size" className={`${adminInputSm} w-full m-0 py-2`} />
+                        <div className="w-28">
+                          <span className="block text-[10px] font-black text-emerald-600 uppercase tracking-wider mb-1">Kit $ (auto)</span>
+                          <div className="py-2 text-sm font-black text-slate-600">
+                            {getKitSize({ kitSize: newProd.kitSize }) === 1 ? 'vial-only' : `$${((Number(newProd.vial) || 0) * getKitSize({ kitSize: newProd.kitSize })).toFixed(2)}`}
+                          </div>
                         </div>
                         <div className="w-24">
                           <label className="block text-[10px] font-black text-emerald-600 uppercase tracking-wider mb-1">Max Boxes</label>
@@ -9347,19 +9347,33 @@ ${rowsXML.join("\n")}
                               <tr key={p.id} className="border-b border-gray-100 hover:bg-slate-50 transition-colors">
                                 <td className="font-bold text-[#4A042A] text-sm">{p.name}</td>
                                 <td className="text-[#D6006E] font-bold text-sm">${p.pricePerVialUSD.toFixed(2)}</td>
-                                <td className="text-center text-xs font-bold text-slate-500">{getKitSize(p) === 1 ? <span className="text-sky-600">Vial only</span> : `${getKitSize(p)} vials`}</td>
+                                <td className="text-center text-xs font-bold text-slate-500">{getKitSize(p) === 1 ? <span className="text-sky-600">Vial only</span> : `${getKitSize(p)} vials · $${(p.pricePerVialUSD * getKitSize(p)).toFixed(2)}`}</td>
                                 <td className="text-center">
                                   {productPriceEdit.id === p.id ? (
-                                    <div className="flex gap-1 justify-center items-center flex-wrap animate-fadeIn bg-pink-50 p-1 rounded-lg border border-pink-200">
-                                      <input type="text" value={productPriceEdit.name} onChange={e => setProductPriceEdit(s => ({ ...s, name: e.target.value }))} placeholder="Name" title="Product name — renaming re-links saved orders" className={`${adminInputSm} w-32 m-0 py-1 text-xs`} />
-                                      <input type="number" step="0.01" min="0" value={productPriceEdit.vial} onChange={e => setProductPriceEdit(s => ({ ...s, vial: e.target.value }))} placeholder="Vial $" title="Price per vial (USD)" className={`${adminInputSm} w-16 m-0 py-1 text-xs`} />
-                                      <input type="number" step="0.01" min="0" value={productPriceEdit.kit} onChange={e => setProductPriceEdit(s => ({ ...s, kit: e.target.value }))} placeholder="Kit $" title="Price per full kit (USD). Leave blank = vial × kit size." className={`${adminInputSm} w-16 m-0 py-1 text-xs`} />
-                                      <input type="number" step="1" min="1" value={productPriceEdit.kitSize} onChange={e => setProductPriceEdit(s => ({ ...s, kitSize: e.target.value }))} placeholder="V/Kit" title="Vials per kit. 1 = vial-only (no kit, no open-box risk)." className={`${adminInputSm} w-14 m-0 py-1 text-xs`} />
-                                      <button onClick={() => handleProductPriceSave(p)} className="bg-emerald-500 text-white px-2 py-1 rounded text-[9px] font-black hover:bg-emerald-600">SAVE</button>
-                                      <button onClick={() => setProductPriceEdit({ id: null, name: '', vial: '', kit: '', kitSize: '' })} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[9px] font-black hover:bg-slate-300">NO</button>
+                                    <div className="flex gap-2 justify-center items-end flex-wrap animate-fadeIn bg-pink-50 p-2 rounded-lg border border-pink-200">
+                                      <div className="flex flex-col items-start">
+                                        <label className="text-[8px] font-black uppercase tracking-wider text-pink-400 mb-0.5">Name</label>
+                                        <input type="text" value={productPriceEdit.name} onChange={e => setProductPriceEdit(s => ({ ...s, name: e.target.value }))} title="Product name — renaming re-links saved orders" className={`${adminInputSm} w-32 m-0 py-1 text-xs`} />
+                                      </div>
+                                      <div className="flex flex-col items-start">
+                                        <label className="text-[8px] font-black uppercase tracking-wider text-pink-400 mb-0.5">Vial $</label>
+                                        <input type="number" step="0.01" min="0" value={productPriceEdit.vial} onChange={e => setProductPriceEdit(s => ({ ...s, vial: e.target.value }))} title="Price per vial (USD)" className={`${adminInputSm} w-16 m-0 py-1 text-xs`} />
+                                      </div>
+                                      <div className="flex flex-col items-start">
+                                        <label className="text-[8px] font-black uppercase tracking-wider text-pink-400 mb-0.5">Vials/Kit</label>
+                                        <input type="number" step="1" min="1" value={productPriceEdit.kitSize} onChange={e => setProductPriceEdit(s => ({ ...s, kitSize: e.target.value }))} title="Vials per kit. 1 = vial-only (no kit, no open-box risk)." className={`${adminInputSm} w-14 m-0 py-1 text-xs`} />
+                                      </div>
+                                      <div className="flex flex-col items-start pb-1">
+                                        <span className="text-[8px] font-black uppercase tracking-wider text-slate-400 mb-0.5">Kit $ (auto)</span>
+                                        <span className="text-[11px] font-black text-slate-600">
+                                          {getKitSize({ kitSize: productPriceEdit.kitSize }) === 1 ? 'vial-only' : `$${((Number(productPriceEdit.vial) || 0) * getKitSize({ kitSize: productPriceEdit.kitSize })).toFixed(2)}`}
+                                        </span>
+                                      </div>
+                                      <button onClick={() => handleProductPriceSave(p)} className="bg-emerald-500 text-white px-2 py-1.5 rounded text-[9px] font-black hover:bg-emerald-600">SAVE</button>
+                                      <button onClick={() => setProductPriceEdit({ id: null, name: '', vial: '', kitSize: '' })} className="bg-slate-200 text-slate-700 px-2 py-1.5 rounded text-[9px] font-black hover:bg-slate-300">NO</button>
                                     </div>
                                   ) : (
-                                    <button onClick={() => setProductPriceEdit({ id: p.id, name: p.name || '', vial: String(p.pricePerVialUSD ?? ''), kit: p.pricePerKitUSD != null ? String(p.pricePerKitUSD) : '', kitSize: String(getKitSize(p)) })} disabled={settings.paymentsOpen} title={settings.paymentsOpen ? 'Close payments before editing products' : 'Edit name / prices / kit size'} className={`bg-transparent border-none p-1 transition-transform ${settings.paymentsOpen ? 'text-slate-200 cursor-not-allowed' : 'text-slate-300 hover:text-pink-500 hover:scale-110'}`}><Edit3 size={16} /></button>
+                                    <button onClick={() => setProductPriceEdit({ id: p.id, name: p.name || '', vial: String(p.pricePerVialUSD ?? ''), kitSize: String(getKitSize(p)) })} disabled={settings.paymentsOpen} title={settings.paymentsOpen ? 'Close payments before editing products' : 'Edit name / vial price / kit size'} className={`bg-transparent border-none p-1 transition-transform ${settings.paymentsOpen ? 'text-slate-200 cursor-not-allowed' : 'text-slate-300 hover:text-pink-500 hover:scale-110'}`}><Edit3 size={16} /></button>
                                   )}
                                 </td>
                                 <td className="text-center">
