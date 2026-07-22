@@ -377,7 +377,7 @@ export default function ShopWorkspaceMain({
               <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-5">
                 {[
                   ['01', 'Enter details', 'Use your regular email so your profile can load.'],
-                  ['02', 'Choose vials', 'Every 10 vials makes 1 protected kit.'],
+                  ['02', 'Choose vials', 'Every completed kit is protected. Kit size shows on each product.'],
                   ['03', 'Save order', 'Submit your cart to lock in your spot.'],
                   ['04', 'Watch for payments', 'Wait for the payment announcement.'],
                   ['05', 'Return to pay', 'Use the same email and upload proof.'],
@@ -565,8 +565,10 @@ export default function ShopWorkspaceMain({
                     const productInfo = buildProductInfo(p.name);
                     const productImage = getProductImageSrc(productInfo);
                     const productImageSrc = getRealProductImageSrc(p.name, p.imageUrl || '');
-                    const protectedKits = Math.floor((p.totalVials || 0) / 10);
-                    const looseVials = (p.totalVials || 0) % 10;
+                    const kitSize = Number(p.kitSize) >= 1 ? Number(p.kitSize) : 10;
+                    const isVialOnly = kitSize === 1;
+                    const protectedKits = Math.floor((p.totalVials || 0) / kitSize);
+                    const looseVials = (p.totalVials || 0) % kitSize;
                     const compactStatusText = p.statusKey === 'locked'
                       ? 'locked'
                       : p.statusKey === 'full'
@@ -625,8 +627,14 @@ export default function ShopWorkspaceMain({
                               <span className={`${p.statusKey === 'available' ? 'text-emerald-600' : p.statusKey === 'full' ? 'text-rose-500' : p.statusKey === 'locked' ? 'text-slate-400' : 'text-violet-500'}`}>
                                 {compactStatusText}
                               </span>
-                              <span className="text-pink-500">{protectedKits} kit</span>
-                              <span className="text-pink-400">{looseVials} loose</span>
+                              {isVialOnly ? (
+                                <span className="text-sky-500">per vial · no kit needed</span>
+                              ) : (
+                                <>
+                                  <span className="text-pink-500">{protectedKits} kit</span>
+                                  <span className="text-pink-400">{looseVials} loose</span>
+                                </>
+                              )}
                             </div>
                           </div>
 
@@ -646,7 +654,7 @@ export default function ShopWorkspaceMain({
                                 disabled={!isCartEditable || p.isClosed}
                               />
                             </label>
-                            <span className="text-[7px] font-bold text-slate-400 whitespace-nowrap">10 = 1 kit</span>
+                            <span className="text-[7px] font-bold text-slate-400 whitespace-nowrap">{isVialOnly ? 'sold per vial' : `${kitSize} = 1 kit`}</span>
                           </div>
                         </div>
                       </div>

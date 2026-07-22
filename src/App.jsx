@@ -32,6 +32,18 @@ import {
   normalizeCustomerEmail,
 } from './customer-lookup-helpers.js';
 import { buildArchiveMetadata, buildCustomerBatchHistoryRecords, buildGroupedHistoryView, buildHistoryArchiveRows } from './history-helpers';
+import {
+  SLOTS_PER_BATCH,
+  buildPackingRows,
+  buildProductPriorityAnalysis,
+  buildProductTotals,
+  compareOrdersNewestFirst,
+  compareOrdersOldestFirst,
+  computeManufacturerRow,
+  computeProductBoxState,
+  getKitSize,
+  maxVialsAllowed,
+} from './kit-math-helpers.js';
 
 const AdminOrderEditHost = lazy(() => import('./components/AdminOrderEditHost'));
 const ProfileViewerHost = lazy(() => import('./components/ProfileViewerHost'));
@@ -75,7 +87,6 @@ const getStorageServices = async () => {
   return storageServicesPromise;
 };
 
-const SLOTS_PER_BATCH = 10;
 const CHAT_RETENTION_MS = 24 * 60 * 60 * 1000;
 const HERO_CUTE_FLOATERS = [
   { id: 'unicorn', icon: '\uD83E\uDD84', label: 'unicorn', tone: 'from-white/90 to-pink-100/78', startX: 0.68, startY: 0.16, vx: -1.45, vy: 1.2, spin: -0.45 },
@@ -102,12 +113,6 @@ const PARTIAL_SHIP_OPTIONS = [
 ];
 const SHOP_ACCESS_STORAGE_KEY = 'bbp-shop-access-code';
 const createEmptyAddressForm = () => ({ shipOpt: '', partialShipPref: '', street: '', brgy: '', city: '', prov: '', zip: '', contact: '' });
-const compareOrdersOldestFirst = (left, right) => {
-  const timeDiff = Number(left?.timestamp || 0) - Number(right?.timestamp || 0);
-  if (timeDiff !== 0) return timeDiff;
-  return String(left?.id || '').localeCompare(String(right?.id || ''));
-};
-const compareOrdersNewestFirst = (left, right) => compareOrdersOldestFirst(right, left);
 const normalizeAccessCode = (value) => String(value || '').trim().toLowerCase();
 const normalizePartialShipPreference = (value) => {
   const cleaned = String(value || '').trim().toLowerCase();
@@ -320,7 +325,7 @@ function ShopHeroSection({
                 </div>
                 <div className="hero-stat rounded-[24px] px-4 py-3">
                   <p className="text-[9px] font-black uppercase tracking-[0.24em] text-pink-500">Kit Protection</p>
-                  <p className="mt-1 text-sm font-black text-[#4A042A]">Every 10 vials makes 1 kit</p>
+                  <p className="mt-1 text-sm font-black text-[#4A042A]">Every completed kit is protected</p>
                 </div>
               </div>
             </>
@@ -426,7 +431,7 @@ function ShopHeroSection({
               <div className="rounded-[24px] border border-[#ECD8E0] bg-white/72 px-4 py-4 backdrop-blur-sm">
                 <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#9E8A93]">Protected Kits</p>
                 <p className="mt-3 text-[1.9rem] font-black leading-none text-[#352C30]">{currentBatchProtectedKits}</p>
-                <p className="mt-2 text-[11px] font-semibold leading-snug text-[#63595D]">full 10-vial kits already locked in</p>
+                <p className="mt-2 text-[11px] font-semibold leading-snug text-[#63595D]">full kits already locked in</p>
               </div>
               <div className="rounded-[24px] border border-[#ECD8E0] bg-white/72 px-4 py-4 backdrop-blur-sm">
                 <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#9E8A93]">Open Spots</p>
@@ -481,7 +486,7 @@ const buildProductInfo = (productName) => {
   const tagBenefits = tags.flatMap(tag => TAG_BENEFIT_MAP[tag] || []);
   const benefits = Array.from(new Set([...(base.benefits || []), ...tagBenefits])).slice(0, 3);
   const shortDesc = base.desc.length > 120 ? `${base.desc.slice(0, 117)}...` : base.desc;
-  const protectionNote = "Full 10-vial kits are protected. If malayo na ang loose qty mo sa current open box, safe ka for now.";
+  const protectionNote = "Full kits are protected. If malayo na ang loose qty mo sa current open box, safe ka for now.";
 
   const productInfo = {
     name: base.name || productName,
@@ -752,6 +757,7 @@ export default function App() {
   const [customersTableSort, setCustomersTableSort] = useState({ key: 'name', direction: 'asc' });
   const [productsTableSort, setProductsTableSort] = useState({ key: 'name', direction: 'asc' });
   const [adminSettingsProductSearch, setAdminSettingsProductSearch] = useState('');
+  const [productPriceEdit, setProductPriceEdit] = useState({ id: null, name: '', vial: '', kit: '', kitSize: '' });
   const [cartInputDrafts, setCartInputDrafts] = useState({});
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
@@ -794,7 +800,7 @@ export default function App() {
   const [quickInfoProduct, setQuickInfoProduct] = useState(null);
   const POPULAR_CATEGORIES = ["All", "Weight Loss", "Healing", "Anti-Aging", "Muscle Growth", "Brain Health", "Skin"];
 
-  const [newProd, setNewProd] = useState({ name: '', kit: '', vial: '', max: '' });
+  const [newProd, setNewProd] = useState({ name: '', kit: '', vial: '', max: '', kitSize: '' });
   const [newAdmin, setNewAdmin] = useState({ name: '', banks: [{ label: '', details: '', qrFile: null }] });
   const [isScrolled, setIsScrolled] = useState(false);
   const configuredShopAccessCode = normalizeAccessCode(settings.shopAccessCode);
@@ -1021,13 +1027,7 @@ export default function App() {
 
   const ordersByEmail = useMemo(() => buildOrdersByEmail(orders), [orders]);
 
-  const productTotals = useMemo(() => {
-    const totals = {};
-    orders.forEach((order) => {
-      totals[order.product] = (totals[order.product] || 0) + Number(order.qty || 0);
-    });
-    return totals;
-  }, [orders]);
+  const productTotals = useMemo(() => buildProductTotals(orders), [orders]);
 
   const customerProductTotals = useMemo(() => {
     const totals = {};
@@ -1565,10 +1565,7 @@ export default function App() {
 
   const enrichedProducts = useMemo(() => {
     return products.map(p => {
-      const totalVials = productTotals[p.name] || 0;
-      const boxes = Math.floor(totalVials / SLOTS_PER_BATCH);
-      const slotsFilled = totalVials % SLOTS_PER_BATCH;
-      const slotsLeft = totalVials === 0 ? SLOTS_PER_BATCH : (slotsFilled === 0 ? 0 : SLOTS_PER_BATCH - slotsFilled);
+      const { kitSize, totalVials, boxes, slotsLeft } = computeProductBoxState(p, productTotals[p.name] || 0);
 
       const limitReached = p.maxBoxes > 0 && boxes >= p.maxBoxes;
       const isClosed = p.locked || settings.paymentsOpen || limitReached;
@@ -1581,7 +1578,7 @@ export default function App() {
       else if (slotsLeft === 0) { statusKey = 'available'; statusText = 'Next Box Open'; }
       else { statusKey = 'available'; statusText = `${slotsLeft} slots left`; }
 
-      return { ...p, totalVials, boxes, slotsLeft, isClosed, statusKey, statusText, openBatchLabel: (!isClosed) ? `Box ${boxes + 1}` : '' };
+      return { ...p, kitSize, totalVials, boxes, slotsLeft, isClosed, statusKey, statusText, openBatchLabel: (!isClosed) ? `Box ${boxes + 1}` : '' };
     }).sort((a, b) => a.name.localeCompare(b.name));
   }, [products, productTotals, settings.paymentsOpen]);
 
@@ -1592,143 +1589,10 @@ export default function App() {
 
   // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ NEW: Calculate exactly how many physical boxes will arrive from the supplier
   const totalPhysicalBoxesToReceive = useMemo(() => {
-    return enrichedProducts.reduce((sum, p) => sum + Math.ceil(p.totalVials / SLOTS_PER_BATCH), 0);
+    return enrichedProducts.reduce((sum, p) => sum + Math.ceil(p.totalVials / p.kitSize), 0);
   }, [enrichedProducts]);
 
-  const productPriorityAnalysis = useMemo(() => {
-    const groupedRows = {};
-    orders.forEach((order) => {
-      if (!groupedRows[order.product]) groupedRows[order.product] = [];
-      groupedRows[order.product].push({
-        ...order,
-        qty: Number(order.qty || 0),
-        timestamp: Number(order.timestamp || 0)
-      });
-    });
-
-    return Object.fromEntries(
-      Object.entries(groupedRows).map(([product, rows]) => {
-        const normalizedRows = rows
-          .filter((row) => Number(row.qty || 0) > 0)
-          .sort(compareOrdersOldestFirst);
-        const totalQty = normalizedRows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
-        const completedBoxes = Math.floor(totalQty / SLOTS_PER_BATCH);
-        const totalBoxes = Math.max(
-          Math.ceil(totalQty / SLOTS_PER_BATCH),
-          Number(productsByName[product]?.maxBoxes || 0),
-          1
-        );
-        const totalToTrim = totalQty % SLOTS_PER_BATCH;
-        const missingSlots = totalToTrim > 0 ? SLOTS_PER_BATCH - totalToTrim : 0;
-        const openBoxNumber = completedBoxes + 1;
-        const customerTotals = {};
-
-        normalizedRows.forEach((row) => {
-          customerTotals[row.email] = (customerTotals[row.email] || 0) + Number(row.qty || 0);
-        });
-
-        const customerKitAllocated = {};
-        const fragments = normalizedRows.map((row) => {
-          const customerTotal = Number(customerTotals[row.email] || 0);
-          const protectedTarget = Math.floor(customerTotal / SLOTS_PER_BATCH) * SLOTS_PER_BATCH;
-          const protectedRemaining = Math.max(protectedTarget - Number(customerKitAllocated[row.email] || 0), 0);
-          const protectedQty = Math.min(Number(row.qty || 0), protectedRemaining);
-          customerKitAllocated[row.email] = (customerKitAllocated[row.email] || 0) + protectedQty;
-          return {
-            row,
-            protectedQty,
-            looseQty: 0,
-            remainingQty: Math.max(Number(row.qty || 0) - protectedQty, 0)
-          };
-        });
-
-        fragments.forEach((fragment) => {
-          fragment.looseQty = Math.max(Number(fragment.remainingQty || 0), 0);
-        });
-
-        let trimRemaining = totalToTrim;
-        const victims = [];
-        const newestFragments = [...fragments].sort((left, right) => compareOrdersNewestFirst(left.row, right.row));
-
-        newestFragments.forEach((fragment) => {
-          if (trimRemaining <= 0) return;
-          const bucketQty = Number(fragment.looseQty || 0);
-          if (bucketQty <= 0) return;
-          const amountToRemove = Math.min(trimRemaining, bucketQty);
-          victims.push({
-            id: fragment.row.id,
-            prod: product,
-            boxNum: openBoxNumber,
-            missingSlots,
-            name: fragment.row.name,
-            email: fragment.row.email,
-            handle: fragment.row.handle,
-            qty: Number(fragment.row.qty || 0),
-            amountToRemove,
-            timestamp: Number(fragment.row.timestamp || 0),
-            priorityBucket: 'loose'
-          });
-          trimRemaining -= amountToRemove;
-        });
-
-        const customerBuckets = {};
-        let slotCursor = 0;
-        fragments.forEach((fragment) => {
-          const email = fragment.row.email;
-          if (!customerBuckets[email]) {
-            customerBuckets[email] = {
-              protectedQty: 0,
-              looseQty: 0,
-              likelySafeQty: 0,
-              atRiskQty: 0,
-              likelySafeBoxes: [],
-              atRiskBoxes: [],
-              totalQty: 0
-            };
-          }
-
-          customerBuckets[email].protectedQty += Number(fragment.protectedQty || 0);
-          customerBuckets[email].looseQty += Number(fragment.looseQty || 0);
-          customerBuckets[email].totalQty += Number(fragment.row.qty || 0);
-
-          slotCursor += Number(fragment.protectedQty || 0);
-
-          let looseRemaining = Number(fragment.looseQty || 0);
-          while (looseRemaining > 0) {
-            const boxNumber = Math.floor(slotCursor / SLOTS_PER_BATCH) + 1;
-            const usedSlots = slotCursor % SLOTS_PER_BATCH;
-            const slotsAvailable = usedSlots === 0 ? SLOTS_PER_BATCH : (SLOTS_PER_BATCH - usedSlots);
-            const allocatedQty = Math.min(looseRemaining, slotsAvailable);
-            const isOutsideCurrentOpenBox = boxNumber < openBoxNumber;
-
-            if (isOutsideCurrentOpenBox) {
-              customerBuckets[email].likelySafeQty += allocatedQty;
-              customerBuckets[email].likelySafeBoxes.push(boxNumber);
-            } else {
-              customerBuckets[email].atRiskQty += allocatedQty;
-              customerBuckets[email].atRiskBoxes.push(boxNumber);
-            }
-
-            looseRemaining -= allocatedQty;
-            slotCursor += allocatedQty;
-          }
-        });
-
-        return [product, {
-          product,
-          totalQty,
-          completedBoxes,
-          totalBoxes,
-          openBoxNumber,
-          missingSlots,
-          totalToTrim,
-          fragments,
-          victims,
-          customerBuckets
-        }];
-      })
-    );
-  }, [orders, productsByName]);
+  const productPriorityAnalysis = useMemo(() => buildProductPriorityAnalysis(orders, productsByName), [orders, productsByName]);
 
   const trimmingHitList = useMemo(() => {
     return Object.values(productPriorityAnalysis)
@@ -2404,7 +2268,7 @@ export default function App() {
         return compareTableValues(rank(a), rank(b), inventoryTableSort.direction) || a.name.localeCompare(b.name);
       }
       if (inventoryTableSort.key === 'expectedBoxes') {
-        return compareTableValues(Math.ceil(a.totalVials / SLOTS_PER_BATCH), Math.ceil(b.totalVials / SLOTS_PER_BATCH), inventoryTableSort.direction) || a.name.localeCompare(b.name);
+        return compareTableValues(Math.ceil(a.totalVials / a.kitSize), Math.ceil(b.totalVials / b.kitSize), inventoryTableSort.direction) || a.name.localeCompare(b.name);
       }
       return compareTableValues(a[inventoryTableSort.key], b[inventoryTableSort.key], inventoryTableSort.direction) || a.name.localeCompare(b.name);
     });
@@ -2446,38 +2310,8 @@ export default function App() {
 
   const packingRows = useMemo(() => {
     if (!needsPackingData) return [];
-    const rows = [];
-    Object.keys(filteredPackingOrders.reduce((acc, o) => {
-      if (!acc[o.product]) acc[o.product] = [];
-      acc[o.product].push(o);
-      return acc;
-    }, {})).sort().forEach(prod => {
-      let box = 1;
-      let slots = 10;
-      filteredPackingOrders.filter(o => o.product === prod).forEach(o => {
-        let q = o.qty;
-        while (q > 0) {
-          if (slots === 0) {
-            box += 1;
-            slots = 10;
-          }
-          const alloc = Math.min(q, slots);
-          slots -= alloc;
-          rows.push({
-            key: `${o.id}-${box}-${alloc}`,
-            product: prod,
-            box,
-            email: o.email,
-            name: o.name,
-            order: o,
-            take: alloc
-          });
-          q -= alloc;
-        }
-      });
-    });
-    return rows;
-  }, [needsPackingData, filteredPackingOrders]);
+    return buildPackingRows(filteredPackingOrders, productsByName);
+  }, [needsPackingData, filteredPackingOrders, productsByName]);
 
   const sortedPackingRows = useMemo(() => {
     if (!needsPackingData) return [];
@@ -3661,7 +3495,7 @@ export default function App() {
 
     if (pData.maxBoxes > 0) {
       const projectedTotal = requestedQty == null ? pData.totalVials : (pData.totalVials - savedQty + requestedQty);
-      const maxTotal = pData.maxBoxes * SLOTS_PER_BATCH;
+      const maxTotal = maxVialsAllowed(pData);
       const allowedQty = Math.max(0, maxTotal - (pData.totalVials - savedQty));
 
       if (projectedTotal > maxTotal || pData.statusText === 'Limit Reached') {
@@ -4046,7 +3880,7 @@ export default function App() {
           return;
         }
 
-        if (pData?.maxBoxes > 0 && (pData.totalVials - existingQty + qty) > (pData.maxBoxes * 10)) {
+        if (pData?.maxBoxes > 0 && (pData.totalVials - existingQty + qty) > maxVialsAllowed(pData)) {
           errors.push({ product: prodName, message: getAvailabilityMessage(prodName, pData, qty) });
         }
 
@@ -4584,7 +4418,8 @@ ${rowsXML.join("\n")}
     const headers = [
       "Product",
       "Total Vials Ordered",
-      "Full 10-Vial Kits",
+      "Full Kits",
+      "Vials Per Kit",
       "Boxes/Kits to Order",
       "Kit Price USD",
       "Vial Price USD",
@@ -4608,15 +4443,7 @@ ${rowsXML.join("\n")}
     let grandTotalManufacturerOrderUSD = 0;
 
     enrichedProducts.forEach((product) => {
-      const totalVials = Number(product.totalVials || 0);
-      const expectedBoxes = Math.ceil(totalVials / SLOTS_PER_BATCH);
-      const fullBoxes = Math.floor(totalVials / SLOTS_PER_BATCH);
-      const looseVials = totalVials % SLOTS_PER_BATCH;
-      const missingSlots = totalVials === 0 ? 0 : (looseVials === 0 ? 0 : (SLOTS_PER_BATCH - looseVials));
-      const vialPriceUSD = Number(product.pricePerVialUSD || 0);
-      const kitPriceUSD = Number(product.pricePerKitUSD || 0) || (vialPriceUSD * SLOTS_PER_BATCH);
-      const orderedVialsValueUSD = totalVials * vialPriceUSD;
-      const manufacturerOrderTotalUSD = expectedBoxes * kitPriceUSD;
+      const { totalVials, kitSize, expectedBoxes, fullBoxes, looseVials, missingSlots, vialPriceUSD, kitPriceUSD, orderedVialsValueUSD, manufacturerOrderTotalUSD } = computeManufacturerRow(product);
       const availability = product.locked ? 'Locked' : ((product.maxBoxes || 0) > 0 ? 'Capped' : 'Open');
       const capType = (product.maxBoxes || 0) > 0 ? (product.syncCapped ? 'Synced' : 'Manual') : '';
 
@@ -4649,6 +4476,7 @@ ${rowsXML.join("\n")}
         product.name,
         totalVials,
         fullBoxes,
+        kitSize,
         expectedBoxes,
         formatUSD(kitPriceUSD),
         formatUSD(vialPriceUSD),
@@ -4672,6 +4500,7 @@ ${rowsXML.join("\n")}
       "TOTAL",
       grandTotalVials,
       grandTotalFullBoxes,
+      '',
       grandTotalExpectedBoxes,
       '',
       '',
@@ -5114,7 +4943,7 @@ ${rowsXML.join("\n")}
     try {
       const updates = enrichedProducts.map(p => {
         const hasDemand = p.totalVials > 0;
-        const nextMaxBoxes = hasDemand ? Math.ceil(p.totalVials / SLOTS_PER_BATCH) : 0;
+        const nextMaxBoxes = hasDemand ? Math.ceil(p.totalVials / p.kitSize) : 0;
         const nextLocked = !hasDemand;
         const nextSyncCapped = true;
         const changed = (p.maxBoxes || 0) !== nextMaxBoxes || Boolean(p.locked) !== nextLocked;
@@ -5319,9 +5148,9 @@ ${rowsXML.join("\n")}
   }
 
   function downloadCSVTemplate() {
-    const headers = "Peptide Name,CODE,Price per KIT(USD),Price per vial (USD)\n";
-    const sampleRow1 = "5-amino-1mq 5mg,5AM,60.00,6.00\n";
-    const sampleRow2 = "BPC157 10mg,BC10,70.00,7.00\n";
+    const headers = "Peptide Name,CODE,Price per KIT(USD),Price per vial (USD),Vials per Kit (blank=10; 1=vial-only)\n";
+    const sampleRow1 = "5-amino-1mq 5mg,5AM,60.00,6.00,10\n";
+    const sampleRow2 = "BPC157 10mg,BC10,42.00,7.00,6\n";
     const blob = new Blob([headers + sampleRow1 + sampleRow2], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -5352,14 +5181,15 @@ ${rowsXML.join("\n")}
               const name = cols[0].replace(/^"|"$/g, '').trim();
               const kitPriceRaw = cols[2].replace(/[^0-9.]/g, '');
               const vialPriceRaw = cols[3].replace(/[^0-9.]/g, '');
+              const kitSize = getKitSize({ kitSize: (cols[4] || '').replace(/[^0-9]/g, '') });
 
               let kit = parseFloat(kitPriceRaw) || 0;
               let vial = parseFloat(vialPriceRaw) || 0;
 
-              if (kit === 0 && vial > 0) kit = vial * 10;
-              if (vial === 0 && kit > 0) vial = kit / 10;
+              if (kit === 0 && vial > 0) kit = vial * kitSize;
+              if (vial === 0 && kit > 0) vial = kit / kitSize;
 
-              newProducts.push({ name, pricePerKitUSD: kit, pricePerVialUSD: vial, locked: false, maxBoxes: 0, inventoryTotalVials: 0, inventoryBoxes: 0, inventorySlotsLeft: SLOTS_PER_BATCH, inventoryUpdatedAt: Date.now() });
+              newProducts.push({ name, pricePerKitUSD: kit, pricePerVialUSD: vial, kitSize, locked: false, maxBoxes: 0, inventoryTotalVials: 0, inventoryBoxes: 0, inventorySlotsLeft: SLOTS_PER_BATCH, inventoryUpdatedAt: Date.now() });
             }
           }
 
@@ -5403,11 +5233,16 @@ ${rowsXML.join("\n")}
   }
 
   async function handleAddProduct() {
-    if (!newProd.name || !newProd.vial) { showToast('Enter name and vial price!'); return; }
+    const name = String(newProd.name || '').trim();
+    if (!name || !newProd.vial) { showToast('Enter name and vial price!'); return; }
+    if (products.some(p => p.name.toLowerCase() === name.toLowerCase())) { showToast(`"${name}" already exists in the catalog.`); return; }
+    const kitSize = getKitSize({ kitSize: newProd.kitSize });
+    const kitPrice = Number(newProd.kit) || (Number(newProd.vial) * kitSize);
     await safeAwait(addDoc(collection(db, colPath('products')), {
-      name: newProd.name,
-      pricePerKitUSD: Number(newProd.kit) || (Number(newProd.vial) * 10),
+      name,
+      pricePerKitUSD: kitPrice,
       pricePerVialUSD: Number(newProd.vial),
+      kitSize,
       locked: false,
       maxBoxes: Number(newProd.max) || 0,
       inventoryTotalVials: 0,
@@ -5415,8 +5250,55 @@ ${rowsXML.join("\n")}
       inventorySlotsLeft: SLOTS_PER_BATCH,
       inventoryUpdatedAt: Date.now()
     }));
-    setNewProd({ name: '', kit: '', vial: '', max: '' });
+    await safeAwait(addDoc(collection(db, colPath('logs')), { timestamp: Date.now(), email: '', name: 'Admin', action: 'Added Product', details: `${name}: vial $${Number(newProd.vial).toFixed(2)}, kit $${kitPrice.toFixed(2)}, ${kitSize === 1 ? 'vial-only' : `${kitSize} vials/kit`}` }));
+    setNewProd({ name: '', kit: '', vial: '', max: '', kitSize: '' });
     showToast('Product added.');
+  }
+
+  async function handleProductPriceSave(p) {
+    // Hard gate: never re-price while the payment window is open. Frozen buyers are
+    // safe, but admin order-edit and packing/trimming still read live price (see 5660+/5839+).
+    if (settings.paymentsOpen) {
+      showToast('Payments are open — close payments before editing products.');
+      setProductPriceEdit({ id: null, name: '', vial: '', kit: '', kitSize: '' });
+      return;
+    }
+    const newVial = Number(productPriceEdit.vial);
+    if (!Number.isFinite(newVial) || newVial <= 0) { showToast('Vial price must be a number above 0.'); return; }
+    const kitSizeRaw = String(productPriceEdit.kitSize).trim();
+    const newKitSize = kitSizeRaw === '' ? getKitSize(p) : Math.floor(Number(kitSizeRaw));
+    if (!Number.isFinite(newKitSize) || newKitSize < 1) { showToast('Kit size must be 1 or more vials (1 = vial-only).'); return; }
+    const kitRaw = String(productPriceEdit.kit).trim();
+    const newKit = kitRaw === '' ? (newVial * newKitSize) : Number(kitRaw);
+    if (!Number.isFinite(newKit) || newKit < 0) { showToast('Kit price must be 0 or a positive number.'); return; }
+    const newName = String(productPriceEdit.name || '').trim() || p.name;
+    const renamed = newName !== p.name;
+    if (renamed && products.some(other => other.id !== p.id && other.name.toLowerCase() === newName.toLowerCase())) {
+      showToast(`"${newName}" already exists in the catalog.`);
+      return;
+    }
+    const oldVial = Number(p.pricePerVialUSD) || 0;
+    const oldKitSize = getKitSize(p);
+    const oldKit = Number(p.pricePerKitUSD) || (oldVial * oldKitSize);
+    await safeAwait(updateDoc(doc(db, colPath('products'), p.id), { name: newName, pricePerVialUSD: newVial, pricePerKitUSD: newKit, kitSize: newKitSize }));
+    if (renamed) {
+      // Orders join products by name — rename must cascade or saved rows go orphan.
+      const affected = orders.filter(o => o.product === p.name);
+      for (let i = 0; i < affected.length; i += 400) {
+        const batch = writeBatch(db);
+        affected.slice(i, i + 400).forEach(o => batch.update(doc(db, colPath('orders'), o.id), { product: newName }));
+        await safeAwait(batch.commit());
+      }
+    }
+    await safeAwait(addDoc(collection(db, colPath('logs')), {
+      timestamp: Date.now(),
+      email: '',
+      name: 'Admin',
+      action: (renamed || newKitSize !== oldKitSize) ? 'Edited Product' : 'Edited Product Price',
+      details: `${renamed ? `${p.name}→${newName}, ` : `${p.name}: `}vial $${oldVial.toFixed(2)}→$${newVial.toFixed(2)}, kit $${oldKit.toFixed(2)}→$${newKit.toFixed(2)}${newKitSize !== oldKitSize ? `, kit size ${oldKitSize}→${newKitSize} vials` : ''}`
+    }));
+    setProductPriceEdit({ id: null, name: '', vial: '', kit: '', kitSize: '' });
+    showToast(renamed ? 'Product updated (orders re-linked).' : 'Product updated.');
   }
 
   const handleAddAdmin = async () => {
@@ -5864,7 +5746,7 @@ ${rowsXML.join("\n")}
       .map((row) => ({
         product: row.product,
         protectedQty: row.protectedQty,
-        protectedKits: Math.floor(row.protectedQty / 10)
+        protectedKits: Math.floor(row.protectedQty / getKitSize(productsByName[row.product]))
       }))
       .filter((row) => row.protectedQty > 0);
     const likelySafeProducts = protectionRows
@@ -5987,7 +5869,7 @@ ${rowsXML.join("\n")}
       return {
         tone: 'emerald',
         label: `${totalProtected} vial${totalProtected === 1 ? '' : 's'} safe na`,
-        detail: 'Safe ang saved qty mo ngayon. Full 10-vial kit lane ito.',
+        detail: 'Safe ang saved qty mo ngayon. Full kit lane ito.',
         note: settings.addOnly || settings.reviewStageOpen || settings.paymentsOpen
           ? 'Meaning ng labels: status is based on box position, not just vial count. Same product can appear in both sections if part of your qty is earlier and part is near the tail.'
           : 'Meaning ng labels: status is based on box position, not just vial count. Same product can appear in both sections if part of your qty is earlier and part is near the tail.',
@@ -6085,7 +5967,7 @@ ${rowsXML.join("\n")}
     : 'Save your address early from Profile & Address.';
   const orderCardProtectionCopy = settings.addOnly
     ? 'Only increases are allowed right now so loose kits do not get worse.'
-    : '10 vials = protected. If malayo na ang loose qty mo sa current open box, safe ka for now.';
+    : 'Full kits = protected. If malayo na ang loose qty mo sa current open box, safe ka for now.';
   const protectionAnnouncement = settings.addOnly
     ? {
       title: 'Add-Only Rule',
@@ -8113,7 +7995,7 @@ ${rowsXML.join("\n")}
                                 </td>
                                 <td className="text-center">{p.totalVials}</td>
                                 <td className="text-center font-black text-pink-600">{p.boxes}</td>
-                                <td className="text-center font-black text-indigo-600">{Math.ceil(p.totalVials / SLOTS_PER_BATCH)}</td>
+                                <td className="text-center font-black text-indigo-600">{Math.ceil(p.totalVials / p.kitSize)}</td>
                                 <td className="text-center">
                                   <div className="flex flex-col items-center gap-1">
                                     <input type="number" className="w-16 border border-[#FFC0CB] bg-[#FFF0F5] rounded-lg p-1 text-center text-xs font-bold text-[#D6006E] outline-none focus:border-[#FF1493] focus:bg-white transition-colors" value={p.maxBoxes || ''} placeholder="0" onChange={e => handleManualMaxBoxesChange(p, Number(e.target.value) || 0)} />
@@ -8711,7 +8593,7 @@ ${rowsXML.join("\n")}
                             <tr key={row.key}>
                               <td className="font-black text-[#4A042A]">
                                 {row.product}
-                                <div className="text-[9px] text-indigo-500 uppercase tracking-widest mt-0.5">Expect {Math.ceil((enrichedProductsByName[row.product]?.totalVials || 0) / SLOTS_PER_BATCH)} Box(es)</div>
+                                <div className="text-[9px] text-indigo-500 uppercase tracking-widest mt-0.5">Expect {Math.ceil((enrichedProductsByName[row.product]?.totalVials || 0) / getKitSize(enrichedProductsByName[row.product]))} Box(es)</div>
                               </td>
                               <td className="text-center font-bold text-pink-600">Box {row.box}</td>
                               <td>
@@ -9431,16 +9313,55 @@ ${rowsXML.join("\n")}
                         </div>
                       </div>
 
+                      <div className="flex flex-wrap items-end gap-2 mb-6 bg-emerald-50/60 border-2 border-emerald-100 rounded-2xl p-4">
+                        <div className="flex-1 min-w-[180px]">
+                          <label className="block text-[10px] font-black text-emerald-600 uppercase tracking-wider mb-1">New Product Name</label>
+                          <input type="text" value={newProd.name} onChange={e => setNewProd(s => ({ ...s, name: e.target.value }))} placeholder="e.g. BPC157 10mg" className={`${adminInputSm} w-full m-0 py-2`} />
+                        </div>
+                        <div className="w-24">
+                          <label className="block text-[10px] font-black text-emerald-600 uppercase tracking-wider mb-1">Vial $</label>
+                          <input type="number" step="0.01" min="0" value={newProd.vial} onChange={e => setNewProd(s => ({ ...s, vial: e.target.value }))} placeholder="6.00" className={`${adminInputSm} w-full m-0 py-2`} />
+                        </div>
+                        <div className="w-24">
+                          <label className="block text-[10px] font-black text-emerald-600 uppercase tracking-wider mb-1">Vials/Kit</label>
+                          <input type="number" step="1" min="1" value={newProd.kitSize} onChange={e => setNewProd(s => ({ ...s, kitSize: e.target.value }))} placeholder="10" title="Vials in one kit. Blank = 10. Set 1 for vial-only products (no kit, no open-box risk)." className={`${adminInputSm} w-full m-0 py-2`} />
+                        </div>
+                        <div className="w-24">
+                          <label className="block text-[10px] font-black text-emerald-600 uppercase tracking-wider mb-1">Kit $</label>
+                          <input type="number" step="0.01" min="0" value={newProd.kit} onChange={e => setNewProd(s => ({ ...s, kit: e.target.value }))} placeholder="Auto" title="Leave blank = vial price × kit size" className={`${adminInputSm} w-full m-0 py-2`} />
+                        </div>
+                        <div className="w-24">
+                          <label className="block text-[10px] font-black text-emerald-600 uppercase tracking-wider mb-1">Max Boxes</label>
+                          <input type="number" step="1" min="0" value={newProd.max} onChange={e => setNewProd(s => ({ ...s, max: e.target.value }))} placeholder="0 = open" title="0 = no cap" className={`${adminInputSm} w-full m-0 py-2`} />
+                        </div>
+                        <button onClick={handleAddProduct} className="bg-emerald-500 text-white px-5 py-2 rounded-xl font-black text-xs uppercase tracking-wider hover:bg-emerald-600 transition-colors shadow-sm">+ Add Product</button>
+                      </div>
+
                       <div className="admin-grid-scroll overflow-x-auto border-2 border-pink-100 rounded-2xl mb-6 max-h-[500px] overflow-y-auto shadow-inner">
                         <table className="w-full text-sm text-left custom-table compact-table">
                           <thead className="sticky top-0 shadow-sm bg-[#FFF0F5] z-10">
-                            <tr>{renderSortableHeader('Name', 'name', productsTableSort, setProductsTableSort)}{renderSortableHeader('Price (Vial)', 'price', productsTableSort, setProductsTableSort)}<th className="text-center">Delete</th></tr>
+                            <tr>{renderSortableHeader('Name', 'name', productsTableSort, setProductsTableSort)}{renderSortableHeader('Price (Vial)', 'price', productsTableSort, setProductsTableSort)}<th className="text-center">Kit</th><th className="text-center">Edit</th><th className="text-center">Delete</th></tr>
                           </thead>
                           <tbody className="bg-white">
                             {sortedSettingsProducts.map(p => (
                               <tr key={p.id} className="border-b border-gray-100 hover:bg-slate-50 transition-colors">
                                 <td className="font-bold text-[#4A042A] text-sm">{p.name}</td>
                                 <td className="text-[#D6006E] font-bold text-sm">${p.pricePerVialUSD.toFixed(2)}</td>
+                                <td className="text-center text-xs font-bold text-slate-500">{getKitSize(p) === 1 ? <span className="text-sky-600">Vial only</span> : `${getKitSize(p)} vials`}</td>
+                                <td className="text-center">
+                                  {productPriceEdit.id === p.id ? (
+                                    <div className="flex gap-1 justify-center items-center flex-wrap animate-fadeIn bg-pink-50 p-1 rounded-lg border border-pink-200">
+                                      <input type="text" value={productPriceEdit.name} onChange={e => setProductPriceEdit(s => ({ ...s, name: e.target.value }))} placeholder="Name" title="Product name — renaming re-links saved orders" className={`${adminInputSm} w-32 m-0 py-1 text-xs`} />
+                                      <input type="number" step="0.01" min="0" value={productPriceEdit.vial} onChange={e => setProductPriceEdit(s => ({ ...s, vial: e.target.value }))} placeholder="Vial $" title="Price per vial (USD)" className={`${adminInputSm} w-16 m-0 py-1 text-xs`} />
+                                      <input type="number" step="0.01" min="0" value={productPriceEdit.kit} onChange={e => setProductPriceEdit(s => ({ ...s, kit: e.target.value }))} placeholder="Kit $" title="Price per full kit (USD). Leave blank = vial × kit size." className={`${adminInputSm} w-16 m-0 py-1 text-xs`} />
+                                      <input type="number" step="1" min="1" value={productPriceEdit.kitSize} onChange={e => setProductPriceEdit(s => ({ ...s, kitSize: e.target.value }))} placeholder="V/Kit" title="Vials per kit. 1 = vial-only (no kit, no open-box risk)." className={`${adminInputSm} w-14 m-0 py-1 text-xs`} />
+                                      <button onClick={() => handleProductPriceSave(p)} className="bg-emerald-500 text-white px-2 py-1 rounded text-[9px] font-black hover:bg-emerald-600">SAVE</button>
+                                      <button onClick={() => setProductPriceEdit({ id: null, name: '', vial: '', kit: '', kitSize: '' })} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[9px] font-black hover:bg-slate-300">NO</button>
+                                    </div>
+                                  ) : (
+                                    <button onClick={() => setProductPriceEdit({ id: p.id, name: p.name || '', vial: String(p.pricePerVialUSD ?? ''), kit: p.pricePerKitUSD != null ? String(p.pricePerKitUSD) : '', kitSize: String(getKitSize(p)) })} disabled={settings.paymentsOpen} title={settings.paymentsOpen ? 'Close payments before editing products' : 'Edit name / prices / kit size'} className={`bg-transparent border-none p-1 transition-transform ${settings.paymentsOpen ? 'text-slate-200 cursor-not-allowed' : 'text-slate-300 hover:text-pink-500 hover:scale-110'}`}><Edit3 size={16} /></button>
+                                  )}
+                                </td>
                                 <td className="text-center">
                                   {confirmAction.type === 'deleteProduct' && confirmAction.id === p.id ? (
                                     <div className="flex gap-1 justify-center animate-fadeIn bg-rose-50 p-1 rounded-lg border border-rose-200">
@@ -9453,7 +9374,7 @@ ${rowsXML.join("\n")}
                                 </td>
                               </tr>
                             ))}
-                            {sortedSettingsProducts.length === 0 && <tr><td colSpan="3" className="text-center p-8 text-pink-300 font-bold italic">No products found.</td></tr>}
+                            {sortedSettingsProducts.length === 0 && <tr><td colSpan="5" className="text-center p-8 text-pink-300 font-bold italic">No products found.</td></tr>}
                           </tbody>
                         </table>
                       </div>
