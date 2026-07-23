@@ -757,7 +757,7 @@ export default function App() {
   const [customersTableSort, setCustomersTableSort] = useState({ key: 'name', direction: 'asc' });
   const [productsTableSort, setProductsTableSort] = useState({ key: 'name', direction: 'asc' });
   const [adminSettingsProductSearch, setAdminSettingsProductSearch] = useState('');
-  const [productPriceEdit, setProductPriceEdit] = useState({ id: null, name: '', vial: '', kitSize: '' });
+  const [productRowDrafts, setProductRowDrafts] = useState({});
   const [cartInputDrafts, setCartInputDrafts] = useState({});
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
@@ -5255,21 +5255,37 @@ ${rowsXML.join("\n")}
     showToast('Product added.');
   }
 
-  async function handleProductPriceSave(p) {
+  const getProductRowDraft = (p) => productRowDrafts[p.id] || { name: p.name || '', vial: String(p.pricePerVialUSD ?? ''), kitSize: String(getKitSize(p)) };
+
+  const setProductRowDraftField = (p, field, value) => setProductRowDrafts(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || { name: p.name || '', vial: String(p.pricePerVialUSD ?? ''), kitSize: String(getKitSize(p)) }), [field]: value } }));
+
+  const clearProductRowDraft = (id) => setProductRowDrafts(prev => { const next = { ...prev }; delete next[id]; return next; });
+
+  const isProductRowDirty = (p) => {
+    const d = productRowDrafts[p.id];
+    if (!d) return false;
+    return String(d.name).trim() !== p.name
+      || Number(d.vial) !== Number(p.pricePerVialUSD)
+      || Math.floor(Number(d.kitSize)) !== getKitSize(p);
+  };
+
+  async function handleProductRowSave(p) {
     // Hard gate: never re-price while the payment window is open. Frozen buyers are
     // safe, but admin order-edit and packing/trimming still read live price (see 5660+/5839+).
     if (settings.paymentsOpen) {
       showToast('Payments are open — close payments before editing products.');
-      setProductPriceEdit({ id: null, name: '', vial: '', kitSize: '' });
+      clearProductRowDraft(p.id);
       return;
     }
-    const newVial = Number(productPriceEdit.vial);
+    if (!isProductRowDirty(p)) { clearProductRowDraft(p.id); return; }
+    const draft = getProductRowDraft(p);
+    const newVial = Number(draft.vial);
     if (!Number.isFinite(newVial) || newVial <= 0) { showToast('Vial price must be a number above 0.'); return; }
-    const kitSizeRaw = String(productPriceEdit.kitSize).trim();
+    const kitSizeRaw = String(draft.kitSize).trim();
     const newKitSize = kitSizeRaw === '' ? getKitSize(p) : Math.floor(Number(kitSizeRaw));
     if (!Number.isFinite(newKitSize) || newKitSize < 1) { showToast('Kit size must be 1 or more vials (1 = vial-only).'); return; }
     const newKit = newVial * newKitSize; // kit price is always derived, never hand-set
-    const newName = String(productPriceEdit.name || '').trim() || p.name;
+    const newName = String(draft.name || '').trim() || p.name;
     const renamed = newName !== p.name;
     if (renamed && products.some(other => other.id !== p.id && other.name.toLowerCase() === newName.toLowerCase())) {
       showToast(`"${newName}" already exists in the catalog.`);
@@ -5295,7 +5311,7 @@ ${rowsXML.join("\n")}
       action: (renamed || newKitSize !== oldKitSize) ? 'Edited Product' : 'Edited Product Price',
       details: `${renamed ? `${p.name}→${newName}, ` : `${p.name}: `}vial $${oldVial.toFixed(2)}→$${newVial.toFixed(2)}, kit $${oldKit.toFixed(2)}→$${newKit.toFixed(2)}${newKitSize !== oldKitSize ? `, kit size ${oldKitSize}→${newKitSize} vials` : ''}`
     }));
-    setProductPriceEdit({ id: null, name: '', vial: '', kitSize: '' });
+    clearProductRowDraft(p.id);
     showToast(renamed ? 'Product updated (orders re-linked).' : 'Product updated.');
   }
 
@@ -9340,55 +9356,67 @@ ${rowsXML.join("\n")}
                       <div className="admin-grid-scroll overflow-x-auto border-2 border-pink-100 rounded-2xl mb-6 max-h-[500px] overflow-y-auto shadow-inner">
                         <table className="w-full text-sm text-left custom-table compact-table">
                           <thead className="sticky top-0 shadow-sm bg-[#FFF0F5] z-10">
-                            <tr>{renderSortableHeader('Name', 'name', productsTableSort, setProductsTableSort)}{renderSortableHeader('Price (Vial)', 'price', productsTableSort, setProductsTableSort)}<th className="text-center">Kit</th><th className="text-center">Edit</th><th className="text-center">Delete</th></tr>
+                            <tr>{renderSortableHeader('Name', 'name', productsTableSort, setProductsTableSort)}{renderSortableHeader('Vial $', 'price', productsTableSort, setProductsTableSort)}<th className="text-center">Vials/Kit</th><th className="text-center">Kit $ (auto)</th><th className="text-center">Edit</th><th className="text-center">Delete</th></tr>
                           </thead>
                           <tbody className="bg-white">
-                            {sortedSettingsProducts.map(p => (
-                              <tr key={p.id} className="border-b border-gray-100 hover:bg-slate-50 transition-colors">
-                                <td className="font-bold text-[#4A042A] text-sm">{p.name}</td>
-                                <td className="text-[#D6006E] font-bold text-sm">${p.pricePerVialUSD.toFixed(2)}</td>
-                                <td className="text-center text-xs font-bold text-slate-500">{getKitSize(p) === 1 ? <span className="text-sky-600">Vial only</span> : `${getKitSize(p)} vials · $${(p.pricePerVialUSD * getKitSize(p)).toFixed(2)}`}</td>
-                                <td className="text-center">
-                                  {productPriceEdit.id === p.id ? (
-                                    <div className="flex gap-2 justify-center items-end flex-wrap animate-fadeIn bg-pink-50 p-2 rounded-lg border border-pink-200">
-                                      <div className="flex flex-col items-start">
-                                        <label className="text-[8px] font-black uppercase tracking-wider text-pink-400 mb-0.5">Name</label>
-                                        <input type="text" value={productPriceEdit.name} onChange={e => setProductPriceEdit(s => ({ ...s, name: e.target.value }))} title="Product name — renaming re-links saved orders" className={`${adminInputSm} w-32 m-0 py-1 text-xs`} />
+                            {sortedSettingsProducts.map(p => {
+                              const editing = Boolean(productRowDrafts[p.id]);
+                              const draft = getProductRowDraft(p);
+                              const dirty = isProductRowDirty(p);
+                              const draftKitSize = getKitSize({ kitSize: draft.kitSize });
+                              const liveKitSize = getKitSize(p);
+                              return (
+                                <tr key={p.id} className={`border-b border-gray-100 transition-colors ${editing ? 'bg-amber-50/60' : 'hover:bg-slate-50'}`}>
+                                  <td>
+                                    {editing ? (
+                                      <input type="text" value={draft.name} onChange={e => setProductRowDraftField(p, 'name', e.target.value)} title="Product name — renaming re-links saved orders" className={`${adminInputSm} w-full min-w-[160px] m-0 py-1.5 text-sm font-bold text-[#4A042A] ${dirty ? 'border-amber-300' : ''}`} />
+                                    ) : (
+                                      <span className="font-bold text-[#4A042A] text-sm">{p.name}</span>
+                                    )}
+                                  </td>
+                                  <td className="w-24">
+                                    {editing ? (
+                                      <input type="number" step="0.01" min="0" value={draft.vial} onChange={e => setProductRowDraftField(p, 'vial', e.target.value)} title="Price per vial (USD)" className={`${adminInputSm} w-20 m-0 py-1.5 text-sm font-bold text-[#D6006E] ${dirty ? 'border-amber-300' : ''}`} />
+                                    ) : (
+                                      <span className="text-[#D6006E] font-bold text-sm">${p.pricePerVialUSD.toFixed(2)}</span>
+                                    )}
+                                  </td>
+                                  <td className="text-center w-20">
+                                    {editing ? (
+                                      <input type="number" step="1" min="1" value={draft.kitSize} onChange={e => setProductRowDraftField(p, 'kitSize', e.target.value)} title="Vials per kit. 1 = vial-only (no kit, no open-box risk)." className={`${adminInputSm} w-16 m-0 py-1.5 text-sm font-bold text-center ${dirty ? 'border-amber-300' : ''}`} />
+                                    ) : (
+                                      <span className="text-xs font-bold text-slate-500">{liveKitSize === 1 ? <span className="text-sky-600">Vial only</span> : liveKitSize}</span>
+                                    )}
+                                  </td>
+                                  <td className="text-center text-xs font-black text-slate-500 whitespace-nowrap">
+                                    {(editing ? draftKitSize : liveKitSize) === 1
+                                      ? <span className="text-sky-600">—</span>
+                                      : `$${((editing ? (Number(draft.vial) || 0) : (Number(p.pricePerVialUSD) || 0)) * (editing ? draftKitSize : liveKitSize)).toFixed(2)}`}
+                                  </td>
+                                  <td className="text-center">
+                                    {editing ? (
+                                      <div className="flex gap-1 justify-center animate-fadeIn">
+                                        <button onClick={() => handleProductRowSave(p)} title={dirty ? 'Save changes' : 'No changes yet — closes edit'} className={`${dirty ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-slate-300'} text-white px-2.5 py-1 rounded text-[9px] font-black flex items-center gap-1`}><Save size={11} /> SAVE</button>
+                                        <button onClick={() => clearProductRowDraft(p.id)} title="Cancel — undo changes" className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[9px] font-black hover:bg-slate-300"><RotateCcw size={11} /></button>
                                       </div>
-                                      <div className="flex flex-col items-start">
-                                        <label className="text-[8px] font-black uppercase tracking-wider text-pink-400 mb-0.5">Vial $</label>
-                                        <input type="number" step="0.01" min="0" value={productPriceEdit.vial} onChange={e => setProductPriceEdit(s => ({ ...s, vial: e.target.value }))} title="Price per vial (USD)" className={`${adminInputSm} w-16 m-0 py-1 text-xs`} />
+                                    ) : (
+                                      <button onClick={() => setProductRowDraftField(p, 'name', p.name || '')} disabled={settings.paymentsOpen} title={settings.paymentsOpen ? 'Close payments before editing products' : 'Edit this row inline'} className={`bg-transparent border-none p-1 transition-transform ${settings.paymentsOpen ? 'text-slate-200 cursor-not-allowed' : 'text-slate-300 hover:text-pink-500 hover:scale-110'}`}><Edit3 size={16} /></button>
+                                    )}
+                                  </td>
+                                  <td className="text-center">
+                                    {confirmAction.type === 'deleteProduct' && confirmAction.id === p.id ? (
+                                      <div className="flex gap-1 justify-center animate-fadeIn bg-rose-50 p-1 rounded-lg border border-rose-200">
+                                        <button onClick={() => { safeAwait(deleteDoc(doc(db, colPath('products'), p.id))); setConfirmAction({ type: null, id: null }); }} className="bg-rose-500 text-white px-2 py-1 rounded text-[9px] font-black hover:bg-rose-600">YES</button>
+                                        <button onClick={() => setConfirmAction({ type: null, id: null })} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[9px] font-black hover:bg-slate-300">NO</button>
                                       </div>
-                                      <div className="flex flex-col items-start">
-                                        <label className="text-[8px] font-black uppercase tracking-wider text-pink-400 mb-0.5">Vials/Kit</label>
-                                        <input type="number" step="1" min="1" value={productPriceEdit.kitSize} onChange={e => setProductPriceEdit(s => ({ ...s, kitSize: e.target.value }))} title="Vials per kit. 1 = vial-only (no kit, no open-box risk)." className={`${adminInputSm} w-14 m-0 py-1 text-xs`} />
-                                      </div>
-                                      <div className="flex flex-col items-start pb-1">
-                                        <span className="text-[8px] font-black uppercase tracking-wider text-slate-400 mb-0.5">Kit $ (auto)</span>
-                                        <span className="text-[11px] font-black text-slate-600">
-                                          {getKitSize({ kitSize: productPriceEdit.kitSize }) === 1 ? 'vial-only' : `$${((Number(productPriceEdit.vial) || 0) * getKitSize({ kitSize: productPriceEdit.kitSize })).toFixed(2)}`}
-                                        </span>
-                                      </div>
-                                      <button onClick={() => handleProductPriceSave(p)} className="bg-emerald-500 text-white px-2 py-1.5 rounded text-[9px] font-black hover:bg-emerald-600">SAVE</button>
-                                      <button onClick={() => setProductPriceEdit({ id: null, name: '', vial: '', kitSize: '' })} className="bg-slate-200 text-slate-700 px-2 py-1.5 rounded text-[9px] font-black hover:bg-slate-300">NO</button>
-                                    </div>
-                                  ) : (
-                                    <button onClick={() => setProductPriceEdit({ id: p.id, name: p.name || '', vial: String(p.pricePerVialUSD ?? ''), kitSize: String(getKitSize(p)) })} disabled={settings.paymentsOpen} title={settings.paymentsOpen ? 'Close payments before editing products' : 'Edit name / vial price / kit size'} className={`bg-transparent border-none p-1 transition-transform ${settings.paymentsOpen ? 'text-slate-200 cursor-not-allowed' : 'text-slate-300 hover:text-pink-500 hover:scale-110'}`}><Edit3 size={16} /></button>
-                                  )}
-                                </td>
-                                <td className="text-center">
-                                  {confirmAction.type === 'deleteProduct' && confirmAction.id === p.id ? (
-                                    <div className="flex gap-1 justify-center animate-fadeIn bg-rose-50 p-1 rounded-lg border border-rose-200">
-                                      <button onClick={() => { safeAwait(deleteDoc(doc(db, colPath('products'), p.id))); setConfirmAction({ type: null, id: null }); }} className="bg-rose-500 text-white px-2 py-1 rounded text-[9px] font-black hover:bg-rose-600">YES</button>
-                                      <button onClick={() => setConfirmAction({ type: null, id: null })} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[9px] font-black hover:bg-slate-300">NO</button>
-                                    </div>
-                                  ) : (
-                                    <button onClick={() => setConfirmAction({ type: 'deleteProduct', id: p.id })} className="text-slate-300 hover:text-rose-500 hover:scale-110 transition-transform bg-transparent border-none p-1"><Trash size={16} /></button>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                            {sortedSettingsProducts.length === 0 && <tr><td colSpan="5" className="text-center p-8 text-pink-300 font-bold italic">No products found.</td></tr>}
+                                    ) : (
+                                      <button onClick={() => setConfirmAction({ type: 'deleteProduct', id: p.id })} className="text-slate-300 hover:text-rose-500 hover:scale-110 transition-transform bg-transparent border-none p-1"><Trash size={16} /></button>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {sortedSettingsProducts.length === 0 && <tr><td colSpan="6" className="text-center p-8 text-pink-300 font-bold italic">No products found.</td></tr>}
                           </tbody>
                         </table>
                       </div>
