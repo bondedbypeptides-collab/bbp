@@ -36,7 +36,7 @@ export default function ProofModalHost({
                   customerList.filter((customer) => customer.proofUrl).map((customer) => (
                     <div key={customer.email} className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col group">
                       <button onClick={() => onOpenFullScreenProof(customer.proofUrl)} className="bbp-focus-ring flex-1 min-h-[150px] bg-slate-100 rounded-xl overflow-hidden mb-2 relative cursor-zoom-in border-none p-0 m-0">
-                        <img src={customer.proofUrl} alt="Proof" className="absolute inset-0 w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
+                        <img src={customer.proofUrl} alt="Proof" loading="lazy" decoding="async" className="absolute inset-0 w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
                       </button>
                       <p className="text-[10px] font-black text-slate-800 truncate">{customer.name}</p>
                       <p className="text-[9px] text-slate-400 truncate">{customer.email}</p>

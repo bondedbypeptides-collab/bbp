@@ -58,7 +58,7 @@ export default function ShopCheckoutHost({
                 {canShowPaymentRoute ? (
                   <div className="flex flex-col gap-2">
                     {currentPaymentRoute.bankQr ? (
-                      <img src={currentPaymentRoute.bankQr} alt="QR Code" className="w-full max-w-[160px] mx-auto rounded-lg border border-slate-100" />
+                      <img src={currentPaymentRoute.bankQr} alt="QR Code" decoding="async" className="w-full max-w-[160px] mx-auto rounded-lg border border-slate-100" />
                     ) : null}
                     {currentPaymentRoute.bankDetails ? (
                       <div className="bg-slate-50 p-2 rounded border border-slate-100 text-center">

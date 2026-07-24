@@ -561,7 +561,7 @@ export default function ShopWorkspaceMain({
                     const active = cart.v > 0;
                     const exist = existingMap[p.name] || 0;
                     const isTouched = Boolean(cartTouchedProducts?.[p.name]);
-                    const visibleQty = cartInputDrafts[p.name] ?? (isTouched ? (cart.v || '') : (cart.v || exist || ''));
+                    const visibleQty = cartInputDrafts[p.name] ?? (isTouched ? (cart.v || '') : (exist || cart.v || ''));
                     const productInfo = buildProductInfo(p.name);
                     const productImage = getProductImageSrc(productInfo);
                     const productImageSrc = getRealProductImageSrc(p.name, p.imageUrl || '');
@@ -589,7 +589,7 @@ export default function ShopWorkspaceMain({
                         key={p.id}
                         data-name={p.name}
                         onClick={!isCartEditable ? () => showToast(isReviewStageOpen ? 'Review stage is live. Buyers cannot change quantities right now.' : 'This order is locked right now.', 5000) : (p.isClosed ? () => showToast(getAvailabilityMessage(p.name, p), 6000) : undefined)}
-                        className={`relative p-2 sm:p-2.5 rounded-2xl border-2 transition-all duration-300 overflow-hidden ${bgClass} ${(!isCartEditable || p.isClosed) ? 'cursor-not-allowed' : ''}`}
+                        className={`defer-render-card relative p-2 sm:p-2.5 rounded-2xl border-2 transition-all duration-300 overflow-hidden ${bgClass} ${(!isCartEditable || p.isClosed) ? 'cursor-not-allowed' : ''}`}
                       >
                         {exist > 0 && (
                           <div className="bg-[#22C55E] text-white text-[9px] font-black uppercase px-2.5 py-1 -mx-2.5 sm:-mx-3 -mt-2.5 sm:-mt-3 mb-2 flex justify-between items-center shadow-sm">
@@ -604,7 +604,7 @@ export default function ShopWorkspaceMain({
                         )}
 
                         <div className="grid grid-cols-[40px_1fr_62px] gap-2 items-center">
-                          <img src={productImageSrc} alt={`${p.name} vial`} onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = productImage; }} className="w-[40px] h-[52px] shrink-0 rounded-lg border border-pink-100 bg-white object-cover shadow-sm" />
+                          <img src={productImageSrc} alt={`${p.name} vial`} loading="lazy" decoding="async" onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = productImage; }} className="w-[40px] h-[52px] shrink-0 rounded-lg border border-pink-100 bg-white object-cover shadow-sm" />
 
                           <div className={`min-w-0 ${(!isCartEditable || p.isClosed) ? 'opacity-40 pointer-events-none' : ''}`}>
                             <div className="flex items-start gap-1 min-w-0">

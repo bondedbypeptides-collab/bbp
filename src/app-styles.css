@@ -35,9 +35,13 @@
         
         body, input, button, select, textarea, table, th, td, span, div { font-family: 'Quicksand', sans-serif !important; }
 
-        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-inner-spin-button,
         input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+
+        /* Per-card render skipping for the shop product grid; .defer-render/.defer-render-xl
+           for whole sections already live in the App.jsx inline style block. */
+        .defer-render-card { content-visibility: auto; contain-intrinsic-size: auto 200px; }
 
         @media screen and (max-width: 768px) { input, select, textarea { font-size: 16px !important; } }
 

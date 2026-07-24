@@ -2,7 +2,7 @@ import React, { startTransition, useDeferredValue, useEffect, useMemo, useRef, u
 import { initializeApp } from 'firebase/app';
 import { lazy, Suspense } from 'react';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, writeBatch, query, where, updateDoc, deleteField, FieldPath } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, getDocs, doc, setDoc, deleteDoc, addDoc, writeBatch, query, where, orderBy, limit, updateDoc, deleteField, FieldPath } from 'firebase/firestore';
 import {
   ShieldCheck, Store, Settings, LayoutDashboard,
   BadgeDollarSign, Scissors, ClipboardList, Users,
@@ -34,9 +34,11 @@ import {
 import { buildArchiveMetadata, buildCustomerBatchHistoryRecords, buildGroupedHistoryView, buildHistoryArchiveRows } from './history-helpers';
 import {
   SLOTS_PER_BATCH,
+  allowSubMinQty,
   buildPackingRows,
   buildProductPriorityAnalysis,
   buildProductTotals,
+  capRemainderFor,
   compareOrdersNewestFirst,
   compareOrdersOldestFirst,
   computeManufacturerRow,
@@ -114,6 +116,7 @@ const PARTIAL_SHIP_OPTIONS = [
 const SHOP_ACCESS_STORAGE_KEY = 'bbp-shop-access-code';
 const createEmptyAddressForm = () => ({ shipOpt: '', partialShipPref: '', street: '', brgy: '', city: '', prov: '', zip: '', contact: '' });
 const normalizeAccessCode = (value) => String(value || '').trim().toLowerCase();
+const escapeAttrValue = (value) => (typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(String(value)) : String(value).replace(/"/g, '\\"'));
 const normalizePartialShipPreference = (value) => {
   const cleaned = String(value || '').trim().toLowerCase();
   if (!cleaned) return '';
@@ -752,6 +755,8 @@ export default function App() {
   const [expandedActiveOrders, setExpandedActiveOrders] = useState({});
   const [paymentsTableSort, setPaymentsTableSort] = useState({ key: 'totalPHP', direction: 'desc' });
   const [logsTableSort, setLogsTableSort] = useState({ key: 'timestamp', direction: 'desc' });
+  const [logsDisplayLimit, setLogsDisplayLimit] = useState(200);
+  const [customersDisplayLimit, setCustomersDisplayLimit] = useState(200);
   const [packingTableSort, setPackingTableSort] = useState({ key: 'product', direction: 'asc' });
   const [trimmingTableSort, setTrimmingTableSort] = useState({ key: 'prod', direction: 'asc' });
   const [customersTableSort, setCustomersTableSort] = useState({ key: 'name', direction: 'asc' });
@@ -771,6 +776,7 @@ export default function App() {
   const normalizedShopSearchQuery = deferredSearchQuery.toLowerCase().trim();
   const normalizedWikiSearchQuery = deferredWikiSearchQuery.toLowerCase().trim();
   const normalizedAdminSearch = deferredAdminGlobalSearch.toLowerCase().trim();
+  useEffect(() => { setLogsDisplayLimit(200); setCustomersDisplayLimit(200); }, [normalizedAdminSearch, logsTableSort, customersTableSort, adminTab]);
   const normalizedAdminSettingsProductSearch = deferredAdminSettingsProductSearch.toLowerCase().trim();
   const normalizedAdminModalSearchQuery = deferredAdminModalSearchQuery.toLowerCase().trim();
   const normalizedAdminFeeSearch = deferredAdminFeeSearch.toLowerCase().trim();
@@ -790,6 +796,18 @@ export default function App() {
   const needsCustomerDirectoryData = isAdminAuthenticated && ['overview', 'customers'].includes(adminTab);
   const needsPackingData = isAdminAuthenticated && ['overview', 'packing'].includes(adminTab);
   const needsAdminHitListData = isAdminAuthenticated && ['overview', 'trimming'].includes(adminTab);
+  // Fee-route balancing (adminFeeChainRecords) needs every fee payer's chain
+  // record, which lives on users docs. A buyer still facing the fee gate gets the
+  // full collection (pre-optimization behavior); once approved they drop to
+  // doc-scoped reads. users=[] on first render keeps this true until their own
+  // profile loads and proves approval.
+  const ownProfileForFeeGate = users.find(u => normalizeCustomerEmail(u.id) === normalizedCustomerEmail || normalizeCustomerEmail(u.email) === normalizedCustomerEmail) || null;
+  const buyerNeedsFeeRouteBalance = !isAdminAuthenticated
+    && Boolean(normalizedCustomerEmail)
+    && settings.storeOpen !== false
+    && settings.adminFeeGateOpen !== false
+    && Number(settings.adminFeePhp || 0) > 0
+    && !hasApprovedChainAccess(ownProfileForFeeGate, settings);
   const shouldSubscribeUsers = adminNeedsUsers || Boolean(normalizedCustomerEmail) || Boolean(normalizedSelectedProfileEmail && normalizedSelectedProfileEmail !== normalizedCustomerEmail);
   const shouldSubscribeHistory = Boolean(normalizedSelectedProfileEmail);
   const switchView = (nextView) => startTransition(() => setView(nextView));
@@ -912,12 +930,18 @@ export default function App() {
       return undefined;
     }
 
-    const unsubChats = onSnapshot(collection(db, colPath('chats')), (snap) => {
+    // Bounded window: newest 500 covers a busy day; the retention sweep below
+    // handles anything the window can't see.
+    const unsubChats = onSnapshot(query(collection(db, colPath('chats')), orderBy('timestamp', 'desc'), limit(500)), (snap) => {
       const arr = [];
       snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
       arr.sort((a, b) => a.timestamp - b.timestamp);
       setChats(arr);
     });
+
+    // Sweep once per shop session so expired/malformed docs outside the bounded
+    // window still get retention-deleted (the old full listener did this implicitly).
+    runChatRetentionSweep();
 
     return () => {
       unsubChats();
@@ -930,14 +954,26 @@ export default function App() {
       return undefined;
     }
 
-    const unsubUsers = onSnapshot(collection(db, colPath('users')), (snap) => {
-      const arr = [];
-      snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
-      setUsers(arr);
-    });
+    if (adminNeedsUsers || buyerNeedsFeeRouteBalance) {
+      const unsubUsers = onSnapshot(collection(db, colPath('users')), (snap) => {
+        const arr = [];
+        snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
+        setUsers(arr);
+      });
+      return () => unsubUsers();
+    }
 
-    return () => unsubUsers();
-  }, [user, shouldSubscribeUsers]);
+    // Buyers only need their own profile (plus a viewed profile) — never the
+    // whole customer directory. Doc-scoped reads keep bandwidth flat as users grow.
+    const emails = Array.from(new Set([normalizedCustomerEmail, normalizedSelectedProfileEmail].filter(Boolean)));
+    const docsByEmail = {};
+    const unsubs = emails.map((email) => onSnapshot(doc(db, colPath('users'), email), (snap) => {
+      if (snap.exists()) docsByEmail[email] = { id: snap.id, ...snap.data() };
+      else delete docsByEmail[email];
+      setUsers(Object.values(docsByEmail));
+    }));
+    return () => unsubs.forEach((unsub) => unsub());
+  }, [user, shouldSubscribeUsers, adminNeedsUsers, buyerNeedsFeeRouteBalance, normalizedCustomerEmail, normalizedSelectedProfileEmail]);
 
   useEffect(() => {
     if (!user || !shouldSubscribeHistory) {
@@ -977,7 +1013,9 @@ export default function App() {
       return undefined;
     }
 
-    const unsubLogs = onSnapshot(collection(db, colPath('logs')), (snap) => {
+    // Bounded: the log stream grows forever, but ops only needs the recent tail.
+    // orderBy drops docs missing `timestamp` — fine here, every writer stamps it.
+    const unsubLogs = onSnapshot(query(collection(db, colPath('logs')), orderBy('timestamp', 'desc'), limit(1500)), (snap) => {
       const arr = [];
       snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
       arr.sort((a, b) => b.timestamp - a.timestamp);
@@ -1081,28 +1119,36 @@ export default function App() {
     };
   }, [isChatOpen]);
 
-  useEffect(() => {
-    const expiredChats = chats.filter(chat => Number(chat.timestamp || 0) < (Date.now() - CHAT_RETENTION_MS));
-    if (!user || expiredChats.length === 0 || chatCleanupRef.current) return;
-
+  // One-shot full scan: the live listener is bounded to the newest 500, but
+  // retention must also catch older docs and malformed ones with no timestamp
+  // (orderBy excludes those, so they can never enter the bounded window).
+  const runChatRetentionSweep = async () => {
+    if (chatCleanupRef.current) return;
     chatCleanupRef.current = true;
-    const cleanup = async () => {
-      try {
-        for (let i = 0; i < expiredChats.length; i += 250) {
-          const batch = writeBatch(db);
-          expiredChats.slice(i, i + 250).forEach(chat => {
-            batch.delete(doc(db, colPath('chats'), chat.id));
-          });
-          await safeAwait(batch.commit());
-        }
-      } catch (err) {
-        console.error('Chat cleanup error:', err);
-      } finally {
-        chatCleanupRef.current = false;
+    try {
+      const snap = await getDocs(collection(db, colPath('chats')));
+      const cutoff = Date.now() - CHAT_RETENTION_MS;
+      const expiredIds = [];
+      snap.forEach(d => { if (Number(d.data()?.timestamp || 0) < cutoff) expiredIds.push(d.id); });
+      for (let i = 0; i < expiredIds.length; i += 250) {
+        const batch = writeBatch(db);
+        expiredIds.slice(i, i + 250).forEach(id => {
+          batch.delete(doc(db, colPath('chats'), id));
+        });
+        await safeAwait(batch.commit());
       }
-    };
+    } catch (err) {
+      console.error('Chat cleanup error:', err);
+    } finally {
+      chatCleanupRef.current = false;
+    }
+  };
 
-    cleanup();
+  useEffect(() => {
+    if (!user) return;
+    const windowHasExpired = chats.some(chat => Number(chat.timestamp || 0) < (Date.now() - CHAT_RETENTION_MS));
+    if (!windowHasExpired) return;
+    runChatRetentionSweep();
   }, [user, chats]);
 
   const normalizeAdminBankOption = (bank = {}, index = 0) => {
@@ -2540,6 +2586,21 @@ export default function App() {
   }, [calculatorDoseMg, calculatorStrengthMg, calculatorWaterMl]);
 
   const customerProfile = useMemo(() => usersById[normalizedCustomerEmail] || null, [usersById, normalizedCustomerEmail]);
+
+  // Keep the checkout address form in sync with the profile's saved address
+  // (e.g. edited via the Profile viewer). Without this, submitPayment writes the
+  // stale lookup-time addressForm back over the corrected address. Never resync
+  // while the pay modal is open — the buyer may be editing fields right there.
+  useEffect(() => {
+    if (showPayModal) return;
+    const savedAddress = customerProfile?.address;
+    if (!savedAddress) return;
+    setAddressForm(prev => {
+      const next = { ...createEmptyAddressForm(), ...savedAddress };
+      return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
+    });
+  }, [customerProfile, showPayModal]);
+
   const currentChainId = getCurrentChainId(settings);
   const currentChainAccessRecord = getChainAccessRecord(customerProfile, settings);
   const currentAdminFeePaymentRoute = currentChainAccessRecord
@@ -2656,6 +2717,7 @@ export default function App() {
 
   useEffect(() => {
     if (view !== 'shop') return undefined;
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
 
     const fieldEl = heroBubbleFieldRef.current;
     if (!fieldEl) return undefined;
@@ -2806,6 +2868,21 @@ export default function App() {
     initScene();
     heroBubbleFrameRef.current = requestAnimationFrame(tick);
 
+    // Pause the 60fps physics loop while the hero is scrolled out of view —
+    // buyers spend most of their session down in the catalog/cart.
+    let heroVisible = true;
+    const visibilityObserver = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver((entries) => {
+      const nowVisible = entries.some((entry) => entry.isIntersecting);
+      if (nowVisible === heroVisible) return;
+      heroVisible = nowVisible;
+      cancelAnimationFrame(heroBubbleFrameRef.current);
+      if (nowVisible && !stopped) {
+        lastTime = 0;
+        heroBubbleFrameRef.current = requestAnimationFrame(tick);
+      }
+    }, { rootMargin: '120px 0px' });
+    if (visibilityObserver) visibilityObserver.observe(fieldEl);
+
     window.addEventListener('resize', handleResize);
 
     return () => {
@@ -2813,6 +2890,7 @@ export default function App() {
       cancelAnimationFrame(heroBubbleFrameRef.current);
       cancelAnimationFrame(resizeTick);
       window.removeEventListener('resize', handleResize);
+      if (visibilityObserver) visibilityObserver.disconnect();
     };
   }, [view, settings.storeOpen]);
 
@@ -2930,6 +3008,7 @@ export default function App() {
       showToast('Upload the admin fee receipt.');
       return;
     }
+    if (!validateProofFile(adminFeeProofFile)) return;
 
     setIsBtnLoading(true);
     try {
@@ -3227,8 +3306,20 @@ export default function App() {
   function focusProductCard(prodName) {
     setShakingProd(prodName);
     setTimeout(() => setShakingProd(null), 700);
-    const prodEl = document.querySelector(`[data-name="${prodName}"]`);
-    if (prodEl) prodEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const findCard = () => document.querySelector(`[data-name="${escapeAttrValue(prodName)}"]`);
+    const prodEl = findCard();
+    if (prodEl) {
+      prodEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    // Card is filtered out of the grid (search/category) — clear filters so the
+    // buyer can actually see the product the error toast is talking about.
+    setSearchQuery('');
+    setSelectedCategory('All');
+    setTimeout(() => {
+      const el = findCard();
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 250);
   }
 
   function getNextTableSort(currentSort, key) {
@@ -3605,7 +3696,7 @@ export default function App() {
     showToast(`Added ${prodName} to your cart.`);
     triggerShake(prodName);
 
-    const prodEl = document.querySelector(`[data-name="${prodName}"]`);
+    const prodEl = document.querySelector(`[data-name="${escapeAttrValue(prodName)}"]`);
     if (prodEl) prodEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
@@ -3685,6 +3776,18 @@ export default function App() {
     }
   }
 
+  function validateProofFile(file) {
+    if (!file?.type?.startsWith('image/')) {
+      showToast('Proof must be an image (screenshot or photo).');
+      return false;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      showToast('Proof image is too large (max 10 MB). Take a screenshot instead of a full-size photo.');
+      return false;
+    }
+    return true;
+  }
+
   function triggerLockedQtyFeedback(prodName) {
     setShakingProd(prodName);
     setTimeout(() => setShakingProd(null), 500);
@@ -3692,7 +3795,12 @@ export default function App() {
   }
 
   function handleCartFocus(prodName, event) {
-    const currentQty = cartItems[prodName]?.v || existingOrderData.items[prodName] || 0;
+    // Untouched rows follow the LIVE saved quantity (an admin edit or another
+    // device may have moved it since lookup); touched rows keep the buyer's value.
+    const isTouched = Boolean(cartTouchedProducts?.[prodName]);
+    const currentQty = isTouched
+      ? (cartItems[prodName]?.v || 0)
+      : (existingOrderData.items[prodName] || cartItems[prodName]?.v || 0);
     setCartInputDrafts(prev => ({ ...prev, [prodName]: String(currentQty || '') }));
     if (event?.target?.select) event.target.select();
   }
@@ -3717,16 +3825,33 @@ export default function App() {
     const draftValue = cartInputDrafts[prodName];
     const usingDraft = draftValue !== undefined;
     const draftQty = draftValue === '' ? 0 : (parseInt(draftValue, 10) || 0);
-    const totalVials = usingDraft ? draftQty : (cart.v || 0);
     const existingQty = existingOrderData.items[prodName] || 0;
-    let nextQty = totalVials;
+    const wasTouched = Boolean(cartTouchedProducts?.[prodName]);
+    const baselineQty = wasTouched ? (cart.v || 0) : (existingQty || cart.v || 0);
+
+    // Pure focus/blur with no change must not mutate a committed quantity
+    // (it was min-bumping legacy sub-min items and pinning stale values).
+    if (usingDraft && !wasTouched && draftQty === baselineQty) {
+      setCartInputDrafts(prev => {
+        const updated = { ...prev };
+        delete updated[prodName];
+        return updated;
+      });
+      return;
+    }
+
+    let nextQty = usingDraft ? draftQty : (cart.v || 0);
 
     if (settings.addOnly && nextQty < existingQty) {
       nextQty = existingQty;
       triggerLockedQtyFeedback(prodName);
     }
 
-    if (nextQty > 0 && nextQty < settings.minOrder && !settings.addOnly) {
+    if (nextQty > 0 && nextQty < settings.minOrder && !settings.addOnly
+      // A capped product can have fewer open slots than the minimum. Grabbing up
+      // to the remainder is allowed — bumping past it would deadlock the last
+      // slots (save rejects the bumped qty, blur re-bumps the typed one).
+      && !allowSubMinQty({ qty: nextQty, existingQty, minOrder: settings.minOrder, capRemainder: capRemainderFor(enrichedProductsByName[prodName], existingQty) })) {
       showToast(`Minimum ${settings.minOrder} vials required per item.`);
       nextQty = settings.minOrder;
       setShakingProd(prodName);
@@ -3788,6 +3913,14 @@ export default function App() {
       showToast("There is no saved order to cancel.");
       return;
     }
+    // A paid (or proof-submitted) order can't be self-cancelled: deleting the rows
+    // while keeping isPaid/proofUrl/paymentSnapshot poisons the buyer's NEXT order
+    // (frozen total and paid flag from the cancelled one survive). Admin handles these.
+    const profileForCancel = usersById[emailLower];
+    if (profileForCancel?.isPaid || profileForCancel?.proofUrl) {
+      showToast("This order already has a payment on file. Message the admin to cancel or adjust it.");
+      return;
+    }
 
     setIsBtnLoading(true);
     try {
@@ -3806,6 +3939,14 @@ export default function App() {
         chunk.forEach(o => batch.delete(doc(db, colPath('orders'), o.id)));
         await safeAwait(batch.commit());
       }
+
+      // Clear frozen-but-unpaid payment remnants so a future order starts clean.
+      await safeAwait(setDoc(doc(db, colPath('users'), emailLower), {
+        paymentSnapshot: null,
+        proofReview: '',
+        paymentSubmittedAt: null,
+        buyerReviewConfirmedAt: null
+      }, { merge: true }));
 
       await safeAwait(addDoc(collection(db, colPath('logs')), {
         timestamp: Date.now(),
@@ -3864,23 +4005,28 @@ export default function App() {
         const existingQty = existingOrderData.items[prodName] || 0;
         if (qty <= 0) return;
 
-        if (!settings.addOnly && qty < settings.minOrder) {
+        // An untouched saved quantity must never block the save (admins trim
+        // orders below min, caps can drop after commit), and a capped product
+        // whose remainder is under the minimum may be filled to the remainder.
+        const isKeepingSavedQty = existingQty > 0 && qty === existingQty;
+        const pData = enrichedProductsByName[prodName];
+
+        if (!settings.addOnly && qty < settings.minOrder
+          && !allowSubMinQty({ qty, existingQty, minOrder: settings.minOrder, capRemainder: capRemainderFor(pData, existingQty) })) {
           errors.push({ product: prodName, message: `${prodName}: minimum is ${settings.minOrder} vials.` });
         }
 
         finalTotalQty += qty;
-        const pData = enrichedProductsByName[prodName];
         if (!pData) {
           errors.push({ product: prodName, message: `${prodName}: product not found.` });
           return;
         }
-        const isKeepingSavedClosedQty = pData.isClosed && existingQty > 0 && qty === existingQty;
-        if (pData.isClosed && !isKeepingSavedClosedQty) {
+        if (pData.isClosed && !isKeepingSavedQty) {
           errors.push({ product: prodName, message: getAvailabilityMessage(prodName, pData, qty) });
           return;
         }
 
-        if (pData?.maxBoxes > 0 && (pData.totalVials - existingQty + qty) > maxVialsAllowed(pData)) {
+        if (pData?.maxBoxes > 0 && !isKeepingSavedQty && (pData.totalVials - existingQty + qty) > maxVialsAllowed(pData)) {
           errors.push({ product: prodName, message: getAvailabilityMessage(prodName, pData, qty) });
         }
 
@@ -3993,6 +4139,8 @@ export default function App() {
     if (!addressForm.contact?.trim()) errs.contact = true;
     if (!proofFile) errs.proofFile = true;
 
+    if (Object.keys(errs).length === 0 && !validateProofFile(proofFile)) return;
+
     if (Object.keys(errs).length > 0) {
       setAddressErrors(errs);
       showToast("Please fill all required highlighted fields.");
@@ -4026,11 +4174,14 @@ export default function App() {
         proofUrl: downloadUrl
       }, { merge: true }));
 
-      await safeAwait(addDoc(collection(db, colPath('logs')), { timestamp: Date.now(), email: emailLower, name: customerName, action: "Submitted Payment", details: `Amount: ₱${totalPHP.toLocaleString()} via ${addressForm.shipOpt}` }));
-
+      // Payment is recorded the moment the user doc write lands. The audit log
+      // must not gate success — a slow log write was showing paid buyers
+      // "Error submitting payment" and inviting duplicate submissions.
       triggerCelebration('payment');
       setShowPayModal(false);
       setProofFile(null);
+
+      safeAwait(addDoc(collection(db, colPath('logs')), { timestamp: Date.now(), email: emailLower, name: customerName, action: "Submitted Payment", details: `Amount: ₱${totalPHP.toLocaleString()} via ${addressForm.shipOpt}` })).catch((logErr) => console.error('Payment log write failed:', logErr));
     } catch (err) {
       console.error(err);
       if (err.code === 'storage/unauthorized') {
@@ -4869,6 +5020,30 @@ ${rowsXML.join("\n")}
     setIsBtnLoading(false);
   }
 
+  // Trimming after the payment freeze shrinks order rows; an unpaid buyer's
+  // frozen snapshot must follow or they are billed for vials that were cut.
+  // Keeps the frozen route / fee / fx — only the amounts are recomputed.
+  // Paid or proof-submitted buyers are left alone (admin settles those by hand).
+  async function rebuildUnpaidFrozenSnapshots(victims) {
+    const cutsByOrderId = {};
+    victims.forEach(v => { cutsByOrderId[v.id] = (cutsByOrderId[v.id] || 0) + Number(v.amountToRemove || 0); });
+    const emails = Array.from(new Set(victims.map(v => normalizeCustomerEmail(v.email)).filter(Boolean)));
+    for (const email of emails) {
+      const profile = usersById[email];
+      if (!profile || profile.proofUrl || profile.isPaid) continue;
+      const prevSnapshot = getFrozenPaymentSnapshot(profile);
+      if (!prevSnapshot) continue;
+      const subtotalUSD = (ordersByEmail[email] || []).reduce((sum, row) => {
+        const remaining = Number(row.qty || 0) - (cutsByOrderId[row.id] || 0);
+        return remaining > 0 ? sum + remaining * getUnitPriceUSD(row.product) : sum;
+      }, 0);
+      const { totalUSD, totalPHP } = calculateOrderTotals(subtotalUSD, Number(prevSnapshot.fxRate || settings.fxRate || 0), Number(prevSnapshot.adminFeePhp || 0));
+      await safeAwait(setDoc(doc(db, colPath('users'), email), {
+        paymentSnapshot: { ...prevSnapshot, capturedAt: Date.now(), subtotalUSD, totalUSD, totalPHP }
+      }, { merge: true }));
+    }
+  }
+
   async function executeTrim(victim) {
     if (!window.confirm(`Are you sure you want to completely CUT ${victim.amountToRemove} vials of ${victim.prod} from ${victim.handle || 'this customer'}?`)) return;
     if (victim.qty === victim.amountToRemove) {
@@ -4876,6 +5051,7 @@ ${rowsXML.join("\n")}
     } else {
       await safeAwait(setDoc(doc(db, colPath('orders'), victim.id), { qty: victim.qty - victim.amountToRemove }, { merge: true }));
     }
+    await rebuildUnpaidFrozenSnapshots([victim]);
   }
 
   async function autoTrimAll() {
@@ -4893,6 +5069,7 @@ ${rowsXML.join("\n")}
         });
         await safeAwait(batch.commit());
       }
+      await rebuildUnpaidFrozenSnapshots(trimmingHitList);
       showToast('Auto-Trim complete.');
     } catch (err) { console.error(err); showToast('Error during auto-trim.'); }
   }
@@ -4928,6 +5105,7 @@ ${rowsXML.join("\n")}
         });
         await safeAwait(batch.commit());
       }
+      await rebuildUnpaidFrozenSnapshots(sortedHitList);
       showToast('Visible hit list rows cut.');
     } catch (err) {
       console.error(err);
@@ -5598,11 +5776,18 @@ ${rowsXML.join("\n")}
 
   // --- PREPARE DATA ---
   const userOrders = ordersByEmail[normalizedCustomerEmail] || [];
-  const existingMap = {};
-  userOrders.forEach(o => { existingMap[o.product] = (existingMap[o.product] || 0) + o.qty; });
+  // Stable identity: currentProtectionSummary and friends memo on this — a fresh
+  // object literal every render was silently defeating those memos.
+  const existingMap = useMemo(() => {
+    const map = {};
+    userOrders.forEach(o => { map[o.product] = (map[o.product] || 0) + o.qty; });
+    return map;
+  }, [userOrders]);
   const hasExistingOrder = Object.keys(existingMap).length > 0;
 
-  const finalItems = (settings.paymentsOpen || settings.storeOpen === false)
+  // Review stage must show the SAVED order (what "Looks Good to Me" confirms and
+  // what payments will freeze) — not unsaved cart edits left over from earlier.
+  const finalItems = (settings.paymentsOpen || settings.storeOpen === false || Boolean(settings.reviewStageOpen))
     ? existingMap
     : buildOrderItemsFromCartState({
       cartItems,
@@ -5640,7 +5825,7 @@ ${rowsXML.join("\n")}
       bankLabel: lockedPaymentSnapshot.bankLabel || '',
       bankDetails: lockedPaymentSnapshot.bankDetails || '',
       bankQr: lockedPaymentSnapshot.bankQr || '',
-      hasRoute: Boolean(lockedPaymentSnapshot.bankDetails || lockedPaymentSnapshot.bankQr)
+      hasRoute: Boolean(lockedPaymentSnapshot.bankDetails || lockedPaymentSnapshot.bankQr || lockedPaymentSnapshot.bankLabel)
     }
     : getSelectedAdminBankRoute(currentCustomerRecord?.adminAssigned || activeCurrentProfileAdmin, customerEmail, currentProfile?.preferredPaymentBankIndex);
   const hasValidPaymentRoute = Boolean(
@@ -5654,7 +5839,12 @@ ${rowsXML.join("\n")}
   const currentOrderAdminFeePhp = resolveOrderAdminFeePhp({ profile: currentProfile || {}, settings });
   const liveOrderTotals = calculateOrderTotals(subtotalUSD, Number(settings.fxRate || 0), currentOrderAdminFeePhp);
   const totalPHP = lockedPaymentSnapshot?.totalPHP ?? liveOrderTotals.totalPHP;
-  const buyerPaymentSettings = { ...settings, adminFeePhp: currentOrderAdminFeePhp };
+  // When a frozen snapshot exists, the fee/fx lines must show the FROZEN values —
+  // otherwise an admin editing settings mid-window makes the line items
+  // contradict the frozen total the buyer is asked to pay.
+  const buyerPaymentSettings = lockedPaymentSnapshot
+    ? { ...settings, adminFeePhp: Number(lockedPaymentSnapshot.adminFeePhp || 0), fxRate: Number(lockedPaymentSnapshot.fxRate || settings.fxRate || 0) }
+    : { ...settings, adminFeePhp: currentOrderAdminFeePhp };
   const selectedVialCount = cartList.reduce((sum, item) => sum + item.qty, 0);
   const availableCatalogCount = filteredShopProducts.filter(p => !p.isClosed).length;
   const nearlyFullCount = filteredShopProducts.filter(p => !p.isClosed && p.slotsLeft > 0 && p.slotsLeft <= 3).length;
@@ -6759,7 +6949,6 @@ ${rowsXML.join("\n")}
     <>
       <style dangerouslySetInnerHTML={{
         __html: `
-        @import url('https://fonts.googleapis.com/css2?family=Pacifico&family=Quicksand:wght@500;600;700;800&display=swap');
         
         /* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ SCROLL PERFORMANCE FIXES ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ */
         html { scroll-behavior: smooth; }
@@ -7551,7 +7740,7 @@ ${rowsXML.join("\n")}
                                 </p>
                               )}
                               {currentAdminFeePaymentRoute.bankQr && (
-                                <img src={currentAdminFeePaymentRoute.bankQr} alt="Admin fee QR" className="mx-auto w-full max-w-[180px] rounded-xl border border-slate-200 bg-white" />
+                                <img src={currentAdminFeePaymentRoute.bankQr} alt="Admin fee QR" decoding="async" className="mx-auto w-full max-w-[180px] rounded-xl border border-slate-200 bg-white" />
                               )}
                               {currentAdminFeePaymentRoute.bankDetails && (
                                 <pre className="whitespace-pre-wrap rounded-xl border border-slate-200 bg-white p-3 text-xs font-bold text-slate-700">{currentAdminFeePaymentRoute.bankDetails}</pre>
@@ -8408,7 +8597,7 @@ ${rowsXML.join("\n")}
                         <thead><tr>{renderSortableHeader('Date & Time', 'timestamp', logsTableSort, setLogsTableSort)}{renderSortableHeader('Customer', 'customer', logsTableSort, setLogsTableSort)}{renderSortableHeader('Action', 'action', logsTableSort, setLogsTableSort)}{renderSortableHeader('Details', 'details', logsTableSort, setLogsTableSort)}</tr></thead>
                         <tbody className="divide-y divide-pink-50">
                           {sortedLogs.length === 0 ? <tr><td colSpan="4" className="text-center p-8 text-pink-300 font-bold italic">No activity logged yet.</td></tr> :
-                            sortedLogs.map(log => (
+                            sortedLogs.slice(0, logsDisplayLimit).map(log => (
                               <tr key={log.id} className="hover:bg-pink-50/20">
                                 <td className="text-xs text-slate-500 font-bold whitespace-nowrap">{new Date(log.timestamp).toLocaleString()}</td>
                                 <td>
@@ -8421,6 +8610,13 @@ ${rowsXML.join("\n")}
                             ))}
                         </tbody>
                       </table>
+                      {sortedLogs.length > logsDisplayLimit && (
+                        <div className="p-3 text-center border-t border-pink-50">
+                          <button onClick={() => setLogsDisplayLimit(limit => limit + 200)} className="bg-pink-50 text-[#D6006E] border border-pink-200 px-4 py-2 rounded-xl font-black text-xs hover:bg-pink-100 transition-colors">
+                            Show 200 more ({sortedLogs.length - logsDisplayLimit} hidden)
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -8862,7 +9058,7 @@ ${rowsXML.join("\n")}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-pink-50">
-                          {sortedRegisteredUsers.map(u => {
+                          {sortedRegisteredUsers.slice(0, customersDisplayLimit).map(u => {
                             return (
                               <tr key={u.id} className="hover:bg-pink-50/20">
                                 <td>
@@ -8893,6 +9089,13 @@ ${rowsXML.join("\n")}
                           {sortedRegisteredUsers.length === 0 && <tr><td colSpan="3" className="text-center p-8 text-pink-300 font-bold italic">No registered customers found.</td></tr>}
                         </tbody>
                       </table>
+                      {sortedRegisteredUsers.length > customersDisplayLimit && (
+                        <div className="p-3 text-center border-t border-pink-50">
+                          <button onClick={() => setCustomersDisplayLimit(limit => limit + 200)} className="bg-pink-50 text-[#D6006E] border border-pink-200 px-4 py-2 rounded-xl font-black text-xs hover:bg-pink-100 transition-colors">
+                            Show 200 more ({sortedRegisteredUsers.length - customersDisplayLimit} hidden)
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -9025,7 +9228,12 @@ ${rowsXML.join("\n")}
                             active: settings.adminFeeGateOpen !== false,
                             activeText: 'Enabled',
                             inactiveText: 'Disabled',
-                            onToggle: () => updateSetting('adminFeeGateOpen', settings.adminFeeGateOpen === false),
+                            onToggle: () => {
+                              // Flipping the fee gate mid-window double-charges: frozen totals
+                              // already bundle the fee, and the gate would demand it upfront too.
+                              if (settings.paymentsOpen) { showToast('Payments are open — frozen totals already include the fee model. Close payments before changing the fee gate.'); return; }
+                              updateSetting('adminFeeGateOpen', settings.adminFeeGateOpen === false);
+                            },
                             activeTone: {
                               panel: 'bg-violet-50 border-violet-200',
                               badge: 'bg-violet-100 text-violet-700',
@@ -9201,6 +9409,8 @@ ${rowsXML.join("\n")}
                                           <img
                                             src={bank.qr}
                                             alt={`${a.name} payment option ${bIdx + 1} QR`}
+                                            loading="lazy"
+                                            decoding="async"
                                             className="w-full max-w-[180px] rounded-lg border border-emerald-100 bg-white object-contain"
                                           />
                                         </a>

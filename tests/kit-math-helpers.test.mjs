@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   SLOTS_PER_BATCH,
+  allowSubMinQty,
   buildPackingRows,
   buildProductPriorityAnalysis,
   buildProductTotals,
+  capRemainderFor,
   compareOrdersNewestFirst,
   compareOrdersOldestFirst,
   computeManufacturerRow,
@@ -71,6 +73,34 @@ test('caps convert boxes to vials using the product kit size', () => {
   assert.equal(maxVialsAllowed({ maxBoxes: 2, kitSize: 6 }), 12);
   assert.equal(maxVialsAllowed({ maxBoxes: 5, kitSize: 1 }), 5);
   assert.equal(maxVialsAllowed({}), 0);
+});
+
+// --- cart save/blur exemption rules (shared by submitOrder and handleCartBlur) ---
+
+test('capRemainderFor: uncapped is unlimited; capped hands the buyer their own saved qty back', () => {
+  assert.equal(capRemainderFor({ maxBoxes: 0 }, 5), Infinity);
+  assert.equal(capRemainderFor(undefined, 5), Infinity);
+  // cap 10 (1 box of 10), 8 taken by everyone, of which 3 are this buyer's -> they may hold up to 5
+  assert.equal(capRemainderFor({ maxBoxes: 1, totalVials: 8 }, 3), 5);
+  // kit-of-6: cap 6, 6 taken, none theirs -> nothing left
+  assert.equal(capRemainderFor({ maxBoxes: 1, kitSize: 6, totalVials: 6 }, 0), 0);
+  // overfilled beyond cap never goes negative
+  assert.equal(capRemainderFor({ maxBoxes: 1, totalVials: 12 }, 0), 0);
+});
+
+test('allowSubMinQty: keeping an untouched saved qty is always legal', () => {
+  assert.equal(allowSubMinQty({ qty: 2, existingQty: 2, minOrder: 3, capRemainder: Infinity }), true);
+});
+
+test('allowSubMinQty: grabbing up to a cap remainder below the minimum is legal', () => {
+  assert.equal(allowSubMinQty({ qty: 2, existingQty: 0, minOrder: 3, capRemainder: 2 }), true);
+  assert.equal(allowSubMinQty({ qty: 1, existingQty: 0, minOrder: 3, capRemainder: 2 }), true);
+});
+
+test('allowSubMinQty: ordinary sub-min quantities stay illegal', () => {
+  assert.equal(allowSubMinQty({ qty: 2, existingQty: 0, minOrder: 3, capRemainder: Infinity }), false);
+  assert.equal(allowSubMinQty({ qty: 2, existingQty: 5, minOrder: 3, capRemainder: Infinity }), false); // lowering below min is not "keeping"
+  assert.equal(allowSubMinQty({ qty: 3, existingQty: 0, minOrder: 3, capRemainder: 2 }), false); // over the remainder
 });
 
 // --- computeManufacturerRow ---

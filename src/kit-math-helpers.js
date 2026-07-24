@@ -42,6 +42,21 @@ export function maxVialsAllowed(product) {
   return Number(product?.maxBoxes || 0) * getKitSize(product);
 }
 
+// Open slots left for THIS buyer on a capped product (their saved qty is already
+// inside totalVials, so it is handed back). Uncapped products have no limit.
+export function capRemainderFor(product, existingQty = 0) {
+  if (!product || !(Number(product.maxBoxes) > 0)) return Infinity;
+  return Math.max(0, maxVialsAllowed(product) - (Number(product.totalVials || 0) - Number(existingQty || 0)));
+}
+
+// Whether a sub-minimum quantity is still a legal save:
+// - keeping an untouched saved qty (admin trims / cap drops must not trap the buyer)
+// - grabbing up to a capped product's remainder when the cap left fewer slots than the minimum
+export function allowSubMinQty({ qty, existingQty = 0, minOrder = 0, capRemainder = Infinity }) {
+  if (existingQty > 0 && qty === existingQty) return true;
+  return capRemainder < minOrder && qty <= capRemainder;
+}
+
 // Pure math for one manufacturer-export row.
 export function computeManufacturerRow(product) {
   const totalVials = Number(product.totalVials || 0);
