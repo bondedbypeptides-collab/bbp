@@ -1,3 +1,5 @@
+import { useRef, useState } from 'react';
+
 export default function ShopCheckoutHost({
   addressErrors,
   addressForm,
@@ -9,25 +11,51 @@ export default function ShopCheckoutHost({
   isCartEditable,
   isReviewStageOpen,
   lockedPaymentSnapshot,
+  maxProofs = 5,
+  onAddProof,
   onAddressChange,
   onAdjustCartItem,
   onClosePay,
   onClosePreview,
   onOpenPayFromPreview,
   onProofChange,
+  onReplaceProof,
   onSubmitOrder,
   onSubmitPayment,
+  onViewProof,
   originalBtn,
   partialShipOptions,
+  proofReviewStatus = '',
   settings,
   shakingProd,
   showPayModal,
   showPreviewModal,
+  submittedProofUrls = [],
   totalPHP,
   totalUSDSubtotal,
   currentPaymentRoute,
 }) {
   const adminFeePaidAlready = Number(settings.adminFeePhp || 0) === 0;
+  const hasSubmittedProofs = submittedProofUrls.length > 0;
+  const needsRecheck = proofReviewStatus === 'needs-recheck';
+  const extraProofInputRef = useRef(null);
+  const [replaceIndex, setReplaceIndex] = useState(null);
+
+  const pickExtraProof = (index) => {
+    setReplaceIndex(index);
+    if (extraProofInputRef.current) {
+      extraProofInputRef.current.value = '';
+      extraProofInputRef.current.click();
+    }
+  };
+
+  const handleExtraProofPicked = (event) => {
+    const file = event.target?.files?.[0] || null;
+    if (!file) return;
+    if (replaceIndex === null) onAddProof?.(file);
+    else onReplaceProof?.(replaceIndex, file);
+    setReplaceIndex(null);
+  };
 
   return (
     <>
@@ -101,6 +129,53 @@ export default function ShopCheckoutHost({
                 </div>
               </div>
 
+              {hasSubmittedProofs && (
+                <div className={`p-3.5 rounded-2xl border-2 ${needsRecheck ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className={`text-[11px] font-black uppercase tracking-widest ${needsRecheck ? 'text-amber-700' : 'text-emerald-700'}`}>
+                      {needsRecheck ? 'Admin needs a recheck' : 'Payment proof submitted'} ({submittedProofUrls.length}/{maxProofs})
+                    </p>
+                    <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full ${needsRecheck ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                      {needsRecheck ? 'Action needed' : 'Waiting for admin'}
+                    </span>
+                  </div>
+                  {needsRecheck && (
+                    <p className="text-[11px] font-bold text-amber-800 mb-2">May problema sa proof mo. Replace it or add a clearer screenshot below.</p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {submittedProofUrls.map((url, idx) => (
+                      <div key={`${url}-${idx}`} className="relative group">
+                        <button type="button" onClick={() => onViewProof?.(url)} title={`View proof ${idx + 1}`} className="bbp-focus-ring block w-16 h-16 rounded-xl overflow-hidden border-2 border-white shadow-sm bg-white cursor-zoom-in p-0">
+                          <img src={url} alt={`Payment proof ${idx + 1}`} loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => pickExtraProof(idx)}
+                          disabled={isBtnLoading}
+                          title={`Replace proof ${idx + 1}`}
+                          className="bbp-focus-ring absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white border border-slate-200 shadow text-[9px] font-black text-slate-500 hover:text-pink-600 hover:border-pink-300 flex items-center justify-center"
+                        >
+                          ↻
+                        </button>
+                        <span className="absolute bottom-0.5 left-0.5 bg-black/55 text-white text-[8px] font-black px-1 rounded">{idx + 1}</span>
+                      </div>
+                    ))}
+                    {submittedProofUrls.length < maxProofs && (
+                      <button
+                        type="button"
+                        onClick={() => pickExtraProof(null)}
+                        disabled={isBtnLoading}
+                        className={`bbp-focus-ring w-16 h-16 rounded-xl border-2 border-dashed flex flex-col items-center justify-center text-[9px] font-black uppercase ${needsRecheck ? 'border-amber-300 text-amber-600 hover:bg-amber-100' : 'border-emerald-300 text-emerald-600 hover:bg-emerald-100'}`}
+                      >
+                        <span className="text-base leading-none">+</span>
+                        Add
+                      </button>
+                    )}
+                  </div>
+                  <input ref={extraProofInputRef} type="file" accept="image/*" onChange={handleExtraProofPicked} className="hidden" aria-label="Add or replace payment proof image" />
+                </div>
+              )}
+
               <div className={`bg-slate-50 p-2.5 rounded-xl border flex items-center justify-between transition-all duration-300 ${addressErrors.proofFile ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200'}`}>
                 <input type="file" accept="image/*" aria-label="Upload payment proof image" onChange={(e) => onProofChange(e.target?.files?.[0] || null)} className={`bbp-focus-ring w-full text-xs font-bold file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[10px] file:font-black file:text-white cursor-pointer ${addressErrors.proofFile ? 'text-red-600 file:bg-red-500' : 'text-[#D6006E] file:bg-[#FF1493] hover:file:bg-[#D6006E]'}`} />
               </div>
@@ -131,7 +206,7 @@ export default function ShopCheckoutHost({
                 </p>
               ) : null}
               <button onClick={onSubmitPayment} disabled={isBtnLoading || !hasValidPaymentRoute || !canShowPaymentRoute} className={`bbp-focus-ring ${originalBtn} w-full py-3 disabled:cursor-not-allowed disabled:opacity-50`}>
-                {isBtnLoading ? 'Uploading...' : 'Complete Payment'}
+                {isBtnLoading ? 'Uploading...' : (hasSubmittedProofs ? 'Submit Another Payment' : 'Complete Payment')}
               </button>
             </div>
           </div>

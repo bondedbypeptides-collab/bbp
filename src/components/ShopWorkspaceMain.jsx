@@ -445,6 +445,13 @@ export default function ShopWorkspaceMain({
                         <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#D6006E]">{settings.paymentsOpen ? 'Amount due' : 'Current total'}</p>
                         <p className="mt-2 text-2xl font-black text-[#4A042A]">₱{totalPHP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                         <p className="mt-1 text-xs font-bold text-slate-500">{settings.paymentsOpen ? 'Includes admin fee' : 'Review this total before payments open'}</p>
+                        {settings.paymentsOpen && (customerProfile?.proofUrls?.length || (customerProfile?.proofUrl ? 1 : 0)) > 0 && (
+                          <p className={`mt-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-widest ${customerProfile?.proofReview === 'needs-recheck' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                            {customerProfile?.proofReview === 'needs-recheck'
+                              ? 'Proof needs recheck — tap View / Add Proof'
+                              : `Proof submitted (${customerProfile?.proofUrls?.length || 1}) — waiting for admin`}
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -462,7 +469,7 @@ export default function ShopWorkspaceMain({
                           </button>
                           {settings.paymentsOpen ? (
                             <button onClick={onOpenPayModal} className="rounded-full bg-[#008040] px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-md hover:scale-[0.98] transition-transform active:scale-95">
-                              Pay Now
+                              {(customerProfile?.proofUrls?.length || (customerProfile?.proofUrl ? 1 : 0)) > 0 ? 'View / Add Proof' : 'Pay Now'}
                             </button>
                           ) : (
                             <button

@@ -1,3 +1,5 @@
+import { normalizeProofUrls } from './proof-helpers.js';
+
 export function mergeAdminEditProducts(catalogProducts = [], orderRows = []) {
   const merged = [...catalogProducts];
   const seenNames = new Set(
@@ -250,9 +252,11 @@ export function buildAdminEditedUserPatch({
   targetProfile = {},
   nextSnapshot = null,
 }) {
+  const proofUrls = normalizeProofUrls(targetProfile);
   const hasPaymentState = Boolean(
     targetProfile?.isPaid
     || targetProfile?.proofUrl
+    || proofUrls.length > 0
     || targetProfile?.paymentSubmittedAt
     || targetProfile?.proofReview
   );
@@ -261,7 +265,8 @@ export function buildAdminEditedUserPatch({
     return {
       paymentSnapshot: nextSnapshot,
       proofReview: targetProfile?.proofReview || '',
-      proofUrl: targetProfile?.proofUrl || null,
+      proofUrl: proofUrls[0] || targetProfile?.proofUrl || null,
+      proofUrls,
       isPaid: Boolean(targetProfile?.isPaid),
       paymentSubmittedAt: targetProfile?.paymentSubmittedAt || null,
       buyerReviewConfirmedAt: targetProfile?.buyerReviewConfirmedAt || null,
@@ -272,6 +277,7 @@ export function buildAdminEditedUserPatch({
     paymentSnapshot: nextSnapshot,
     proofReview: '',
     proofUrl: null,
+    proofUrls: [],
     isPaid: false,
     paymentSubmittedAt: null,
     buyerReviewConfirmedAt: null,

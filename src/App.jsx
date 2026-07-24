@@ -2,7 +2,7 @@ import React, { startTransition, useDeferredValue, useEffect, useMemo, useRef, u
 import { initializeApp } from 'firebase/app';
 import { lazy, Suspense } from 'react';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, getDocs, doc, setDoc, deleteDoc, addDoc, writeBatch, query, where, orderBy, limit, updateDoc, deleteField, FieldPath } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, getDocs, doc, setDoc, deleteDoc, addDoc, writeBatch, query, where, orderBy, limit, updateDoc, deleteField, runTransaction, FieldPath } from 'firebase/firestore';
 import {
   ShieldCheck, Store, Settings, LayoutDashboard,
   BadgeDollarSign, Scissors, ClipboardList, Users,
@@ -32,6 +32,14 @@ import {
   normalizeCustomerEmail,
 } from './customer-lookup-helpers.js';
 import { buildArchiveMetadata, buildCustomerBatchHistoryRecords, buildGroupedHistoryView, buildHistoryArchiveRows } from './history-helpers';
+import {
+  MAX_PAYMENT_PROOFS,
+  appendProofUrl,
+  buildProofExportFields,
+  buildProofUrlsPayload,
+  normalizeProofUrls,
+  replaceProofUrlAt,
+} from './proof-helpers.js';
 import {
   SLOTS_PER_BATCH,
   allowSubMinQty,
@@ -1751,6 +1759,7 @@ export default function App() {
         isPaid: profile.isPaid || false,
         adminAssigned,
         proofUrl: profile.proofUrl || null,
+        proofUrls: normalizeProofUrls(profile),
         proofReview: profile.proofReview || '',
         paymentSnapshot: frozenPaymentSnapshot,
         paymentBankIndex: Number.isInteger(Number(livePaymentRoute?.bankIndex)) ? Number(livePaymentRoute.bankIndex) : -1,
@@ -3280,6 +3289,7 @@ export default function App() {
         userSnapshot: customerProfile || { id: customer.email, name: customer.name || '', email: customer.email },
         proofReference: {
           proofUrl: customer.proofUrl || null,
+          proofUrls: normalizeProofUrls(customerProfile || customer),
           proofReview: customer.proofReview || '',
           paymentSubmittedAt: customerProfile?.paymentSubmittedAt || customer.paymentSubmittedAt || null,
           isPaid: customer.isPaid || false
@@ -3293,6 +3303,7 @@ export default function App() {
       await safeAwait(setDoc(doc(db, colPath('users'), customer.email), {
         isPaid: false,
         proofUrl: null,
+        proofUrls: [],
         proofReview: '',
         paymentSubmittedAt: null
       }, { merge: true }));
@@ -3448,7 +3459,7 @@ export default function App() {
         if (record.recycleType === 'proof' && record.userSnapshot?.id) {
           const proofReference = record.proofReference || {};
           await safeAwait(setDoc(doc(db, colPath('users'), record.userSnapshot.id), {
-            proofUrl: proofReference.proofUrl || null,
+            ...buildProofUrlsPayload(normalizeProofUrls(proofReference)),
             proofReview: proofReference.proofReview || '',
             paymentSubmittedAt: proofReference.paymentSubmittedAt || null,
             isPaid: Boolean(proofReference.isPaid)
@@ -3774,6 +3785,80 @@ export default function App() {
         document.getElementById('top-form-card')?.scrollIntoView({ behavior: 'auto', block: 'start' });
       });
     }
+  }
+
+  async function uploadProofImage(file, emailLower) {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${emailLower}_${Date.now()}.${fileExt}`;
+    const sRefPath = isCanvas ? `artifacts/${appId}/public/proofs/${fileName}` : `proofs/${fileName}`;
+    const { storage, storageRef, uploadBytesResumable, getDownloadURL } = await getStorageServices();
+    const sRef = storageRef(storage, sRefPath);
+    await uploadBytesResumable(sRef, file);
+    return getDownloadURL(sRef);
+  }
+
+  // Add (or replace one of) the buyer's payment proofs after the initial submit.
+  // No deletes — a replaced proof's old URL goes to the log so evidence never
+  // silently disappears. Any change resets review status back to pending.
+  async function submitExtraProof(file, replaceIndex = null) {
+    if (!file) return;
+    if (!validateProofFile(file)) return;
+    const emailLower = normalizedCustomerEmail;
+    if (!emailLower) { showToast('Enter your email first.'); return; }
+    const profile = usersById[emailLower] || {};
+    const existing = normalizeProofUrls(profile);
+    if (existing.length === 0) { showToast('Submit your payment first, then add more proofs.'); return; }
+    if (replaceIndex === null && existing.length >= MAX_PAYMENT_PROOFS) {
+      showToast(`Limit is ${MAX_PAYMENT_PROOFS} proofs. Replace one of your uploads instead.`);
+      return;
+    }
+    setIsBtnLoading(true);
+    try {
+      showToast(replaceIndex === null ? 'Uploading proof...' : 'Replacing proof...');
+      const downloadUrl = await uploadProofImage(file, emailLower);
+
+      // Transaction against the FRESH doc: two rapid adds/replaces must never
+      // rebuild from a stale snapshot and lose each other's proof or history.
+      // The replaced URL is preserved in the same atomic write (evidence survives
+      // even if the best-effort audit log below never lands).
+      let committedUrls = null;
+      let replacedOldUrl = null;
+      await safeAwait(runTransaction(db, async (transaction) => {
+        const userRef = doc(db, colPath('users'), emailLower);
+        const snap = await transaction.get(userRef);
+        const fresh = snap.exists() ? snap.data() : {};
+        const freshUrls = normalizeProofUrls(fresh);
+        const nextUrls = replaceIndex === null
+          ? appendProofUrl(freshUrls, downloadUrl)
+          : replaceProofUrlAt(freshUrls, replaceIndex, downloadUrl);
+        if (!nextUrls) throw new Error('proof-slots-changed');
+        replacedOldUrl = replaceIndex === null ? null : freshUrls[replaceIndex];
+        committedUrls = nextUrls;
+        transaction.set(userRef, {
+          ...buildProofUrlsPayload(nextUrls),
+          ...(replacedOldUrl ? { proofReplaceHistory: [...(Array.isArray(fresh.proofReplaceHistory) ? fresh.proofReplaceHistory : []), { at: Date.now(), slot: replaceIndex + 1, oldUrl: replacedOldUrl }] } : {}),
+          isPaid: true,
+          proofReview: '',
+          paymentSubmittedAt: Date.now()
+        }, { merge: true });
+      }));
+      safeAwait(addDoc(collection(db, colPath('logs')), {
+        timestamp: Date.now(),
+        email: emailLower,
+        name: customerName,
+        action: replaceIndex === null ? 'Added Payment Proof' : 'Replaced Payment Proof',
+        details: replaceIndex === null
+          ? `Proof ${committedUrls.length}/${MAX_PAYMENT_PROOFS} added.`
+          : `Proof ${replaceIndex + 1} replaced. Previous: ${replacedOldUrl}`
+      })).catch((logErr) => console.error('Proof log write failed:', logErr));
+      showToast(replaceIndex === null ? 'Proof added.' : 'Proof replaced.');
+    } catch (err) {
+      console.error(err);
+      showToast(err?.message === 'proof-slots-changed'
+        ? 'Your proof list just changed — check it and try again.'
+        : 'Could not upload the proof.');
+    }
+    setIsBtnLoading(false);
   }
 
   function validateProofFile(file) {
@@ -4152,27 +4237,37 @@ export default function App() {
     setIsBtnLoading(true);
 
     try {
-      const fileExt = proofFile.name.split('.').pop();
-      const fileName = `${emailLower}_${Date.now()}.${fileExt}`;
-      const sRefPath = isCanvas ? `artifacts/${appId}/public/proofs/${fileName}` : `proofs/${fileName}`;
-      const { storage, storageRef, uploadBytesResumable, getDownloadURL } = await getStorageServices();
-      const sRef = storageRef(storage, sRefPath);
       const currentProfile = emailLower === normalizedCustomerEmail ? (customerProfile || {}) : (usersById[emailLower] || {});
+      const priorProofUrls = normalizeProofUrls(currentProfile);
+      if (priorProofUrls.length >= MAX_PAYMENT_PROOFS) {
+        // Never silently drop a proof — at the cap the buyer must explicitly replace one.
+        showToast(`You already have ${MAX_PAYMENT_PROOFS} proofs on file. Use the ↻ button on a proof to replace it.`);
+        setIsBtnLoading(false);
+        return;
+      }
       const existingSnapshot = getFrozenPaymentSnapshot(currentProfile);
       const frozenSnapshot = existingSnapshot || buildPaymentSnapshot(existingOrderData.items, currentProfile.adminAssigned || currentCustomerRecord?.adminAssigned, emailLower, Date.now(), currentProfile);
 
       showToast("Uploading proof...");
-      await uploadBytesResumable(sRef, proofFile);
-      const downloadUrl = await getDownloadURL(sRef);
+      const downloadUrl = await uploadProofImage(proofFile, emailLower);
 
-      await safeAwait(setDoc(doc(db, colPath('users'), emailLower), {
-        address: addressForm,
-        isPaid: true,
-        proofReview: '',
-        paymentSnapshot: frozenSnapshot,
-        paymentSubmittedAt: Date.now(),
-        proofUrl: downloadUrl
-      }, { merge: true }));
+      // Same transaction pattern as submitExtraProof: append against the FRESH
+      // doc so a second tab or a stale snapshot can never drop a proof.
+      await safeAwait(runTransaction(db, async (transaction) => {
+        const userRef = doc(db, colPath('users'), emailLower);
+        const snap = await transaction.get(userRef);
+        const fresh = snap.exists() ? snap.data() : {};
+        const nextProofUrls = appendProofUrl(normalizeProofUrls(fresh), downloadUrl);
+        if (!nextProofUrls) throw new Error('proof-slots-full');
+        transaction.set(userRef, {
+          address: addressForm,
+          isPaid: true,
+          proofReview: '',
+          paymentSnapshot: frozenSnapshot,
+          paymentSubmittedAt: Date.now(),
+          ...buildProofUrlsPayload(nextProofUrls)
+        }, { merge: true });
+      }));
 
       // Payment is recorded the moment the user doc write lands. The audit log
       // must not gate success — a slow log write was showing paid buyers
@@ -4186,6 +4281,8 @@ export default function App() {
       console.error(err);
       if (err.code === 'storage/unauthorized') {
         showToast("Storage Error! Please check your Firebase Storage Rules.");
+      } else if (err?.message === 'proof-slots-full') {
+        showToast(`You already have ${MAX_PAYMENT_PROOFS} proofs on file. Use the ↻ button on a proof to replace it.`);
       } else {
         showToast("Error submitting payment.");
       }
@@ -4301,6 +4398,7 @@ export default function App() {
 
     try {
       const formattedCustomers = customerList.map(c => {
+        const proofExport = buildProofExportFields(c);
         return {
           Email: c.email,
           Name: c.name,
@@ -4308,7 +4406,7 @@ export default function App() {
           "Subtotal USD": c.subtotalUSD.toFixed(2),
           "Total USD": c.totalUSD.toFixed(2),
           "Total PHP": c.totalPHP,
-          "Proof Link": c.proofUrl || '',
+          "Proof Link": proofExport.primary,
           "Assigned Admin": c.adminAssigned || '',
           "Bank Account": formatCustomerPaymentRouteLabel(c),
           "Label Link": "N/A (Generated on Demand)",
@@ -4320,14 +4418,18 @@ export default function App() {
           Contact: c.address?.contact || '',
           "Shipping Option": c.address?.shipOpt || '',
           "Partial Ship": getPartialShipPreferenceLabel(c.address?.partialShipPref) || '',
-          "Is Paid": c.isPaid ? 'TRUE' : 'FALSE'
+          "Is Paid": c.isPaid ? 'TRUE' : 'FALSE',
+          // New fields LAST — existing sheet column positions (and pivots) must not shift.
+          "All Proof Links": proofExport.joined,
+          "Proof Count": proofExport.count,
+          "Proof Links Array": proofExport.all
         };
       });
 
       const response = await fetch(settings.gasWebAppUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'push', customers: formattedCustomers })
+        body: JSON.stringify({ action: 'push', batchName: settings.batchName || 'Unnamed Batch', customers: formattedCustomers })
       });
 
       const result = await response.json();
@@ -4344,13 +4446,14 @@ export default function App() {
   };
 
   const exportCustomersCSVRows = (customers, filenamePrefix = 'BBP_Customers') => {
-    const headers = ["Email", "Name", "Handle", "Subtotal USD", "Total USD", "Total PHP", "Proof Link", "Assigned Admin", "Bank Account", "Label Link", "Street", "Barangay", "City", "Province", "Zip", "Contact", "Shipping Option", "Partial Ship", "Is Paid"];
+    const headers = ["Email", "Name", "Handle", "Subtotal USD", "Total USD", "Total PHP", "Proof Link", "All Proof Links", "Proof Count", "Assigned Admin", "Bank Account", "Label Link", "Street", "Barangay", "City", "Province", "Zip", "Contact", "Shipping Option", "Partial Ship", "Is Paid"];
     let csvContent = headers.join(",") + "\n";
 
     customers.forEach(c => {
+      const proofExport = buildProofExportFields(c);
       const row = [
         `"${c.email}"`, `"${c.name}"`, `"${c.handle || ''}"`, `"${c.subtotalUSD.toFixed(2)}"`, `"${c.totalUSD.toFixed(2)}"`, `"${c.totalPHP}"`,
-        `"${c.proofUrl || ''}"`, `"${c.adminAssigned || ''}"`, `"${formatCustomerPaymentRouteLabel(c)}"`, `"N/A (Generated on Demand)"`,
+        `"${proofExport.primary}"`, `"${proofExport.joined}"`, `"${proofExport.count}"`, `"${c.adminAssigned || ''}"`, `"${formatCustomerPaymentRouteLabel(c)}"`, `"N/A (Generated on Demand)"`,
         `"${c.address?.street || ''}"`, `"${c.address?.brgy || ''}"`, `"${c.address?.city || ''}"`, `"${c.address?.prov || ''}"`,
         `"${c.address?.zip || ''}"`, `"${c.address?.contact || ''}"`, `"${c.address?.shipOpt || ''}"`, `"${getPartialShipPreferenceLabel(c.address?.partialShipPref) || ''}"`, `"${c.isPaid ? 'TRUE' : 'FALSE'}"`
       ];
@@ -5238,7 +5341,7 @@ ${rowsXML.join("\n")}
 
       for (const chunk of chunkArray(users, 400)) {
         const batch = writeBatch(db);
-        chunk.forEach(u => batch.set(doc(db, colPath('users'), u.id), { isPaid: false, proofUrl: null, proofReview: '', paymentSnapshot: null, paymentSubmittedAt: null }, { merge: true }));
+        chunk.forEach(u => batch.set(doc(db, colPath('users'), u.id), { isPaid: false, proofUrl: null, proofUrls: [], proofReview: '', paymentSnapshot: null, paymentSubmittedAt: null }, { merge: true }));
         await safeAwait(batch.commit());
       }
 
@@ -6871,16 +6974,20 @@ ${rowsXML.join("\n")}
                   <td className="text-center">
                     {c.proofUrl ? (
                       <div className="flex flex-col items-center gap-1">
-                        <button onClick={() => setFullScreenProof(c.proofUrl)}
-                          onMouseEnter={(event) => showHoveredProofPreview(c.proofUrl, event)}
-                          onMouseLeave={hideHoveredProofPreview}
-                          onPointerEnter={(event) => showHoveredProofPreview(c.proofUrl, event)}
-                          onPointerLeave={hideHoveredProofPreview}
-                          onFocus={(event) => showHoveredProofPreview(c.proofUrl, event)}
-                          onBlur={hideHoveredProofPreview}
-                          className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-violet-700 transition-colors hover:border-violet-300">
-                          View
-                        </button>
+                        <div className="flex flex-wrap items-center justify-center gap-1">
+                          {(c.proofUrls?.length ? c.proofUrls : [c.proofUrl]).map((url, proofIdx, allProofs) => (
+                            <button key={`${url}-${proofIdx}`} onClick={() => setFullScreenProof(url)}
+                              onMouseEnter={(event) => showHoveredProofPreview(url, event)}
+                              onMouseLeave={hideHoveredProofPreview}
+                              onPointerEnter={(event) => showHoveredProofPreview(url, event)}
+                              onPointerLeave={hideHoveredProofPreview}
+                              onFocus={(event) => showHoveredProofPreview(url, event)}
+                              onBlur={hideHoveredProofPreview}
+                              className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-violet-700 transition-colors hover:border-violet-300">
+                              {allProofs.length > 1 ? `View ${proofIdx + 1}` : 'View'}
+                            </button>
+                          ))}
+                        </div>
                         <button
                           onClick={() => removeCustomerProof(c)}
                           className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300"
@@ -7957,6 +8064,12 @@ ${rowsXML.join("\n")}
               onProofChange={setProofFile}
               onSubmitOrder={submitOrder}
               onSubmitPayment={submitPayment}
+              submittedProofUrls={normalizeProofUrls(customerProfile)}
+              maxProofs={MAX_PAYMENT_PROOFS}
+              proofReviewStatus={customerProfile?.proofReview || ''}
+              onAddProof={(file) => submitExtraProof(file, null)}
+              onReplaceProof={(index, file) => submitExtraProof(file, index)}
+              onViewProof={setFullScreenProof}
               originalBtn={originalBtn}
               partialShipOptions={PARTIAL_SHIP_OPTIONS}
               settings={buyerPaymentSettings}

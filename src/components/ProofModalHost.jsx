@@ -33,22 +33,29 @@ export default function ProofModalHost({
                 {customerList.filter((customer) => customer.proofUrl).length === 0 ? (
                   <div className="col-span-full text-center py-12 text-slate-400 font-bold italic">No proofs uploaded yet.</div>
                 ) : (
-                  customerList.filter((customer) => customer.proofUrl).map((customer) => (
-                    <div key={customer.email} className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col group">
-                      <button onClick={() => onOpenFullScreenProof(customer.proofUrl)} className="bbp-focus-ring flex-1 min-h-[150px] bg-slate-100 rounded-xl overflow-hidden mb-2 relative cursor-zoom-in border-none p-0 m-0">
-                        <img src={customer.proofUrl} alt="Proof" loading="lazy" decoding="async" className="absolute inset-0 w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
-                      </button>
-                      <p className="text-[10px] font-black text-slate-800 truncate">{customer.name}</p>
-                      <p className="text-[9px] text-slate-400 truncate">{customer.email}</p>
-                      <span className="mt-1 bg-violet-50 text-violet-700 border border-violet-100 px-2 py-0.5 rounded text-[8px] font-black uppercase text-center">Proof On File</span>
-                      <button
-                        onClick={() => onRemoveCustomerProof(customer)}
-                        className="bbp-focus-ring mt-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300"
-                      >
-                        Remove Proof
-                      </button>
-                    </div>
-                  ))
+                  customerList.filter((customer) => customer.proofUrl).flatMap((customer) => {
+                    const proofs = customer.proofUrls?.length ? customer.proofUrls : [customer.proofUrl];
+                    return proofs.map((url, proofIdx) => (
+                      <div key={`${customer.email}-${proofIdx}`} className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col group">
+                        <button onClick={() => onOpenFullScreenProof(url)} className="bbp-focus-ring flex-1 min-h-[150px] bg-slate-100 rounded-xl overflow-hidden mb-2 relative cursor-zoom-in border-none p-0 m-0">
+                          <img src={url} alt={`Proof ${proofIdx + 1}`} loading="lazy" decoding="async" className="absolute inset-0 w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
+                        </button>
+                        <p className="text-[10px] font-black text-slate-800 truncate">{customer.name}</p>
+                        <p className="text-[9px] text-slate-400 truncate">{customer.email}</p>
+                        <span className="mt-1 bg-violet-50 text-violet-700 border border-violet-100 px-2 py-0.5 rounded text-[8px] font-black uppercase text-center">
+                          {proofs.length > 1 ? `Proof ${proofIdx + 1} of ${proofs.length}` : 'Proof On File'}
+                        </span>
+                        {proofIdx === 0 && (
+                          <button
+                            onClick={() => onRemoveCustomerProof(customer)}
+                            className="bbp-focus-ring mt-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300"
+                          >
+                            {proofs.length > 1 ? 'Remove All Proofs' : 'Remove Proof'}
+                          </button>
+                        )}
+                      </div>
+                    ));
+                  })
                 )}
               </div>
             </div>

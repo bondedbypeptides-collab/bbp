@@ -61,10 +61,43 @@ test('buildAdminEditedUserPatch preserves existing payment and proof state for p
     paymentSnapshot: nextSnapshot,
     proofReview: 'approved',
     proofUrl: 'https://example.com/proof.png',
+    proofUrls: ['https://example.com/proof.png'],
     isPaid: true,
     paymentSubmittedAt: 123456,
     buyerReviewConfirmedAt: 654321,
   });
+});
+
+test('buildAdminEditedUserPatch: empty proofUrls array on a legacy doc falls back to the single proofUrl', () => {
+  const patch = buildAdminEditedUserPatch({
+    targetProfile: { isPaid: true, proofUrl: 'https://example.com/legacy.png', proofUrls: [] },
+    nextSnapshot: null,
+  });
+  assert.deepEqual(patch.proofUrls, ['https://example.com/legacy.png']);
+  assert.equal(patch.proofUrl, 'https://example.com/legacy.png');
+});
+
+test('buildAdminEditedUserPatch caps an over-cap corrupt doc at the proof limit', () => {
+  const many = Array.from({ length: 8 }, (_, i) => `https://example.com/${i}.png`);
+  const patch = buildAdminEditedUserPatch({
+    targetProfile: { isPaid: true, proofUrl: many[0], proofUrls: many },
+    nextSnapshot: null,
+  });
+  assert.equal(patch.proofUrls.length, 5);
+  assert.equal(patch.proofUrl, many[0]);
+});
+
+test('buildAdminEditedUserPatch keeps every proof for multi-proof customers', () => {
+  const patch = buildAdminEditedUserPatch({
+    targetProfile: {
+      isPaid: true,
+      proofUrl: 'https://example.com/1.png',
+      proofUrls: ['https://example.com/1.png', 'https://example.com/2.png'],
+    },
+    nextSnapshot: null,
+  });
+  assert.deepEqual(patch.proofUrls, ['https://example.com/1.png', 'https://example.com/2.png']);
+  assert.equal(patch.proofUrl, 'https://example.com/1.png');
 });
 
 test('buildAdminEditedUserPatch clears payment fields when there is no saved payment state', () => {
@@ -83,6 +116,7 @@ test('buildAdminEditedUserPatch clears payment fields when there is no saved pay
     paymentSnapshot: null,
     proofReview: '',
     proofUrl: null,
+    proofUrls: [],
     isPaid: false,
     paymentSubmittedAt: null,
     buyerReviewConfirmedAt: null,
