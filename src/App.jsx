@@ -4218,6 +4218,9 @@ export default function App() {
     // panel, so the bottom "choose file" input is only mandatory for the FIRST
     // submission. Requiring it afterward trapped buyers who'd already added proofs.
     const alreadyHasProofs = normalizeProofUrls(customerProfile).length > 0;
+    // The first upload accepts multiple files so split-payers can submit every
+    // proof at once. proofFile may be a single File (legacy) or an array.
+    const proofFiles = Array.isArray(proofFile) ? proofFile.filter(Boolean) : (proofFile ? [proofFile] : []);
 
     const errs = {};
     if (!addressForm.shipOpt) errs.shipOpt = true;
@@ -4228,9 +4231,9 @@ export default function App() {
     if (!addressForm.prov?.trim()) errs.prov = true;
     if (!addressForm.zip?.trim()) errs.zip = true;
     if (!addressForm.contact?.trim()) errs.contact = true;
-    if (!proofFile && !alreadyHasProofs) errs.proofFile = true;
+    if (proofFiles.length === 0 && !alreadyHasProofs) errs.proofFile = true;
 
-    if (proofFile && !validateProofFile(proofFile)) return;
+    for (const f of proofFiles) { if (!validateProofFile(f)) return; }
 
     if (Object.keys(errs).length > 0) {
       setAddressErrors(errs);
@@ -4241,7 +4244,7 @@ export default function App() {
 
     // Already have proofs and no new file staged: nothing to upload — just persist
     // any address edits and close. (Adds/replaces go through the panel instead.)
-    if (!proofFile && alreadyHasProofs) {
+    if (proofFiles.length === 0 && alreadyHasProofs) {
       setIsBtnLoading(true);
       try {
         await safeAwait(setDoc(doc(db, colPath('users'), emailLower), { address: addressForm }, { merge: true }));
@@ -4266,11 +4269,18 @@ export default function App() {
         setIsBtnLoading(false);
         return;
       }
+      if (priorProofUrls.length + proofFiles.length > MAX_PAYMENT_PROOFS) {
+        // Refuse before uploading so no image is orphaned in Storage past the cap.
+        showToast(`You can upload up to ${MAX_PAYMENT_PROOFS} proofs. Pick fewer, or add the rest later.`);
+        setIsBtnLoading(false);
+        return;
+      }
       const existingSnapshot = getFrozenPaymentSnapshot(currentProfile);
       const frozenSnapshot = existingSnapshot || buildPaymentSnapshot(existingOrderData.items, currentProfile.adminAssigned || currentCustomerRecord?.adminAssigned, emailLower, Date.now(), currentProfile);
 
-      showToast("Uploading proof...");
-      const downloadUrl = await uploadProofImage(proofFile, emailLower);
+      showToast(proofFiles.length > 1 ? `Uploading ${proofFiles.length} proofs...` : "Uploading proof...");
+      const downloadUrls = [];
+      for (const f of proofFiles) downloadUrls.push(await uploadProofImage(f, emailLower));
 
       // Same transaction pattern as submitExtraProof: append against the FRESH
       // doc so a second tab or a stale snapshot can never drop a proof.
@@ -4278,8 +4288,12 @@ export default function App() {
         const userRef = doc(db, colPath('users'), emailLower);
         const snap = await transaction.get(userRef);
         const fresh = snap.exists() ? snap.data() : {};
-        const nextProofUrls = appendProofUrl(normalizeProofUrls(fresh), downloadUrl);
-        if (!nextProofUrls) throw new Error('proof-slots-full');
+        let nextProofUrls = normalizeProofUrls(fresh);
+        for (const url of downloadUrls) {
+          const appended = appendProofUrl(nextProofUrls, url);
+          if (!appended) break; // cap reached mid-batch; stop appending
+          nextProofUrls = appended;
+        }
         transaction.set(userRef, {
           address: addressForm,
           isPaid: true,

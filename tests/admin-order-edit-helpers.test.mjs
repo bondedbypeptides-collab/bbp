@@ -16,6 +16,7 @@ import {
   resolveOrderAdminFeePhp,
   mergeAdminEditProducts,
 } from '../src/admin-order-edit-helpers.js';
+import { MAX_PAYMENT_PROOFS } from '../src/proof-helpers.js';
 
 test('mergeAdminEditProducts keeps deleted products that are already on the order', () => {
   const merged = mergeAdminEditProducts(
@@ -78,12 +79,12 @@ test('buildAdminEditedUserPatch: empty proofUrls array on a legacy doc falls bac
 });
 
 test('buildAdminEditedUserPatch caps an over-cap corrupt doc at the proof limit', () => {
-  const many = Array.from({ length: 8 }, (_, i) => `https://example.com/${i}.png`);
+  const many = Array.from({ length: MAX_PAYMENT_PROOFS + 3 }, (_, i) => `https://example.com/${i}.png`);
   const patch = buildAdminEditedUserPatch({
     targetProfile: { isPaid: true, proofUrl: many[0], proofUrls: many },
     nextSnapshot: null,
   });
-  assert.equal(patch.proofUrls.length, 5);
+  assert.equal(patch.proofUrls.length, MAX_PAYMENT_PROOFS);
   assert.equal(patch.proofUrl, many[0]);
 });
 

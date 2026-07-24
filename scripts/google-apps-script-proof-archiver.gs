@@ -7,12 +7,15 @@
 //   "Customers" sheet, AND copies every payment-proof image into Drive
 //   (BBP Proof Archive / <batch name> /). Re-pushing skips files already
 //   archived, so it is safe to push repeatedly and resumes after timeouts.
-//   A "Drive Proof Links" column is added — those links survive Firebase
-//   Storage cleanup. Only clean Storage after spot-checking the Drive folder.
+//   Each proof gets its own clickable column: "Proof 1..N" (Firebase links)
+//   and "Drive Proof 1..N" (the archived copies, which survive Firebase
+//   Storage cleanup). Only clean Storage after spot-checking the Drive folder.
 // PULL: doGet returns the sheet back as JSON (unchanged behavior).
 
 var SHEET_NAME = 'Customers';
 var ARCHIVE_ROOT_FOLDER = 'BBP Proof Archive';
+var PROOF_COLS = 3; // one clickable column per proof; keep in sync with app MAX_PAYMENT_PROOFS
+var PROOF_RAW_FIELDS = { 'Proof Links Array': 1, 'All Proof Links': 1, 'Proof Link': 1 };
 
 // Handle incoming data from the Web App (PUSH)
 function doPost(e) {
@@ -33,23 +36,29 @@ function doPost(e) {
 
       sheet.clear(); // Clear old data
       if (rows.length > 0) {
-        // "Proof Links Array" is machine input for the archiver, not a column.
-        var headers = Object.keys(rows[0]).filter(function (key) { return key !== 'Proof Links Array'; });
-        headers.push('Drive Proof Links');
+        // Pass through every field EXCEPT the raw/joined proof fields, then add
+        // one clickable column per proof and per Drive copy.
+        var baseHeaders = Object.keys(rows[0]).filter(function (key) { return !PROOF_RAW_FIELDS[key]; });
+        var headers = baseHeaders.slice();
+        var i;
+        for (i = 1; i <= PROOF_COLS; i++) headers.push('Proof ' + i);
+        for (i = 1; i <= PROOF_COLS; i++) headers.push('Drive Proof ' + i);
         var sheetData = [headers];
 
         rows.forEach(function (row) {
           var email = String(row.Email || '').toLowerCase().trim();
-          var line = headers.map(function (h) {
-            if (h === 'Drive Proof Links') return archive.driveLinksByEmail[email] || '';
-            return row[h] !== undefined ? row[h] : '';
+          var proofs = proofUrlsFromRow(row);
+          var driveLinks = archive.driveLinksByEmail[email] || [];
+          var line = baseHeaders.map(function (h) {
+            return row[h] !== undefined && row[h] !== null ? row[h] : '';
           });
+          var j;
+          for (j = 0; j < PROOF_COLS; j++) line.push(proofs[j] || '');
+          for (j = 0; j < PROOF_COLS; j++) line.push(driveLinks[j] || '');
           sheetData.push(line);
         });
 
         sheet.getRange(1, 1, sheetData.length, sheetData[0].length).setValues(sheetData);
-
-        // Format the headers to look nice
         sheet.getRange(1, 1, 1, headers.length).setBackground('#FFC0CB').setFontWeight('bold').setFontColor('#4A042A');
         sheet.setFrozenRows(1);
         sheet.autoResizeColumns(1, headers.length);
@@ -118,7 +127,8 @@ function authorizeDrive() {
   return folder.getName();
 }
 
-// Download every proof URL into Drive (idempotent), return Drive links per email.
+// Download every proof URL into Drive (idempotent). Returns per-email ARRAYS of
+// Drive links, aligned with each customer's proof order.
 function archiveProofsToDrive(customers, batchName) {
   var folder = getOrCreateFolder(getOrCreateFolder(DriveApp.getRootFolder(), ARCHIVE_ROOT_FOLDER), sanitizeName(batchName));
   var existingNames = collectExistingFileNames(folder);
@@ -158,7 +168,7 @@ function archiveProofsToDrive(customers, batchName) {
         driveLinks.push('FETCH FAILED (' + (fetchErr && fetchErr.message ? String(fetchErr.message).slice(0, 90) : 'error') + ')');
       }
     });
-    driveLinksByEmail[email] = driveLinks.join(' | ');
+    driveLinksByEmail[email] = driveLinks;
   });
 
   return {

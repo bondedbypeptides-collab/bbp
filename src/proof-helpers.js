@@ -1,7 +1,7 @@
 // Multiple payment proofs per buyer. `proofUrl` stays the primary proof (every
 // legacy reader keys off it); `proofUrls` holds the full ordered list.
 
-export const MAX_PAYMENT_PROOFS = 5;
+export const MAX_PAYMENT_PROOFS = 3;
 
 // Full proof list for a profile, tolerating legacy single-proof docs.
 export function normalizeProofUrls(profile = {}) {

@@ -180,8 +180,9 @@ export default function ShopCheckoutHost({
                   panel above is the only way to manage them — showing this too traps
                   the buyer into a required file they don't need. */}
               {!hasSubmittedProofs && (
-                <div className={`bg-slate-50 p-2.5 rounded-xl border flex items-center justify-between transition-all duration-300 ${addressErrors.proofFile ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200'}`}>
-                  <input type="file" accept="image/*" aria-label="Upload payment proof image" onChange={(e) => onProofChange(e.target?.files?.[0] || null)} className={`bbp-focus-ring w-full text-xs font-bold file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[10px] file:font-black file:text-white cursor-pointer ${addressErrors.proofFile ? 'text-red-600 file:bg-red-500' : 'text-[#D6006E] file:bg-[#FF1493] hover:file:bg-[#D6006E]'}`} />
+                <div className={`bg-slate-50 p-2.5 rounded-xl border transition-all duration-300 ${addressErrors.proofFile ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200'}`}>
+                  <input type="file" accept="image/*" multiple aria-label="Upload payment proof image(s)" onChange={(e) => onProofChange(Array.from(e.target?.files || []))} className={`bbp-focus-ring w-full text-xs font-bold file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[10px] file:font-black file:text-white cursor-pointer ${addressErrors.proofFile ? 'text-red-600 file:bg-red-500' : 'text-[#D6006E] file:bg-[#FF1493] hover:file:bg-[#D6006E]'}`} />
+                  <p className="mt-1.5 text-[10px] font-bold text-slate-400">Paid in parts? Select all your proof screenshots at once (up to {maxProofs}).</p>
                 </div>
               )}
 
