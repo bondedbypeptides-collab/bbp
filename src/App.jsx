@@ -9853,7 +9853,7 @@ ${rowsXML.join("\n")}
       )}
 
       {toast && (
-        <div className="fixed bottom-24 sm:bottom-8 left-1/2 -translate-x-1/2 z-[10000] w-[min(92vw,680px)] px-3 pointer-events-none">
+        <div className="fixed top-4 sm:top-6 left-1/2 -translate-x-1/2 z-[10000] w-[min(92vw,680px)] px-3 pointer-events-none">
           <div className="rounded-[22px] border border-white/55 bg-white/68 backdrop-blur-2xl px-4 py-3 shadow-[0_18px_45px_rgba(214,0,110,0.16)] animate-fadeIn">
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/55 text-pink-600 border border-pink-100/70">

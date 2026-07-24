@@ -106,12 +106,15 @@ function doGet(e) {
 }
 
 // RUN THIS ONCE after adding the archiver: Run > authorizeDrive > Run, then
-// approve the Drive permission. The web app executes as the owner, so the owner
-// must grant Drive access once or every push fails with "no permission to call
-// DriveApp". Safe to re-run; it only reads the archive folder name.
+// approve the permissions. The web app executes as the owner, so the owner must
+// grant these once. It touches BOTH DriveApp (to save proof copies) AND
+// UrlFetchApp (to download proof images) so the single consent covers both
+// scopes — granting only Drive leaves fetches failing with "FETCH FAILED".
+// Safe to re-run.
 function authorizeDrive() {
   var folder = getOrCreateFolder(DriveApp.getRootFolder(), ARCHIVE_ROOT_FOLDER);
-  Logger.log('Drive authorized. Archive root: ' + folder.getName());
+  var probe = UrlFetchApp.fetch('https://www.googleapis.com/', { muteHttpExceptions: true });
+  Logger.log('Authorized (Drive + external requests). Archive root: ' + folder.getName() + ' | probe ' + probe.getResponseCode());
   return folder.getName();
 }
 
@@ -152,7 +155,7 @@ function archiveProofsToDrive(customers, batchName) {
         archivedCount += 1;
       } catch (fetchErr) {
         failedCount += 1;
-        driveLinks.push('FETCH FAILED');
+        driveLinks.push('FETCH FAILED (' + (fetchErr && fetchErr.message ? String(fetchErr.message).slice(0, 90) : 'error') + ')');
       }
     });
     driveLinksByEmail[email] = driveLinks.join(' | ');
