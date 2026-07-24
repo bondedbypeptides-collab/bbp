@@ -9,7 +9,7 @@ import {
   Lock, Package, Search, ArrowRight, CreditCard,
   Home, LogOut, Trash2, ChevronRight, BookOpen, Printer, ImageIcon,
   Sparkles, AlertTriangle, Calculator,
-  MessageCircle, Send, ScrollText, Edit3, Trash, ShoppingCart, RotateCcw, Save
+  MessageCircle, Send, ScrollText, Edit3, Trash, ShoppingCart, RotateCcw, Save, Download
 } from 'lucide-react';
 import ShopWorkspaceMain from './components/ShopWorkspaceMain';
 import {
@@ -5059,6 +5059,23 @@ ${rowsXML.join("\n")}
     document.body.removeChild(link);
   };
 
+  // Fire every data export at once. Staggered so the browser honors each save
+  // (it may ask to "allow multiple downloads" the first time — that's expected).
+  // ponytail: multi-download over a JSZip dependency for a handful of CSVs.
+  const downloadAllExports = () => {
+    // Use the FULL customerList (populated on settings-core, unfiltered) rather
+    // than activeOrdersList, which is search-filtered and gated to other tabs.
+    const jobs = [
+      () => exportCustomersCSV(),
+      () => exportCustomerOrderSheetRows(customerList, 'BBP_Order_Sheet'),
+      () => exportManufacturerOrderCSV(),
+      () => exportRawOrdersCSV(),
+      () => exportAdminFeeAccessCSV(adminFeeAccessCustomers, 'BBP_Admin_Fee_Access'),
+    ];
+    showToast(`Preparing ${jobs.length} export files. Allow multiple downloads if your browser asks.`);
+    jobs.forEach((job, i) => setTimeout(() => { try { job(); } catch (err) { console.error('Export failed:', err); } }, i * 500));
+  };
+
   const importCustomersCSV = async (e) => {
     const file = e.target?.files?.[0];
     if (!file) return;
@@ -9388,6 +9405,23 @@ ${rowsXML.join("\n")}
                 {adminTab === 'settings-core' && (
                   <div className="admin-page-shell space-y-5 pb-10 max-w-4xl mx-auto">
                     <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Core System Settings</h2>
+
+                    <section className="bg-white p-5 rounded-2xl shadow-sm border-2 border-indigo-50">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <h3 className="font-black text-xs text-indigo-600 uppercase tracking-[0.2em]">Data &amp; Exports</h3>
+                          <p className="mt-1.5 text-xs font-bold text-slate-500 leading-relaxed">
+                            Download every spreadsheet at once: customer list, order sheet, manufacturer order summary, raw orders backup, and admin-fee access. Your browser may ask to allow multiple downloads.
+                          </p>
+                        </div>
+                        <button
+                          onClick={downloadAllExports}
+                          className="shrink-0 rounded-2xl bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-black uppercase text-xs tracking-widest px-6 py-3 shadow-md hover:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+                        >
+                          <Download size={16} /> Download All Exports
+                        </button>
+                      </div>
+                    </section>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <section className="bg-white p-4 rounded-2xl shadow-sm border-2 border-pink-50 space-y-4 h-full">
