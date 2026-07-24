@@ -62,6 +62,13 @@ test('normalizeProofUrls: array wins over legacy field and drops junk', () => {
   );
 });
 
+test('normalizeProofUrls: dedupes repeated URLs so URL-addressing is unambiguous', () => {
+  assert.deepEqual(
+    normalizeProofUrls({ proofUrls: ['https://x/a.jpg', 'https://x/b.jpg', 'https://x/a.jpg'] }),
+    ['https://x/a.jpg', 'https://x/b.jpg']
+  );
+});
+
 test('normalizeProofUrls: caps at the maximum', () => {
   const many = Array.from({ length: 9 }, (_, i) => `https://x/${i}.jpg`);
   assert.equal(normalizeProofUrls({ proofUrls: many }).length, MAX_PAYMENT_PROOFS);

@@ -11,7 +11,7 @@ export default function ShopCheckoutHost({
   isCartEditable,
   isReviewStageOpen,
   lockedPaymentSnapshot,
-  maxProofs = 5,
+  maxProofs = 3,
   onAddProof,
   onAddressChange,
   onAdjustCartItem,
@@ -40,10 +40,12 @@ export default function ShopCheckoutHost({
   const hasSubmittedProofs = submittedProofUrls.length > 0;
   const needsRecheck = proofReviewStatus === 'needs-recheck';
   const extraProofInputRef = useRef(null);
-  const [replaceIndex, setReplaceIndex] = useState(null);
+  // Carry the target proof's URL, not just its index — the list can shift between
+  // opening the file picker and the write, so the URL is the stable identifier.
+  const [replaceTarget, setReplaceTarget] = useState(null);
 
   const pickExtraProof = (index) => {
-    setReplaceIndex(index);
+    setReplaceTarget(index === null ? null : { index, url: submittedProofUrls[index] });
     if (extraProofInputRef.current) {
       extraProofInputRef.current.value = '';
       extraProofInputRef.current.click();
@@ -53,9 +55,9 @@ export default function ShopCheckoutHost({
   const handleExtraProofPicked = (event) => {
     const file = event.target?.files?.[0] || null;
     if (!file) return;
-    if (replaceIndex === null) onAddProof?.(file);
-    else onReplaceProof?.(replaceIndex, file);
-    setReplaceIndex(null);
+    if (replaceTarget === null) onAddProof?.(file);
+    else onReplaceProof?.(replaceTarget.index, replaceTarget.url, file);
+    setReplaceTarget(null);
   };
 
   return (
@@ -161,7 +163,7 @@ export default function ShopCheckoutHost({
                         {submittedProofUrls.length > 1 && (
                           <button
                             type="button"
-                            onClick={() => onDeleteProof?.(idx)}
+                            onClick={() => onDeleteProof?.(idx, url)}
                             disabled={isBtnLoading}
                             title={`Remove proof ${idx + 1}`}
                             className="bbp-focus-ring absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-white border border-slate-200 shadow text-[10px] font-black text-slate-500 hover:text-rose-600 hover:border-rose-300 flex items-center justify-center leading-none"

@@ -3801,7 +3801,7 @@ export default function App() {
   // Add (or replace one of) the buyer's payment proofs after the initial submit.
   // No deletes — a replaced proof's old URL goes to the log so evidence never
   // silently disappears. Any change resets review status back to pending.
-  async function submitExtraProof(file, replaceIndex = null) {
+  async function submitExtraProof(file, replaceIndex = null, replaceUrl = null) {
     if (!file) return;
     if (!validateProofFile(file)) return;
     const emailLower = normalizedCustomerEmail;
@@ -3820,24 +3820,32 @@ export default function App() {
 
       // Transaction against the FRESH doc: two rapid adds/replaces must never
       // rebuild from a stale snapshot and lose each other's proof or history.
-      // The replaced URL is preserved in the same atomic write (evidence survives
-      // even if the best-effort audit log below never lands).
+      // Replace targets the proof by URL, not index — the list may have shifted
+      // since the buyer clicked, so the position is not a stable identifier.
       let committedUrls = null;
       let replacedOldUrl = null;
+      let replacedSlot = null;
       await safeAwait(runTransaction(db, async (transaction) => {
         const userRef = doc(db, colPath('users'), emailLower);
         const snap = await transaction.get(userRef);
         const fresh = snap.exists() ? snap.data() : {};
         const freshUrls = normalizeProofUrls(fresh);
-        const nextUrls = replaceIndex === null
-          ? appendProofUrl(freshUrls, downloadUrl)
-          : replaceProofUrlAt(freshUrls, replaceIndex, downloadUrl);
+        let nextUrls;
+        if (replaceIndex === null) {
+          nextUrls = appendProofUrl(freshUrls, downloadUrl);
+          replacedOldUrl = null;
+        } else {
+          const resolvedIndex = freshUrls.indexOf(replaceUrl);
+          if (resolvedIndex < 0) throw new Error('proof-slots-changed');
+          nextUrls = replaceProofUrlAt(freshUrls, resolvedIndex, downloadUrl);
+          replacedOldUrl = freshUrls[resolvedIndex];
+          replacedSlot = resolvedIndex + 1;
+        }
         if (!nextUrls) throw new Error('proof-slots-changed');
-        replacedOldUrl = replaceIndex === null ? null : freshUrls[replaceIndex];
         committedUrls = nextUrls;
         transaction.set(userRef, {
           ...buildProofUrlsPayload(nextUrls),
-          ...(replacedOldUrl ? { proofReplaceHistory: [...(Array.isArray(fresh.proofReplaceHistory) ? fresh.proofReplaceHistory : []), { at: Date.now(), slot: replaceIndex + 1, oldUrl: replacedOldUrl }] } : {}),
+          ...(replacedOldUrl ? { proofReplaceHistory: [...(Array.isArray(fresh.proofReplaceHistory) ? fresh.proofReplaceHistory : []), { at: Date.now(), slot: replacedSlot, oldUrl: replacedOldUrl }] } : {}),
           isPaid: true,
           proofReview: '',
           paymentSubmittedAt: Date.now()
@@ -3850,7 +3858,7 @@ export default function App() {
         action: replaceIndex === null ? 'Added Payment Proof' : 'Replaced Payment Proof',
         details: replaceIndex === null
           ? `Proof ${committedUrls.length}/${MAX_PAYMENT_PROOFS} added.`
-          : `Proof ${replaceIndex + 1} replaced. Previous: ${replacedOldUrl}`
+          : `Proof ${replacedSlot} replaced. Previous: ${replacedOldUrl}`
       })).catch((logErr) => console.error('Proof log write failed:', logErr));
       showToast(replaceIndex === null ? 'Proof added.' : 'Proof replaced.');
     } catch (err) {
@@ -3865,7 +3873,7 @@ export default function App() {
   // Soft delete: removes a proof from the buyer's active list but keeps the URL in
   // proofReplaceHistory + the audit log, so payment evidence is never erased. The
   // last proof can't be removed (a paid buyer must always have one — replace instead).
-  async function deleteProof(index) {
+  async function deleteProof(index, targetUrl = null) {
     const emailLower = normalizedCustomerEmail;
     if (!emailLower) { showToast('Enter your email first.'); return; }
     const existing = normalizeProofUrls(usersById[emailLower] || {});
@@ -3873,22 +3881,27 @@ export default function App() {
       showToast('You need at least one proof on file. Use the ↻ button to replace it instead.');
       return;
     }
-    if (index < 0 || index >= existing.length) return;
+    // Resolve the target by URL (position may have shifted since the click).
+    const wantUrl = targetUrl || existing[index];
     setIsBtnLoading(true);
     try {
       let removedUrl = null;
+      let removedSlot = null;
       await safeAwait(runTransaction(db, async (transaction) => {
         const userRef = doc(db, colPath('users'), emailLower);
         const snap = await transaction.get(userRef);
         const fresh = snap.exists() ? snap.data() : {};
         const freshUrls = normalizeProofUrls(fresh);
         if (freshUrls.length <= 1) throw new Error('proof-min-one');
-        const nextUrls = removeProofUrlAt(freshUrls, index);
+        const resolvedIndex = freshUrls.indexOf(wantUrl);
+        if (resolvedIndex < 0) throw new Error('proof-slots-changed');
+        const nextUrls = removeProofUrlAt(freshUrls, resolvedIndex);
         if (!nextUrls || nextUrls.length === 0) throw new Error('proof-slots-changed');
-        removedUrl = freshUrls[index];
+        removedUrl = freshUrls[resolvedIndex];
+        removedSlot = resolvedIndex + 1;
         transaction.set(userRef, {
           ...buildProofUrlsPayload(nextUrls),
-          proofReplaceHistory: [...(Array.isArray(fresh.proofReplaceHistory) ? fresh.proofReplaceHistory : []), { at: Date.now(), slot: index + 1, oldUrl: removedUrl, deleted: true }],
+          proofReplaceHistory: [...(Array.isArray(fresh.proofReplaceHistory) ? fresh.proofReplaceHistory : []), { at: Date.now(), slot: removedSlot, oldUrl: removedUrl, deleted: true }],
           isPaid: true,
           proofReview: '',
           paymentSubmittedAt: Date.now()
@@ -3899,7 +3912,7 @@ export default function App() {
         email: emailLower,
         name: customerName,
         action: 'Removed Payment Proof',
-        details: `Proof ${index + 1} removed by buyer. Kept URL: ${removedUrl}`
+        details: `Proof ${removedSlot} removed by buyer. Kept URL: ${removedUrl}`
       })).catch((logErr) => console.error('Proof log write failed:', logErr));
       showToast('Proof removed.');
     } catch (err) {
@@ -8155,8 +8168,8 @@ ${rowsXML.join("\n")}
               maxProofs={MAX_PAYMENT_PROOFS}
               proofReviewStatus={customerProfile?.proofReview || ''}
               onAddProof={(file) => submitExtraProof(file, null)}
-              onReplaceProof={(index, file) => submitExtraProof(file, index)}
-              onDeleteProof={deleteProof}
+              onReplaceProof={(index, url, file) => submitExtraProof(file, index, url)}
+              onDeleteProof={(index, url) => deleteProof(index, url)}
               onViewProof={setFullScreenProof}
               originalBtn={originalBtn}
               partialShipOptions={PARTIAL_SHIP_OPTIONS}

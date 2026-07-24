@@ -3,14 +3,23 @@
 
 export const MAX_PAYMENT_PROOFS = 3;
 
-// Full proof list for a profile, tolerating legacy single-proof docs.
+// Full proof list for a profile, tolerating legacy single-proof docs. Deduped so
+// URL-addressed replace/delete are never ambiguous (app URLs are already unique;
+// this guards corrupt/legacy docs that somehow repeat a URL).
 export function normalizeProofUrls(profile = {}) {
-  const list = Array.isArray(profile?.proofUrls)
+  const raw = Array.isArray(profile?.proofUrls)
     ? profile.proofUrls.filter((url) => typeof url === 'string' && url.trim() !== '')
     : [];
-  if (list.length > 0) return list.slice(0, MAX_PAYMENT_PROOFS);
   const single = typeof profile?.proofUrl === 'string' ? profile.proofUrl.trim() : '';
-  return single ? [single] : [];
+  const list = raw.length > 0 ? raw : (single ? [single] : []);
+  const seen = new Set();
+  const deduped = [];
+  for (const url of list) {
+    if (seen.has(url)) continue;
+    seen.add(url);
+    deduped.push(url);
+  }
+  return deduped.slice(0, MAX_PAYMENT_PROOFS);
 }
 
 // Append a new proof; refuses past the cap (caller shows the toast).
