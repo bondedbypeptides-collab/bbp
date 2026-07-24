@@ -4213,6 +4213,12 @@ export default function App() {
       showToast("Payment instructions are temporarily hidden by admin. Please wait until routes are shown again.");
       return;
     }
+    const emailLower = normalizedCustomerEmail;
+    // A returning buyer who already submitted manages proofs via the Add/Replace
+    // panel, so the bottom "choose file" input is only mandatory for the FIRST
+    // submission. Requiring it afterward trapped buyers who'd already added proofs.
+    const alreadyHasProofs = normalizeProofUrls(customerProfile).length > 0;
+
     const errs = {};
     if (!addressForm.shipOpt) errs.shipOpt = true;
     if (!addressForm.partialShipPref) errs.partialShipPref = true;
@@ -4222,9 +4228,9 @@ export default function App() {
     if (!addressForm.prov?.trim()) errs.prov = true;
     if (!addressForm.zip?.trim()) errs.zip = true;
     if (!addressForm.contact?.trim()) errs.contact = true;
-    if (!proofFile) errs.proofFile = true;
+    if (!proofFile && !alreadyHasProofs) errs.proofFile = true;
 
-    if (Object.keys(errs).length === 0 && !validateProofFile(proofFile)) return;
+    if (proofFile && !validateProofFile(proofFile)) return;
 
     if (Object.keys(errs).length > 0) {
       setAddressErrors(errs);
@@ -4233,7 +4239,22 @@ export default function App() {
       return;
     }
 
-    const emailLower = normalizedCustomerEmail;
+    // Already have proofs and no new file staged: nothing to upload — just persist
+    // any address edits and close. (Adds/replaces go through the panel instead.)
+    if (!proofFile && alreadyHasProofs) {
+      setIsBtnLoading(true);
+      try {
+        await safeAwait(setDoc(doc(db, colPath('users'), emailLower), { address: addressForm }, { merge: true }));
+        showToast("Payment proof already submitted. Your details are saved.");
+        setShowPayModal(false);
+      } catch (err) {
+        console.error(err);
+        showToast("Could not save your details.");
+      }
+      setIsBtnLoading(false);
+      return;
+    }
+
     setIsBtnLoading(true);
 
     try {
@@ -9832,7 +9853,7 @@ ${rowsXML.join("\n")}
       )}
 
       {toast && (
-        <div className="fixed bottom-24 sm:bottom-8 left-1/2 -translate-x-1/2 z-[10000] w-[min(92vw,680px)] px-3">
+        <div className="fixed bottom-24 sm:bottom-8 left-1/2 -translate-x-1/2 z-[10000] w-[min(92vw,680px)] px-3 pointer-events-none">
           <div className="rounded-[22px] border border-white/55 bg-white/68 backdrop-blur-2xl px-4 py-3 shadow-[0_18px_45px_rgba(214,0,110,0.16)] animate-fadeIn">
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/55 text-pink-600 border border-pink-100/70">

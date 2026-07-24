@@ -105,6 +105,16 @@ function doGet(e) {
   }
 }
 
+// RUN THIS ONCE after adding the archiver: Run > authorizeDrive > Run, then
+// approve the Drive permission. The web app executes as the owner, so the owner
+// must grant Drive access once or every push fails with "no permission to call
+// DriveApp". Safe to re-run; it only reads the archive folder name.
+function authorizeDrive() {
+  var folder = getOrCreateFolder(DriveApp.getRootFolder(), ARCHIVE_ROOT_FOLDER);
+  Logger.log('Drive authorized. Archive root: ' + folder.getName());
+  return folder.getName();
+}
+
 // Download every proof URL into Drive (idempotent), return Drive links per email.
 function archiveProofsToDrive(customers, batchName) {
   var folder = getOrCreateFolder(getOrCreateFolder(DriveApp.getRootFolder(), ARCHIVE_ROOT_FOLDER), sanitizeName(batchName));

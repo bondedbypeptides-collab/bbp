@@ -176,12 +176,17 @@ export default function ShopCheckoutHost({
                 </div>
               )}
 
-              <div className={`bg-slate-50 p-2.5 rounded-xl border flex items-center justify-between transition-all duration-300 ${addressErrors.proofFile ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200'}`}>
-                <input type="file" accept="image/*" aria-label="Upload payment proof image" onChange={(e) => onProofChange(e.target?.files?.[0] || null)} className={`bbp-focus-ring w-full text-xs font-bold file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[10px] file:font-black file:text-white cursor-pointer ${addressErrors.proofFile ? 'text-red-600 file:bg-red-500' : 'text-[#D6006E] file:bg-[#FF1493] hover:file:bg-[#D6006E]'}`} />
-              </div>
+              {/* First-submission proof picker. Once proofs exist, the Add/Replace
+                  panel above is the only way to manage them — showing this too traps
+                  the buyer into a required file they don't need. */}
+              {!hasSubmittedProofs && (
+                <div className={`bg-slate-50 p-2.5 rounded-xl border flex items-center justify-between transition-all duration-300 ${addressErrors.proofFile ? 'animate-shake border-red-500 bg-red-50' : 'border-slate-200'}`}>
+                  <input type="file" accept="image/*" aria-label="Upload payment proof image" onChange={(e) => onProofChange(e.target?.files?.[0] || null)} className={`bbp-focus-ring w-full text-xs font-bold file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[10px] file:font-black file:text-white cursor-pointer ${addressErrors.proofFile ? 'text-red-600 file:bg-red-500' : 'text-[#D6006E] file:bg-[#FF1493] hover:file:bg-[#D6006E]'}`} />
+                </div>
+              )}
 
               <div className="bg-slate-50 p-4 sm:p-5 rounded-2xl border border-slate-200">
-                <p className="bbp-section-title mb-2">Step 3: Review summary and upload proof</p>
+                <p className="bbp-section-title mb-2">{hasSubmittedProofs ? 'Order summary' : 'Step 3: Review summary and upload proof'}</p>
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 border-b border-slate-200 pb-2">Your Order Summary</p>
                 {cartList.map((i, idx) => (
                   <div key={idx} className="flex justify-between items-center text-sm font-bold text-[#4A042A] mb-1.5">
@@ -206,7 +211,7 @@ export default function ShopCheckoutHost({
                 </p>
               ) : null}
               <button onClick={onSubmitPayment} disabled={isBtnLoading || !hasValidPaymentRoute || !canShowPaymentRoute} className={`bbp-focus-ring ${originalBtn} w-full py-3 disabled:cursor-not-allowed disabled:opacity-50`}>
-                {isBtnLoading ? 'Uploading...' : (hasSubmittedProofs ? 'Submit Another Payment' : 'Complete Payment')}
+                {isBtnLoading ? 'Uploading...' : (hasSubmittedProofs ? 'Done' : 'Complete Payment')}
               </button>
             </div>
           </div>
