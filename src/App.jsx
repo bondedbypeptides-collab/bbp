@@ -1761,6 +1761,7 @@ export default function App() {
         adminAssigned,
         proofUrl: profile.proofUrl || null,
         proofUrls: normalizeProofUrls(profile),
+        proofReplaceHistory: Array.isArray(profile.proofReplaceHistory) ? profile.proofReplaceHistory : [],
         proofReview: profile.proofReview || '',
         paymentSnapshot: frozenPaymentSnapshot,
         paymentBankIndex: Number.isInteger(Number(livePaymentRoute?.bankIndex)) ? Number(livePaymentRoute.bankIndex) : -1,
@@ -3278,6 +3279,50 @@ export default function App() {
     });
   }
 
+  // Admin removes ONE proof of several, keeping the rest and the buyer's paid
+  // state. The removed URL is preserved in proofReplaceHistory (by: 'admin') so
+  // the evidence trail survives, mirroring the buyer's soft delete. Removing the
+  // last proof is done via "Remove All" instead (this guards length <= 1).
+  async function adminRemoveOneProof(customer, url) {
+    if (!customer?.email || !url) return;
+    const emailLower = normalizeCustomerEmail(customer.email);
+    const current = normalizeProofUrls(usersById[emailLower] || customer);
+    if (current.length <= 1) {
+      showToast('This is their only proof. Use "Remove All" to clear it.');
+      return;
+    }
+    if (!window.confirm(`Remove this one proof for ${customer.name || emailLower}? Their other ${current.length - 1} proof(s) and paid status stay.`)) return;
+    try {
+      let removedUrl = null;
+      let removedSlot = null;
+      await safeAwait(runTransaction(db, async (transaction) => {
+        const userRef = doc(db, colPath('users'), emailLower);
+        const snap = await transaction.get(userRef);
+        const fresh = snap.exists() ? snap.data() : {};
+        const freshUrls = normalizeProofUrls(fresh);
+        if (freshUrls.length <= 1) throw new Error('proof-min-one');
+        const idx = freshUrls.indexOf(url);
+        if (idx < 0) throw new Error('proof-slots-changed');
+        removedUrl = freshUrls[idx];
+        removedSlot = idx + 1;
+        transaction.set(userRef, {
+          ...buildProofUrlsPayload(removeProofUrlAt(freshUrls, idx)),
+          proofReplaceHistory: [...(Array.isArray(fresh.proofReplaceHistory) ? fresh.proofReplaceHistory : []), { at: Date.now(), slot: removedSlot, oldUrl: removedUrl, deleted: true, by: 'admin' }]
+        }, { merge: true });
+      }));
+      safeAwait(addDoc(collection(db, colPath('logs')), {
+        timestamp: Date.now(), email: emailLower, name: 'Admin',
+        action: 'Removed One Proof', details: `Removed proof ${removedSlot} for ${customer.name || emailLower}. Kept URL: ${removedUrl}`
+      })).catch((logErr) => console.error('Proof log write failed:', logErr));
+      showToast('Proof removed. Their other proofs are kept.');
+    } catch (err) {
+      console.error(err);
+      showToast(err?.message === 'proof-slots-changed'
+        ? 'That proof list just changed — refresh and try again.'
+        : 'Could not remove that proof.');
+    }
+  }
+
   async function removeCustomerProof(customer) {
     if (!customer?.email) return;
     if (!window.confirm(`Remove proof for ${customer.name || customer.email}?`)) return;
@@ -3291,6 +3336,7 @@ export default function App() {
         proofReference: {
           proofUrl: customer.proofUrl || null,
           proofUrls: normalizeProofUrls(customerProfile || customer),
+          proofReplaceHistory: Array.isArray(customerProfile?.proofReplaceHistory) ? customerProfile.proofReplaceHistory : [],
           proofReview: customer.proofReview || '',
           paymentSubmittedAt: customerProfile?.paymentSubmittedAt || customer.paymentSubmittedAt || null,
           isPaid: customer.isPaid || false
@@ -3461,6 +3507,7 @@ export default function App() {
           const proofReference = record.proofReference || {};
           await safeAwait(setDoc(doc(db, colPath('users'), record.userSnapshot.id), {
             ...buildProofUrlsPayload(normalizeProofUrls(proofReference)),
+            ...(Array.isArray(proofReference.proofReplaceHistory) ? { proofReplaceHistory: proofReference.proofReplaceHistory } : {}),
             proofReview: proofReference.proofReview || '',
             paymentSubmittedAt: proofReference.paymentSubmittedAt || null,
             isPaid: Boolean(proofReference.isPaid)
@@ -7073,26 +7120,50 @@ ${rowsXML.join("\n")}
                   </td>
                   <td className="text-center">
                     {c.proofUrl ? (
-                      <div className="flex flex-col items-center gap-1">
-                        <div className="flex flex-wrap items-center justify-center gap-1">
+                      <div className="flex flex-col items-center gap-1.5">
+                        <div className="flex flex-wrap items-center justify-center gap-1.5">
                           {(c.proofUrls?.length ? c.proofUrls : [c.proofUrl]).map((url, proofIdx, allProofs) => (
-                            <button key={`${url}-${proofIdx}`} onClick={() => setFullScreenProof(url)}
-                              onMouseEnter={(event) => showHoveredProofPreview(url, event)}
-                              onMouseLeave={hideHoveredProofPreview}
-                              onPointerEnter={(event) => showHoveredProofPreview(url, event)}
-                              onPointerLeave={hideHoveredProofPreview}
-                              onFocus={(event) => showHoveredProofPreview(url, event)}
-                              onBlur={hideHoveredProofPreview}
-                              className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-violet-700 transition-colors hover:border-violet-300">
-                              {allProofs.length > 1 ? `View ${proofIdx + 1}` : 'View'}
-                            </button>
+                            <span key={`${url}-${proofIdx}`} className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 overflow-hidden">
+                              <button onClick={() => setFullScreenProof(url)}
+                                onMouseEnter={(event) => showHoveredProofPreview(url, event)}
+                                onMouseLeave={hideHoveredProofPreview}
+                                onPointerEnter={(event) => showHoveredProofPreview(url, event)}
+                                onPointerLeave={hideHoveredProofPreview}
+                                onFocus={(event) => showHoveredProofPreview(url, event)}
+                                onBlur={hideHoveredProofPreview}
+                                className="px-3 py-1 text-[10px] font-black uppercase tracking-widest text-violet-700 transition-colors hover:bg-violet-100">
+                                {allProofs.length > 1 ? `View ${proofIdx + 1}` : 'View'}
+                              </button>
+                              {allProofs.length > 1 && (
+                                <button onClick={() => adminRemoveOneProof(c, url)} title={`Remove proof ${proofIdx + 1}, keep the rest`}
+                                  className="px-1.5 py-1 text-[11px] font-black text-violet-400 border-l border-violet-200 hover:bg-rose-100 hover:text-rose-600 leading-none">
+                                  ×
+                                </button>
+                              )}
+                            </span>
                           ))}
                         </div>
+                        {(c.proofReplaceHistory?.some((h) => h?.oldUrl)) && (
+                          <div className="flex flex-wrap items-center justify-center gap-1">
+                            <span className="text-[8px] font-black uppercase tracking-widest text-amber-600">Trail:</span>
+                            {c.proofReplaceHistory.filter((h) => h?.oldUrl).slice(-4).map((h, hIdx) => (
+                              <button key={`${h.oldUrl}-${hIdx}`} onClick={() => setFullScreenProof(h.oldUrl)}
+                                onMouseEnter={(event) => showHoveredProofPreview(h.oldUrl, event)}
+                                onMouseLeave={hideHoveredProofPreview}
+                                onFocus={(event) => showHoveredProofPreview(h.oldUrl, event)}
+                                onBlur={hideHoveredProofPreview}
+                                title={`${h.deleted ? 'Removed' : 'Replaced'}${h.by === 'admin' ? ' by admin' : ''} — click to view the old image`}
+                                className="rounded-full border border-amber-200 bg-amber-50/70 px-2 py-0.5 text-[9px] font-bold text-amber-700 hover:border-amber-400 transition-colors">
+                                {h.deleted ? '✕' : '↩'} p{h.slot}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                         <button
                           onClick={() => removeCustomerProof(c)}
                           className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-rose-700 transition-colors hover:border-rose-300"
                         >
-                          Remove
+                          {(c.proofUrls?.length || 1) > 1 ? 'Remove All' : 'Remove'}
                         </button>
                         {c.needsRecheck && <span className="text-[9px] font-black uppercase tracking-widest text-rose-600">Recheck</span>}
                       </div>
