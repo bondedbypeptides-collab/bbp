@@ -145,7 +145,7 @@ export default function ShopCheckoutHost({
                   {needsRecheck && (
                     <p className="text-[11px] font-bold text-amber-800 mb-2">May problema sa proof mo. Replace it or add a clearer screenshot below.</p>
                   )}
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-x-5 gap-y-4 pt-1.5">
                     {submittedProofUrls.map((url, idx) => (
                       <div key={`${url}-${idx}`} className="relative group">
                         <button type="button" onClick={() => onViewProof?.(url)} title={`View proof ${idx + 1}`} className="bbp-focus-ring block w-16 h-16 rounded-xl overflow-hidden border-2 border-white shadow-sm bg-white cursor-zoom-in p-0">
