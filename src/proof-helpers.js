@@ -32,6 +32,14 @@ export function replaceProofUrlAt(urls = [], index = 0, url = '') {
   return next;
 }
 
+// Remove one slot. Returns the shorter list (possibly empty); null on bad index.
+// Callers enforce the "keep at least one proof" policy — this only does the removal.
+export function removeProofUrlAt(urls = [], index = 0) {
+  const list = (urls || []).filter((entry) => typeof entry === 'string' && entry.trim() !== '');
+  if (index < 0 || index >= list.length) return null;
+  return list.filter((_, i) => i !== index);
+}
+
 // Firestore payload keeping proofUrl (primary) and proofUrls in lockstep.
 export function buildProofUrlsPayload(urls = []) {
   const list = (urls || []).filter((entry) => typeof entry === 'string' && entry.trim() !== '');

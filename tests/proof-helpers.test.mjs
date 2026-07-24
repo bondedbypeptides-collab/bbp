@@ -6,8 +6,30 @@ import {
   buildProofExportFields,
   buildProofUrlsPayload,
   normalizeProofUrls,
+  removeProofUrlAt,
   replaceProofUrlAt,
 } from '../src/proof-helpers.js';
+
+test('removeProofUrlAt: drops the slot, refuses a bad index, does not mutate input', () => {
+  const urls = ['https://x/1.jpg', 'https://x/2.jpg', 'https://x/3.jpg'];
+  assert.deepEqual(removeProofUrlAt(urls, 1), ['https://x/1.jpg', 'https://x/3.jpg']);
+  assert.deepEqual(removeProofUrlAt(urls, 0), ['https://x/2.jpg', 'https://x/3.jpg']);
+  assert.equal(removeProofUrlAt(urls, 3), null);
+  assert.equal(removeProofUrlAt(urls, -1), null);
+  assert.deepEqual(urls, ['https://x/1.jpg', 'https://x/2.jpg', 'https://x/3.jpg'], 'input untouched');
+});
+
+test('removeProofUrlAt: removing the only proof yields an empty list (caller enforces >=1)', () => {
+  assert.deepEqual(removeProofUrlAt(['https://x/1.jpg'], 0), []);
+});
+
+test('E2E: delete keeps proofUrl in lockstep after removing the primary', () => {
+  let urls = ['https://x/1.jpg', 'https://x/2.jpg', 'https://x/3.jpg'];
+  urls = removeProofUrlAt(urls, 0); // remove the primary
+  const payload = buildProofUrlsPayload(urls);
+  assert.deepEqual(payload.proofUrls, ['https://x/2.jpg', 'https://x/3.jpg']);
+  assert.equal(payload.proofUrl, 'https://x/2.jpg', 'primary promotes to the new first proof');
+});
 
 test('buildProofExportFields: multi-proof customer exports every link', () => {
   const fields = buildProofExportFields({ proofUrl: 'https://x/1.jpg', proofUrls: ['https://x/1.jpg', 'https://x/2.jpg'] });

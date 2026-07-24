@@ -17,6 +17,7 @@ export default function ShopCheckoutHost({
   onAdjustCartItem,
   onClosePay,
   onClosePreview,
+  onDeleteProof,
   onOpenPayFromPreview,
   onProofChange,
   onReplaceProof,
@@ -157,6 +158,17 @@ export default function ShopCheckoutHost({
                         >
                           ↻
                         </button>
+                        {submittedProofUrls.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteProof?.(idx)}
+                            disabled={isBtnLoading}
+                            title={`Remove proof ${idx + 1}`}
+                            className="bbp-focus-ring absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-white border border-slate-200 shadow text-[10px] font-black text-slate-500 hover:text-rose-600 hover:border-rose-300 flex items-center justify-center leading-none"
+                          >
+                            ×
+                          </button>
+                        )}
                         <span className="absolute bottom-0.5 left-0.5 bg-black/55 text-white text-[8px] font-black px-1 rounded">{idx + 1}</span>
                       </div>
                     ))}

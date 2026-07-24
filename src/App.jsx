@@ -38,6 +38,7 @@ import {
   buildProofExportFields,
   buildProofUrlsPayload,
   normalizeProofUrls,
+  removeProofUrlAt,
   replaceProofUrlAt,
 } from './proof-helpers.js';
 import {
@@ -3857,6 +3858,57 @@ export default function App() {
       showToast(err?.message === 'proof-slots-changed'
         ? 'Your proof list just changed — check it and try again.'
         : 'Could not upload the proof.');
+    }
+    setIsBtnLoading(false);
+  }
+
+  // Soft delete: removes a proof from the buyer's active list but keeps the URL in
+  // proofReplaceHistory + the audit log, so payment evidence is never erased. The
+  // last proof can't be removed (a paid buyer must always have one — replace instead).
+  async function deleteProof(index) {
+    const emailLower = normalizedCustomerEmail;
+    if (!emailLower) { showToast('Enter your email first.'); return; }
+    const existing = normalizeProofUrls(usersById[emailLower] || {});
+    if (existing.length <= 1) {
+      showToast('You need at least one proof on file. Use the ↻ button to replace it instead.');
+      return;
+    }
+    if (index < 0 || index >= existing.length) return;
+    setIsBtnLoading(true);
+    try {
+      let removedUrl = null;
+      await safeAwait(runTransaction(db, async (transaction) => {
+        const userRef = doc(db, colPath('users'), emailLower);
+        const snap = await transaction.get(userRef);
+        const fresh = snap.exists() ? snap.data() : {};
+        const freshUrls = normalizeProofUrls(fresh);
+        if (freshUrls.length <= 1) throw new Error('proof-min-one');
+        const nextUrls = removeProofUrlAt(freshUrls, index);
+        if (!nextUrls || nextUrls.length === 0) throw new Error('proof-slots-changed');
+        removedUrl = freshUrls[index];
+        transaction.set(userRef, {
+          ...buildProofUrlsPayload(nextUrls),
+          proofReplaceHistory: [...(Array.isArray(fresh.proofReplaceHistory) ? fresh.proofReplaceHistory : []), { at: Date.now(), slot: index + 1, oldUrl: removedUrl, deleted: true }],
+          isPaid: true,
+          proofReview: '',
+          paymentSubmittedAt: Date.now()
+        }, { merge: true });
+      }));
+      safeAwait(addDoc(collection(db, colPath('logs')), {
+        timestamp: Date.now(),
+        email: emailLower,
+        name: customerName,
+        action: 'Removed Payment Proof',
+        details: `Proof ${index + 1} removed by buyer. Kept URL: ${removedUrl}`
+      })).catch((logErr) => console.error('Proof log write failed:', logErr));
+      showToast('Proof removed.');
+    } catch (err) {
+      console.error(err);
+      showToast(err?.message === 'proof-min-one'
+        ? 'You need at least one proof on file. Replace it instead.'
+        : err?.message === 'proof-slots-changed'
+          ? 'Your proof list just changed — check it and try again.'
+          : 'Could not remove the proof.');
     }
     setIsBtnLoading(false);
   }
@@ -8104,6 +8156,7 @@ ${rowsXML.join("\n")}
               proofReviewStatus={customerProfile?.proofReview || ''}
               onAddProof={(file) => submitExtraProof(file, null)}
               onReplaceProof={(index, file) => submitExtraProof(file, index)}
+              onDeleteProof={deleteProof}
               onViewProof={setFullScreenProof}
               originalBtn={originalBtn}
               partialShipOptions={PARTIAL_SHIP_OPTIONS}
